@@ -50,7 +50,7 @@ export interface ModelReference {
   /** Model identifier as the vendor names it. */
   readonly model: string;
   /** Optional snapshot/version, when the vendor exposes one. */
-  readonly revision?: string;
+  readonly revision?: string | undefined;
 }
 
 export const modelReferenceSchema = z.strictObject({
@@ -70,11 +70,11 @@ export const modelReferenceSchema = z.strictObject({
 export interface HumanActor {
   readonly kind: "human";
   /** Acalys account, when this person has one. */
-  readonly userId?: UserId;
+  readonly userId?: UserId | undefined;
   /** Provider account, when the action came through a provider. */
-  readonly provider?: ProviderUserReference;
+  readonly provider?: ProviderUserReference | undefined;
   /** Name for display. Never used as an identifier. */
-  readonly displayName?: string;
+  readonly displayName?: string | undefined;
 }
 
 /**
@@ -97,7 +97,7 @@ export interface SystemActor {
 export interface IntegrationActor {
   readonly kind: "integration";
   readonly integrationId: NamespacedId;
-  readonly displayName?: string;
+  readonly displayName?: string | undefined;
 }
 
 /** Which pipeline stage an agent was performing (§30). */
@@ -123,9 +123,9 @@ export interface AgentActor {
   readonly kind: "agent";
   readonly agentType: AgentType;
   /** Distinguishes one agent instance within a run. */
-  readonly agentRunId?: string;
+  readonly agentRunId?: string | undefined;
   /** Which model produced the output. Provenance only (§62). */
-  readonly model?: ModelReference;
+  readonly model?: ModelReference | undefined;
 }
 
 /** Everything that can originate an action. */
@@ -184,7 +184,7 @@ export type AuditSource = (typeof AUDIT_SOURCES)[number];
 export interface AuditContext {
   readonly actor: Actor;
   /** Correlates the mutation with the request that caused it. */
-  readonly requestId?: string;
+  readonly requestId?: string | undefined;
   readonly source: AuditSource;
 }
 

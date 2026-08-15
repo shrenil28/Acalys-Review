@@ -134,7 +134,7 @@ const refNameSchema = z.string().refine(isValidRefName, {
  */
 export interface GitRef {
   /** Branch or tag name, e.g. `main`, `feature/login`. Absent when detached. */
-  readonly name?: string;
+  readonly name?: string | undefined;
   readonly objectId: GitObjectId;
 }
 
@@ -155,7 +155,7 @@ export const gitRefSchema = z.strictObject({
 export interface GitComparison {
   readonly base: GitObjectId;
   readonly head: GitObjectId;
-  readonly mergeBase?: GitObjectId;
+  readonly mergeBase?: GitObjectId | undefined;
 }
 
 export const gitComparisonSchema = z.strictObject({

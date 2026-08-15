@@ -106,7 +106,7 @@ export interface ProviderChangeRequestReference extends ProviderReference {
    * Never a key: it is unique per repository at best, and GitLab issues and
    * merge requests share a numbering space.
    */
-  readonly number?: number;
+  readonly number?: number | undefined;
 }
 
 export const providerChangeRequestReferenceSchema = z.strictObject({
@@ -120,7 +120,7 @@ export const providerChangeRequestReferenceSchema = z.strictObject({
 export interface ProviderCommentReference extends ProviderReference {
   readonly kind: "comment";
   /** Provider thread/discussion id, where threading is supported. */
-  readonly threadId?: string;
+  readonly threadId?: string | undefined;
 }
 
 export const providerCommentReferenceSchema = z.strictObject({
@@ -134,7 +134,7 @@ export const providerCommentReferenceSchema = z.strictObject({
 export interface ProviderUserReference extends ProviderReference {
   readonly kind: "user";
   /** Login handle, e.g. `octocat`. Display only — handles can be changed. */
-  readonly handle?: string;
+  readonly handle?: string | undefined;
 }
 
 export const providerUserReferenceSchema = z.strictObject({

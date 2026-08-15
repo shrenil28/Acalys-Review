@@ -82,7 +82,7 @@ export interface Repository {
   /** Denormalized tenant key — see the tenancy module for why (§9). */
   readonly organizationId: OrganizationId;
   /** Which connection reaches this repository. Absent for `local`. */
-  readonly providerConnectionId?: ProviderConnectionId;
+  readonly providerConnectionId?: ProviderConnectionId | undefined;
   readonly provider: SourceProvider;
   /** The provider's own identity for this repository. */
   readonly providerRepository: ProviderRepositoryReference;
@@ -92,7 +92,7 @@ export interface Repository {
    * Optional because a freshly created repository has no commits and therefore
    * no default branch.
    */
-  readonly defaultBranch?: string;
+  readonly defaultBranch?: string | undefined;
   readonly visibility: RepositoryVisibility;
   readonly lifecycle: RepositoryLifecycle;
   readonly createdAt: Timestamp;
@@ -132,7 +132,7 @@ export interface ProviderConnection {
    * Host for self-managed deployments, e.g. `gitlab.internal.acme.com`.
    * Absent for the provider's public cloud.
    */
-  readonly host?: string;
+  readonly host?: string | undefined;
   readonly lifecycle: ProviderConnectionLifecycle;
   readonly createdAt: Timestamp;
   readonly updatedAt: Timestamp;

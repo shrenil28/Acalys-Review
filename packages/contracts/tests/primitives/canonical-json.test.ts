@@ -60,14 +60,14 @@ describe("canonicalJson (P0.txt §58)", () => {
   it("omits object keys whose value is undefined, matching the §57 rule", () => {
     // `.optional()` fields are absent, not null. An absent key and an
     // explicitly-undefined key must hash the same.
-    const withUndefined = { a: 1, b: undefined } as unknown as JsonValue;
+    const withUndefined = { a: 1, b: undefined };
     expect(canonicalJson(withUndefined)).toBe('{"a":1}');
     expect(canonicalJson(withUndefined)).toBe(canonicalJson({ a: 1 }));
   });
 
   describe("rejects values with no deterministic form", () => {
     it("undefined inside an array, where omission would shift indices", () => {
-      const value = [1, undefined, 3] as unknown as JsonValue;
+      const value = [1, undefined, 3];
       expect(() => canonicalJson(value)).toThrow(ValidationError);
       expect(() => canonicalJson(value)).toThrow(/\$\[1\] is undefined/);
     });
@@ -77,35 +77,29 @@ describe("canonicalJson (P0.txt §58)", () => {
       ["Infinity", Number.POSITIVE_INFINITY],
       ["-Infinity", Number.NEGATIVE_INFINITY],
     ])("%s, which JSON.stringify would silently turn into null", (_l, n) => {
-      expect(() => canonicalJson(n as unknown as JsonValue)).toThrow(
-        ValidationError,
-      );
+      expect(() => canonicalJson(n)).toThrow(ValidationError);
     });
 
     it("bigint", () => {
-      expect(() => canonicalJson(1n as unknown as JsonValue)).toThrow(/bigint/);
+      expect(() => canonicalJson(1n)).toThrow(/bigint/);
     });
 
     it.each([
       ["function", () => "x"],
       ["symbol", Symbol("x")],
     ])("%s — transport contracts carry data only (§63)", (_l, v) => {
-      expect(() => canonicalJson({ v } as unknown as JsonValue)).toThrow(
-        ValidationError,
-      );
+      expect(() => canonicalJson({ v })).toThrow(ValidationError);
     });
 
     it("Date, because timestamps cross boundaries as strings (§6)", () => {
-      const value = { at: new Date() } as unknown as JsonValue;
+      const value = { at: new Date() };
       expect(() => canonicalJson(value)).toThrow(/is a Date/);
     });
 
     it("circular references", () => {
       const cyclic: Record<string, unknown> = { name: "root" };
       cyclic.self = cyclic;
-      expect(() => canonicalJson(cyclic as JsonValue)).toThrow(
-        /Circular reference/,
-      );
+      expect(() => canonicalJson(cyclic)).toThrow(/Circular reference/);
     });
 
     it("names the failing path, not just 'invalid' (§96)", () => {

@@ -26,19 +26,31 @@
  */
 
 import { ValidationError } from "../errors/errors.js";
-import type { JsonValue } from "./json.js";
 
 /**
  * Serializes to a canonical string: recursively key-sorted, no insignificant
  * whitespace, stable across runs and machines.
  *
+ * Takes `unknown` rather than {@link JsonValue}, which looks like a weakening
+ * and is not. TypeScript does not give **interfaces** an implicit index
+ * signature, so no `interface` is ever assignable to
+ * `{ [key: string]: JsonValue }` — meaning a `JsonValue` parameter would
+ * reject `ChangedFile`, `ReviewRun`, and every other domain contract, i.e.
+ * precisely the values that need hashing. The alternatives were worse:
+ * declaring every contract as a `type` alias purely to satisfy a parameter, or
+ * casting at each call site, which hides real mistakes.
+ *
+ * Nothing is lost, because the guarantee here has always been a runtime one.
+ * Every non-serializable value is rejected below with a path-qualified error,
+ * and that check runs regardless of what the compiler believed.
+ *
  * @throws {ValidationError} if the value cannot be represented deterministically —
- *   `undefined`, a function, a symbol, `NaN`, `Infinity`, a `bigint`, or a
- *   circular reference. Failing loudly is the point: silently coercing
+ *   `undefined`, a function, a symbol, `NaN`, `Infinity`, a `bigint`, a `Date`,
+ *   or a circular reference. Failing loudly is the point: silently coercing
  *   `Infinity` to `null` (which `JSON.stringify` does) would produce two
  *   different inputs that hash the same.
  */
-export function canonicalJson(value: JsonValue): string {
+export function canonicalJson(value: unknown): string {
   return write(value, new Set<object>(), "$");
 }
 

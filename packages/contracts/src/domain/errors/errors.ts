@@ -48,7 +48,7 @@ export interface SerializedError {
   /** The unresolved classification, useful for metrics and triage. */
   readonly retryability: Retryability;
   /** Structured, already-safe context. Typically a validation path. */
-  readonly details?: Record<string, JsonValue>;
+  readonly details?: Record<string, JsonValue> | undefined;
 }
 
 export interface AcalysErrorOptions {
@@ -56,17 +56,18 @@ export interface AcalysErrorOptions {
    * Structured context. Must be JSON-safe and must not carry credentials,
    * tokens, source code, or raw provider payloads.
    */
-  readonly details?: Record<string, JsonValue>;
+  readonly details?: Record<string, JsonValue> | undefined;
   /**
    * The underlying failure. Retained in-process for logging and never
    * serialized (§63).
    */
+  // `unknown` already admits undefined, so no `| undefined` here.
   readonly cause?: unknown;
   /**
    * Required when the class is `conditional`; ignored otherwise. Forces the
    * throw site to answer the question it is uniquely able to answer.
    */
-  readonly retryable?: boolean;
+  readonly retryable?: boolean | undefined;
 }
 
 /**
@@ -80,7 +81,7 @@ export abstract class AcalysError extends Error {
   abstract readonly code: string;
   abstract readonly retryability: Retryability;
 
-  readonly details?: Record<string, JsonValue>;
+  readonly details?: Record<string, JsonValue> | undefined;
   readonly #explicitRetryable?: boolean;
 
   constructor(message: string, options: AcalysErrorOptions = {}) {

@@ -16,3 +16,7 @@ export * from "./provider/index.js";
 export * from "./actor/index.js";
 export * from "./tenancy/index.js";
 export * from "./repository/index.js";
+export * from "./review-target/index.js";
+export * from "./pull-request/index.js";
+export * from "./change/index.js";
+export * from "./review/index.js";
