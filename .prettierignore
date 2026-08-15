@@ -1,0 +1,11 @@
+node_modules
+dist
+build
+coverage
+generated
+*.tsbuildinfo
+.vite
+package-lock.json
+
+# Inherited verbatim; not reformatted by Phase 0 tooling.
+apps/web

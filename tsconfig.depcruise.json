@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "docs": "Tooling-only config, read by dependency-cruiser. It exists because the graph spans two resolution schemes: workspace packages resolve through package exports, while apps/web resolves its own '@/*' alias via its private tsconfig. dependency-cruiser takes exactly one tsConfig, and has no 'alias' option, so this file unions the two. Without it every apps/web import fails to resolve, the app's modules all look orphaned, and — the real problem — the 'web-must-not-import-internal-contracts' rule silently never fires, because the graph would hold no edges out of apps/web at all. Never extend this from application code.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["apps/web/src/*"],
+      "@acalys/contracts": ["packages/contracts/src/index.ts"],
+      "@acalys/contracts/domain": ["packages/contracts/src/domain/index.ts"],
+      "@acalys/contracts/api/v1": ["packages/contracts/src/api/v1/index.ts"],
+      "@acalys/contracts/internal": ["packages/contracts/src/internal/index.ts"]
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "acalys",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Acalys Review — cloud code-review platform",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
+    "schemas:generate": "npm run schemas:generate --workspace @acalys/contracts",
+    "schemas:check": "npm run schemas:check --workspace @acalys/contracts",
+    "verify": "npm run typecheck && npm run lint && npm run depcruise && npm run test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@types/node": "^24.10.1",
+    "dependency-cruiser": "^17.1.1",
+    "eslint": "^9.39.1",
+    "fast-check": "^4.4.0",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

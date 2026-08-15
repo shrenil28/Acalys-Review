@@ -1,0 +1,60 @@
+name: CI
+
+# Quality gates for Phase 0 (P0.txt §103). Every gate here is also runnable
+# locally via `npm run verify`, so CI never fails on something a developer
+# could not have caught first.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Contracts must build before anything imports them through package
+      # exports, which resolve to dist/.
+      - name: Build contracts
+        run: npm run build --workspace @acalys/contracts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Format check
+        run: npm run format:check
+
+      # The architectural boundaries: provider SDKs must not be reachable from
+      # canonical contracts, the UI must not reach worker internals, and no
+      # backend package may depend on the frontend (§59, §84).
+      - name: Dependency boundaries
+        run: npm run depcruise
+
+      - name: Tests
+        run: npm run test
+
+      # Generated JSON Schema must match the Zod source of truth (§101).
+      # Enabled from Checkpoint E, when generation lands.
+      - name: Schema drift
+        run: npm run schemas:check --if-present
+
+      # apps/web is inherited verbatim; this proves the monorepo move did not
+      # disturb it.
+      - name: Web app builds
+        run: npm run build --workspace apps/web
