@@ -46,6 +46,66 @@ import {
   type GitComparison,
   type GitRef,
 } from "../src/domain/git/git-refs.js";
+import {
+  lineRangeSchema,
+  type LineRange,
+} from "../src/domain/location/line-range.js";
+import {
+  symbolReferenceSchema,
+  type SymbolReference,
+} from "../src/domain/location/symbol-reference.js";
+import {
+  sourceLocationSchema,
+  type SourceLocation,
+} from "../src/domain/location/source-location.js";
+import {
+  artifactReferenceSchema,
+  redactionSchema,
+  type ArtifactReference,
+  type Redaction,
+} from "../src/domain/artifacts/artifact.js";
+import {
+  toolReferenceSchema,
+  toolRunReferenceSchema,
+  type ToolReference,
+  type ToolRunReference,
+} from "../src/domain/tools/tool.js";
+import {
+  ciCheckReferenceSchema,
+  type CiCheckReference,
+} from "../src/domain/ci/ci-check.js";
+import {
+  evidenceSchema,
+  evidenceProvenanceSchema,
+  type Evidence,
+  type EvidenceProvenance,
+} from "../src/domain/evidence/evidence.js";
+import {
+  findingConfidenceSchema,
+  type FindingConfidence,
+} from "../src/domain/finding/taxonomy.js";
+import {
+  findingFingerprintSchema,
+  findingFingerprintInputSchema,
+  type FindingFingerprint,
+  type FindingFingerprintInput,
+} from "../src/domain/finding/fingerprint.js";
+import {
+  verificationResultSchema,
+  type VerificationResult,
+} from "../src/domain/finding/verification.js";
+import {
+  findingTransitionSchema,
+  type FindingTransition,
+} from "../src/domain/finding/finding-lifecycle.js";
+import {
+  candidateFindingSchema,
+  type CandidateFinding,
+} from "../src/domain/finding/candidate-finding.js";
+import {
+  reviewFindingSchema,
+  type ReviewFinding,
+} from "../src/domain/finding/review-finding.js";
 
 /**
  * Guards the one thing P0.txt §54 asks for and that nothing else checks: the
@@ -100,6 +160,33 @@ describe("schema/type conformance (P0.txt §54)", () => {
     assertSchemaMatchesInterface<Actor>()(actorSchema);
     assertSchemaMatchesInterface<GitRef>()(gitRefSchema);
     assertSchemaMatchesInterface<GitComparison>()(gitComparisonSchema);
+
+    // Checkpoint C
+    assertSchemaMatchesInterface<LineRange>()(lineRangeSchema);
+    assertSchemaMatchesInterface<SymbolReference>()(symbolReferenceSchema);
+    assertSchemaMatchesInterface<SourceLocation>()(sourceLocationSchema);
+    assertSchemaMatchesInterface<Redaction>()(redactionSchema);
+    assertSchemaMatchesInterface<ArtifactReference>()(artifactReferenceSchema);
+    assertSchemaMatchesInterface<ToolReference>()(toolReferenceSchema);
+    assertSchemaMatchesInterface<ToolRunReference>()(toolRunReferenceSchema);
+    assertSchemaMatchesInterface<CiCheckReference>()(ciCheckReferenceSchema);
+    assertSchemaMatchesInterface<EvidenceProvenance>()(
+      evidenceProvenanceSchema,
+    );
+    assertSchemaMatchesInterface<Evidence>()(evidenceSchema);
+    assertSchemaMatchesInterface<FindingConfidence>()(findingConfidenceSchema);
+    assertSchemaMatchesInterface<FindingFingerprint>()(
+      findingFingerprintSchema,
+    );
+    assertSchemaMatchesInterface<FindingFingerprintInput>()(
+      findingFingerprintInputSchema,
+    );
+    assertSchemaMatchesInterface<VerificationResult>()(
+      verificationResultSchema,
+    );
+    assertSchemaMatchesInterface<FindingTransition>()(findingTransitionSchema);
+    assertSchemaMatchesInterface<CandidateFinding>()(candidateFindingSchema);
+    assertSchemaMatchesInterface<ReviewFinding>()(reviewFindingSchema);
 
     expect(true).toBe(true);
   });

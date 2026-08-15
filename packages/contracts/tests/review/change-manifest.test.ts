@@ -5,13 +5,13 @@ import {
   changedFileSchema,
   computeChangeStatistics,
   diffHunkSchema,
-  lineRangeSchema,
   reviewableFiles,
   sortChangedFiles,
   sortLanguageSummaries,
   totalLinesChanged,
   type ChangedFile,
 } from "../../src/domain/change/change-manifest.js";
+import { lineRangeSchema } from "../../src/domain/location/line-range.js";
 import { RepositoryIdOps } from "../../src/domain/identity/ids.js";
 import { repositoryPath } from "../../src/domain/primitives/repository-path.js";
 import { namespacedId } from "../../src/domain/primitives/namespaced-id.js";

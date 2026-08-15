@@ -40,6 +40,7 @@ import {
   repositoryPathSchema,
   type RepositoryPath,
 } from "../primitives/repository-path.js";
+import { lineRangeSchema, type LineRange } from "../location/line-range.js";
 import { timestampSchema, type Timestamp } from "../primitives/timestamp.js";
 import { COLLECTION_LIMITS, TEXT_LIMITS } from "../primitives/limits.js";
 import {
@@ -67,31 +68,6 @@ export const CHANGE_STATUSES = [
 ] as const;
 
 export type ChangeStatus = (typeof CHANGE_STATUSES)[number];
-
-/**
- * An inclusive 1-based line span.
- *
- * 1-based because that is what every editor, every provider comment API, and
- * every compiler diagnostic uses; a 0-based span here would mean an off-by-one
- * at every boundary. Stated explicitly because §22 warns against leaving the
- * convention implicit.
- */
-export interface LineRange {
-  /** First line, 1-based and inclusive. */
-  readonly start: number;
-  /** Last line, 1-based and inclusive. Equals `start` for a single line. */
-  readonly end: number;
-}
-
-export const lineRangeSchema = z
-  .strictObject({
-    start: z.number().int().positive({ error: "Lines are 1-based" }),
-    end: z.number().int().positive({ error: "Lines are 1-based" }),
-  })
-  .refine((range) => range.end >= range.start, {
-    error: "Line range ends before it starts",
-    path: ["end"],
-  });
 
 /**
  * One contiguous changed region within a file.
