@@ -26,3 +26,7 @@ export * from "./tools/index.js";
 export * from "./ci/index.js";
 export * from "./evidence/index.js";
 export * from "./finding/index.js";
+export * from "./output/index.js";
+export * from "./knowledge/index.js";
+export * from "./premerge/index.js";
+export * from "./configuration/index.js";

@@ -106,6 +106,72 @@ import {
   reviewFindingSchema,
   type ReviewFinding,
 } from "../src/domain/finding/review-finding.js";
+import {
+  findingCountSummarySchema,
+  reviewRiskAreaSchema,
+  reviewSummaryAreaSchema,
+  reviewSummarySchema,
+  type FindingCountSummary,
+  type ReviewRiskArea,
+  type ReviewSummary,
+  type ReviewSummaryArea,
+} from "../src/domain/output/review-summary.js";
+import {
+  conversationMessageSchema,
+  reviewCommentSchema,
+  reviewConversationSchema,
+  type ConversationMessage,
+  type ReviewComment,
+  type ReviewConversation,
+} from "../src/domain/output/conversation.js";
+import {
+  editOperationSchema,
+  fileEditSchema,
+  suggestedFixSchema,
+  suggestedFixValidationSchema,
+  type EditOperation,
+  type FileEdit,
+  type SuggestedFix,
+  type SuggestedFixValidation,
+} from "../src/domain/output/suggested-fix.js";
+import {
+  knowledgeReferenceSchema,
+  type KnowledgeReference,
+} from "../src/domain/knowledge/knowledge.js";
+import {
+  preMergeCheckResultSchema,
+  type PreMergeCheckResult,
+} from "../src/domain/premerge/premerge.js";
+import {
+  knowledgeConfigSchema,
+  preMergeConfigSchema,
+  publicationConfigSchema,
+  reviewBehaviorConfigSchema,
+  reviewConfigSchema,
+  toolConfigSchema,
+  type KnowledgeConfig,
+  type PreMergeConfig,
+  type PublicationConfig,
+  type ReviewBehaviorConfig,
+  type ReviewConfig,
+  type ToolConfig,
+} from "../src/domain/configuration/review-config.js";
+import {
+  pathInstructionSchema,
+  type PathInstruction,
+} from "../src/domain/configuration/path-instruction.js";
+import {
+  configResolutionInputSchema,
+  requestOverridesSchema,
+  reviewConfigOverlaySchema,
+  type ConfigResolutionInput,
+  type RequestOverrides,
+  type ReviewConfigOverlay,
+} from "../src/domain/configuration/resolution.js";
+import {
+  reviewConfigSnapshotSchema,
+  type ReviewConfigSnapshot,
+} from "../src/domain/configuration/config-snapshot.js";
 
 /**
  * Guards the one thing P0.txt §54 asks for and that nothing else checks: the
@@ -187,6 +253,52 @@ describe("schema/type conformance (P0.txt §54)", () => {
     assertSchemaMatchesInterface<FindingTransition>()(findingTransitionSchema);
     assertSchemaMatchesInterface<CandidateFinding>()(candidateFindingSchema);
     assertSchemaMatchesInterface<ReviewFinding>()(reviewFindingSchema);
+
+    // Checkpoint D1
+    assertSchemaMatchesInterface<FindingCountSummary>()(
+      findingCountSummarySchema,
+    );
+    assertSchemaMatchesInterface<ReviewSummaryArea>()(reviewSummaryAreaSchema);
+    assertSchemaMatchesInterface<ReviewRiskArea>()(reviewRiskAreaSchema);
+    assertSchemaMatchesInterface<ReviewSummary>()(reviewSummarySchema);
+    assertSchemaMatchesInterface<ReviewComment>()(reviewCommentSchema);
+    assertSchemaMatchesInterface<ConversationMessage>()(
+      conversationMessageSchema,
+    );
+    assertSchemaMatchesInterface<ReviewConversation>()(
+      reviewConversationSchema,
+    );
+    assertSchemaMatchesInterface<EditOperation>()(editOperationSchema);
+    assertSchemaMatchesInterface<FileEdit>()(fileEditSchema);
+    assertSchemaMatchesInterface<SuggestedFixValidation>()(
+      suggestedFixValidationSchema,
+    );
+    assertSchemaMatchesInterface<SuggestedFix>()(suggestedFixSchema);
+    assertSchemaMatchesInterface<KnowledgeReference>()(
+      knowledgeReferenceSchema,
+    );
+    assertSchemaMatchesInterface<PreMergeCheckResult>()(
+      preMergeCheckResultSchema,
+    );
+    assertSchemaMatchesInterface<PathInstruction>()(pathInstructionSchema);
+    assertSchemaMatchesInterface<ReviewBehaviorConfig>()(
+      reviewBehaviorConfigSchema,
+    );
+    assertSchemaMatchesInterface<ToolConfig>()(toolConfigSchema);
+    assertSchemaMatchesInterface<KnowledgeConfig>()(knowledgeConfigSchema);
+    assertSchemaMatchesInterface<PreMergeConfig>()(preMergeConfigSchema);
+    assertSchemaMatchesInterface<PublicationConfig>()(publicationConfigSchema);
+    assertSchemaMatchesInterface<ReviewConfig>()(reviewConfigSchema);
+    assertSchemaMatchesInterface<ReviewConfigOverlay>()(
+      reviewConfigOverlaySchema,
+    );
+    assertSchemaMatchesInterface<RequestOverrides>()(requestOverridesSchema);
+    assertSchemaMatchesInterface<ConfigResolutionInput>()(
+      configResolutionInputSchema,
+    );
+    assertSchemaMatchesInterface<ReviewConfigSnapshot>()(
+      reviewConfigSnapshotSchema,
+    );
 
     expect(true).toBe(true);
   });
