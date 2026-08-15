@@ -62,11 +62,30 @@ export const diffSideSchema = z.enum(DIFF_SIDES);
  * cannot be checked against one. It also lets a location be passed to
  * publication code on its own.
  *
- * `revisionId` and `commit` both appear because they answer different
- * questions. `revisionId` ties the location to the platform's own immutable
- * snapshot (§15) and is absent for local reviews, which have no revision.
- * `commit` is the raw Git anchor a provider API needs, and is present whenever
- * the content is committed.
+ * # `revisionId` and `commit` are not two spellings of one thing
+ *
+ * They answer different questions and are never interchangeable:
+ *
+ * | Field | Is | Namespace | Absent when |
+ * | --- | --- | --- | --- |
+ * | `revisionId` | the platform's immutable snapshot of a PR's geometry (§15) | Acalys UUIDv7 | local review — there is no revision (§112) |
+ * | `commit` | the Git object the content lives in | Git object id | the content is uncommitted (a dirty working tree) |
+ *
+ * One revision spans **two** commits — a base and a head — so `revisionId`
+ * cannot be a commit and a commit cannot identify a revision. `side` is what
+ * says which of the revision's two commits `commit` should be.
+ *
+ * **They can therefore disagree**, e.g. a `revisionId` for revision 3 paired
+ * with a `commit` belonging to revision 4. No schema can catch that: checking
+ * it requires loading the revision and comparing its base/head, which is a
+ * cross-aggregate read the contracts layer must not perform (§107).
+ *
+ * Per §107's instruction to document which service enforces an invariant a
+ * pure schema cannot: **the finding-reconciliation service** validates, when
+ * both fields are present, that `commit` equals the revision's `base` (for
+ * `side: "base"`) or `head` (for `side: "head"`) before persisting a finding.
+ * Adapters should generally populate `commit` *from* the revision rather than
+ * from a second source, which makes the pairing correct by construction.
  */
 export interface SourceLocation {
   readonly repositoryId: RepositoryId;

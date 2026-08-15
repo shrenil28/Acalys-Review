@@ -12,10 +12,18 @@ import {
 } from "../../src/domain/evidence/evidence.js";
 import {
   artifactReferenceSchema,
+  canDisclose,
   dataClassificationSchema,
-  isDisplayable,
+  DATA_CLASSIFICATIONS,
+  DISCLOSURE_DESTINATIONS,
+  effectiveClassification,
+  isRedactionPending,
   redactionSchema,
+  REDACTION_STATES,
   NO_REDACTION,
+  type DataClassification,
+  type DisclosureDestination,
+  type RedactionState,
 } from "../../src/domain/artifacts/artifact.js";
 import {
   ciCheckReferenceSchema,
@@ -328,25 +336,15 @@ describe("Artifacts, classification, and redaction (P0.txt §45, §121, §122)",
         classification: "sensitive",
         redaction: { state: "pending" },
       });
-      expect(isDisplayable(pending)).toBe(false);
+      expect(isRedactionPending(pending)).toBe(true);
+      expect(canDisclose(pending, "tenant_surface")).toBe(false);
     });
 
-    it("refuses to display unchecked content even when not sensitive", () => {
-      const pending = artifactReferenceSchema.parse({
-        ...artifact,
-        classification: "public",
-        redaction: { state: "pending" },
-      });
-      expect(isDisplayable(pending)).toBe(false);
-    });
-
-    it("displays sensitive content only once redacted", () => {
-      const raw = artifactReferenceSchema.parse({
-        ...artifact,
-        classification: "sensitive",
-        redaction: { state: "not_required" },
-      });
-      const cleaned = artifactReferenceSchema.parse({
+    it("redaction demotes sensitive to tenant_private, never to public", () => {
+      // Redaction removes the secret, but the rest is still the tenant's data.
+      // Anything else would let redaction launder tenant data onto a public
+      // surface.
+      const redacted = artifactReferenceSchema.parse({
         ...artifact,
         classification: "sensitive",
         redaction: {
@@ -354,8 +352,142 @@ describe("Artifacts, classification, and redaction (P0.txt §45, §121, §122)",
           reason: namespacedId("acalys.redaction.detected-secret"),
         },
       });
-      expect(isDisplayable(raw)).toBe(false);
-      expect(isDisplayable(cleaned)).toBe(true);
+      expect(effectiveClassification(redacted)).toBe("tenant_private");
+      expect(canDisclose(redacted, "tenant_surface")).toBe(true);
+      expect(canDisclose(redacted, "public_surface")).toBe(false);
+    });
+
+    it("not_required grants nothing on its own", () => {
+      // The exact bug this replaced: a helper that returned true for any
+      // non-sensitive artifact silently made every tenant-private artifact
+      // world-disclosable.
+      const tenantData = artifactReferenceSchema.parse({
+        ...artifact,
+        classification: "tenant_private",
+        redaction: { state: "not_required" },
+      });
+      expect(canDisclose(tenantData, "tenant_surface")).toBe(true);
+      expect(canDisclose(tenantData, "public_surface")).toBe(false);
+    });
+
+    describe("the full classification x redaction x destination matrix", () => {
+      /**
+       * Every combination asserted explicitly. This is the test that protects
+       * the reason `pending` exists: a single row silently flipping to `true`
+       * is a disclosure bug, and sampling would not catch it.
+       */
+      const EXPECTED: Readonly<
+        Record<
+          DataClassification,
+          Readonly<Record<RedactionState, readonly DisclosureDestination[]>>
+        >
+      > = {
+        public: {
+          not_required: [
+            "public_surface",
+            "provider_comment",
+            "tenant_surface",
+          ],
+          redacted: ["public_surface", "provider_comment", "tenant_surface"],
+          pending: [],
+        },
+        tenant_private: {
+          not_required: ["provider_comment", "tenant_surface"],
+          redacted: ["provider_comment", "tenant_surface"],
+          pending: [],
+        },
+        sensitive: {
+          // Raw sensitive content goes nowhere, even though it was assessed:
+          // `not_required` on sensitive content is a policy statement that no
+          // redaction is needed, not permission to disclose it anywhere.
+          not_required: [],
+          // Once redacted it behaves as tenant_private.
+          redacted: ["provider_comment", "tenant_surface"],
+          pending: [],
+        },
+      };
+
+      const cases: {
+        classification: DataClassification;
+        state: RedactionState;
+        destination: DisclosureDestination;
+        expected: boolean;
+      }[] = [];
+
+      for (const classification of DATA_CLASSIFICATIONS) {
+        for (const state of REDACTION_STATES) {
+          for (const destination of DISCLOSURE_DESTINATIONS) {
+            cases.push({
+              classification,
+              state,
+              destination,
+              expected: EXPECTED[classification][state].includes(destination),
+            });
+          }
+        }
+      }
+
+      it("covers all 27 combinations", () => {
+        expect(cases).toHaveLength(
+          DATA_CLASSIFICATIONS.length *
+            REDACTION_STATES.length *
+            DISCLOSURE_DESTINATIONS.length,
+        );
+        expect(cases).toHaveLength(27);
+      });
+
+      it.each(cases)(
+        "$classification + $state -> $destination = $expected",
+        ({ classification, state, destination, expected }) => {
+          const parsed = artifactReferenceSchema.parse({
+            ...artifact,
+            classification,
+            redaction:
+              state === "redacted"
+                ? {
+                    state,
+                    reason: namespacedId("acalys.redaction.detected-secret"),
+                  }
+                : { state },
+          });
+          expect(canDisclose(parsed, destination)).toBe(expected);
+        },
+      );
+
+      it("INVARIANT: pending is never disclosable, anywhere", () => {
+        // Stated on its own so a regression names the invariant rather than a
+        // row number.
+        for (const classification of DATA_CLASSIFICATIONS) {
+          const parsed = artifactReferenceSchema.parse({
+            ...artifact,
+            classification,
+            redaction: { state: "pending" },
+          });
+          for (const destination of DISCLOSURE_DESTINATIONS) {
+            expect(canDisclose(parsed, destination)).toBe(false);
+          }
+        }
+      });
+
+      it("INVARIANT: redaction state alone never authorizes disclosure", () => {
+        // For every non-pending redaction state, there exists a classification
+        // that is still refused at a public surface — so no caller can treat
+        // "redaction settled" as "safe to publish".
+        for (const state of ["not_required", "redacted"] as const) {
+          const parsed = artifactReferenceSchema.parse({
+            ...artifact,
+            classification: "tenant_private",
+            redaction:
+              state === "redacted"
+                ? {
+                    state,
+                    reason: namespacedId("acalys.redaction.detected-secret"),
+                  }
+                : { state },
+          });
+          expect(canDisclose(parsed, "public_surface")).toBe(false);
+        }
+      });
     });
 
     it("uses P0's classification vocabulary", () => {

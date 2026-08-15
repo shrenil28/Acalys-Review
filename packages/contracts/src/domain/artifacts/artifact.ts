@@ -75,17 +75,36 @@ export type DataClassification = (typeof DATA_CLASSIFICATIONS)[number];
 export const dataClassificationSchema = z.enum(DATA_CLASSIFICATIONS);
 
 /**
- * What redaction has been applied (§122).
+ * Whether redaction has reached a safe terminal determination (§122).
  *
- * Not a boolean, because three states are genuinely distinguishable and the
- * difference matters operationally:
+ * Read the vocabulary as a **readiness/safety status**, not as a log of
+ * transformations performed:
  *
- * - `not_required` — inspected, nothing sensitive found.
- * - `redacted` — sensitive content was found and removed or masked.
- * - `pending` — **not yet inspected.** This is the state a boolean cannot
- *   express, and the dangerous one: `redacted: false` reads as "safe" when it
- *   may only mean "unchecked". A consumer must be able to refuse to display
- *   content that has not been through redaction yet.
+ * - `not_required` — assessed, and no redaction is needed for this content.
+ * - `redacted` — assessed, sensitive content found, and removal completed.
+ * - `pending` — **has not reached a safe terminal determination.**
+ *
+ * `pending` deliberately covers two operational situations that a boolean
+ * cannot distinguish from safety, and that this layer deliberately does not
+ * distinguish from each other:
+ *
+ *     not yet assessed
+ *     assessed, but redaction work is still outstanding
+ *
+ * Both yield the identical conservative answer — not safe to disclose — so
+ * splitting them here would add a state with no consumer and invite the two
+ * meanings to drift apart. If an operational pipeline later needs to tell them
+ * apart for scheduling, that belongs to the redaction service's own job state,
+ * not to this contract.
+ *
+ * The invariant that gives `pending` real security meaning rather than making
+ * it a workflow label:
+ *
+ *     redaction.state === "pending"  ⇒  canDisclose(...) === false
+ *
+ * for **every** classification and **every** destination. `redacted: false`
+ * reads as "safe" when it may only mean "unchecked"; this state makes the
+ * difference expressible and fail-closed.
  */
 export const REDACTION_STATES = [
   "not_required",
@@ -181,15 +200,96 @@ export const artifactReferenceSchema = z.strictObject({
 });
 
 /**
- * Whether this artifact is safe to render to a user right now.
+ * Where content is about to go.
  *
- * `pending` fails: content that has not been through redaction may still
- * contain a secret, and "not yet checked" must never read as "clean" (§122).
+ * Disclosure is a question about a *pair* — content and destination — so any
+ * helper that answers it without a destination is answering a different,
+ * weaker question and inviting the caller to mistake it for this one.
+ *
+ * - `public_surface` — anything world-readable: a public repository comment, a
+ *   status badge, an unauthenticated page.
+ * - `provider_comment` — a comment on the change under review. Visible to
+ *   everyone with access to that repository, which is the tenant's own
+ *   audience but not the tenant's staff list.
+ * - `tenant_surface` — the dashboard and API, behind tenant authentication.
  */
-export function isDisplayable(artifact: ArtifactReference): boolean {
-  if (artifact.redaction.state === "pending") return false;
-  return (
-    artifact.classification !== "sensitive" ||
+export const DISCLOSURE_DESTINATIONS = [
+  "public_surface",
+  "provider_comment",
+  "tenant_surface",
+] as const;
+
+export type DisclosureDestination = (typeof DISCLOSURE_DESTINATIONS)[number];
+
+export const disclosureDestinationSchema = z.enum(DISCLOSURE_DESTINATIONS);
+
+/** The most sensitive classification each destination may receive. */
+const DESTINATION_ACCEPTS: Readonly<
+  Record<DisclosureDestination, ReadonlySet<DataClassification>>
+> = Object.freeze({
+  public_surface: new Set<DataClassification>(["public"]),
+  provider_comment: new Set<DataClassification>(["public", "tenant_private"]),
+  tenant_surface: new Set<DataClassification>(["public", "tenant_private"]),
+});
+
+/**
+ * Whether redaction has reached a safe terminal determination.
+ *
+ * The fail-closed gate, named for what it checks. Kept separate from
+ * {@link canDisclose} so a caller can report *why* something is withheld —
+ * "still being processed" and "too sensitive for this destination" need
+ * different messages and different remedies.
+ */
+export function isRedactionPending(artifact: ArtifactReference): boolean {
+  return artifact.redaction.state === "pending";
+}
+
+/**
+ * The classification that applies *after* redaction has been carried out.
+ *
+ * Redaction removes the sensitive material, so redacted `sensitive` content is
+ * no longer sensitive — but it is still the tenant's data, and drops to
+ * `tenant_private` rather than to `public`. Anything else would let redaction
+ * launder tenant data into a world-readable surface.
+ */
+export function effectiveClassification(
+  artifact: ArtifactReference,
+): DataClassification {
+  if (
+    artifact.classification === "sensitive" &&
     artifact.redaction.state === "redacted"
+  ) {
+    return "tenant_private";
+  }
+  return artifact.classification;
+}
+
+/**
+ * Whether this artifact may be disclosed to a given destination.
+ *
+ * Two independent gates, in this order:
+ *
+ * 1. **Readiness.** `pending` is refused for every classification and every
+ *    destination, without exception. Content that has not reached a safe
+ *    terminal determination may still contain a secret, and "not yet checked"
+ *    must never read as "clean" (§122).
+ * 2. **Policy.** The *effective* classification must be one the destination
+ *    accepts.
+ *
+ * Note what the second gate deliberately does **not** do: `not_required` grants
+ * nothing on its own. `tenant_private` + `not_required` is perfectly safe on
+ * the dashboard and forbidden on a public surface — the decision comes from
+ * classification and destination together, never from the redaction state
+ * alone. An earlier version of this function returned `true` for any
+ * non-`sensitive` artifact, which silently made every tenant-private artifact
+ * world-disclosable.
+ */
+export function canDisclose(
+  artifact: ArtifactReference,
+  destination: DisclosureDestination,
+): boolean {
+  if (isRedactionPending(artifact)) return false;
+  return DESTINATION_ACCEPTS[destination].has(
+    effectiveClassification(artifact),
   );
 }
