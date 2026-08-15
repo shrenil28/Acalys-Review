@@ -1,0 +1,20 @@
+import fs from "node:fs";
+const t=(await(await fetch("http://127.0.0.1:9222/json/list")).json()).find(x=>x.type==="page");
+const ws=new WebSocket(t.webSocketDebuggerUrl);let id=0;const pend=new Map();const errs=[];
+const send=(m,p={})=>new Promise(r=>{const i=++id;pend.set(i,r);ws.send(JSON.stringify({id:i,method:m,params:p}))});
+ws.addEventListener("message",e=>{const m=JSON.parse(e.data);
+ if(m.id&&pend.has(m.id)){pend.get(m.id)(m);pend.delete(m.id)}
+ if(m.method==="Runtime.exceptionThrown")errs.push(m.params.exceptionDetails.exception?.description?.split("\n")[0]);});
+await new Promise(r=>ws.addEventListener("open",r));
+await send("Runtime.enable");await send("Page.enable");
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const ev=async x=>(await send("Runtime.evaluate",{expression:x,returnByValue:true})).result.result.value;
+await ev(`localStorage.setItem("cr:theme","light");localStorage.setItem("cr:sidebar-collapsed","false")`);
+await send("Page.navigate",{url:"http://localhost:5173/analytics/pr-reviews"});await sleep(3000);
+console.log("light:", await ev(`({dark:document.documentElement.classList.contains('dark'),bg:getComputedStyle(document.body).backgroundColor,tick:getComputedStyle(document.documentElement).getPropertyValue('--cr-chart-tick').trim()})`));
+let s=await send("Page.captureScreenshot",{format:"png"});fs.writeFileSync("light.png",Buffer.from(s.result.data,"base64"));
+await ev(`localStorage.setItem("cr:theme","dark")`);
+await send("Page.navigate",{url:"http://localhost:5173/analytics/pr-reviews"});await sleep(2500);
+console.log("dark:", await ev(`({dark:document.documentElement.classList.contains('dark'),bg:getComputedStyle(document.body).backgroundColor,tick:getComputedStyle(document.documentElement).getPropertyValue('--cr-chart-tick').trim()})`));
+console.log("errors:", errs.length?errs.slice(0,2):"none");
+ws.close();

@@ -1,0 +1,16 @@
+const t=(await(await fetch("http://127.0.0.1:9222/json/list")).json()).find(x=>x.type==="page");
+const ws=new WebSocket(t.webSocketDebuggerUrl);let id=0;const pend=new Map();
+const send=(m,p={})=>new Promise(r=>{const i=++id;pend.set(i,r);ws.send(JSON.stringify({id:i,method:m,params:p}))});
+ws.addEventListener("message",e=>{const m=JSON.parse(e.data);if(m.id&&pend.has(m.id)){pend.get(m.id)(m);pend.delete(m.id)}});
+await new Promise(r=>ws.addEventListener("open",r));
+await send("Runtime.enable");await send("Page.enable");
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const ev=async x=>(await send("Runtime.evaluate",{expression:x,returnByValue:true})).result.result.value;
+const visible=`(()=>{const n=document.querySelector('nav[aria-label="Settings sections"]');return n? n.offsetParent!==null : false})()`;
+await send("Page.navigate",{url:"http://localhost:5173/organization/settings/general"});await sleep(2600);
+console.log("Concise  -> nav visible:", await ev(visible));
+await ev(`[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Concise')?.click()`);await sleep(300);
+await ev(`[...document.querySelectorAll('[role=menuitem],button')].find(b=>b.textContent.trim()==='YAML Editor')?.click()`);await sleep(500);
+console.log("YAML     -> nav visible:", await ev(visible), "| card:", await ev(`document.body.innerText.includes('Configuration YAML')`));
+console.log("nav card bg:", await ev(`(()=>{const n=document.querySelector('nav[aria-label="Settings sections"]');return n?getComputedStyle(n.parentElement).backgroundColor:'n/a'})()`));
+ws.close();

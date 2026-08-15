@@ -1,0 +1,4645 @@
+# Acalys Review — Phase 0: Canonical Contracts & Architectural Foundation
+
+You are implementing **Phase 0 of Acalys Review**, a production-grade cloud code-review platform whose first architectural baseline is modeled after the capabilities and separation of concerns of systems such as CodeRabbit.
+
+This phase is deliberately **not about implementing the LLM reviewer, GitHub webhook handling, repository cloning, static-analysis tools, sandbox execution, or multi-agent review yet**.
+
+Phase 0 exists to establish the **canonical domain model, contracts, state machines, schemas, validation boundaries, identifiers, events, package boundaries, persistence-facing abstractions, and provider-neutral interfaces** on which every later subsystem will depend.
+
+This is foundational work.
+
+Do not treat it as a collection of TypeScript interfaces that can be casually changed later.
+
+The Phase 0 contracts must be designed as if the following future systems will all depend on them:
+
+* GitHub
+* GitLab
+* Bitbucket in the future
+* local CLI review
+* IDE review
+* web review UI
+* webhook gateway
+* review scheduler
+* durable workflow engine
+* repository snapshot service
+* sandbox workers
+* static-analysis workers
+* repository intelligence
+* AST/symbol graph
+* evidence system
+* Review Agent
+* Verification Agent
+* Chat Agent
+* Pre-Merge Agent
+* incremental re-review
+* review memory
+* organization/repository knowledge
+* CI ingestion
+* runtime reproduction
+* fix agent
+* `/review`
+* `/deep-review`
+* model routing
+* billing
+* observability
+* evaluation infrastructure
+
+The result of Phase 0 should make it possible for all later components to communicate through **stable canonical contracts instead of provider-specific, agent-specific, or database-specific structures**.
+
+---
+
+# 1. Core architectural principle
+
+The entire platform must obey:
+
+```text
+External Provider Representation
+             ↓
+       Adapter Boundary
+             ↓
+    Canonical Acalys Contracts
+             ↓
+       Internal Platform
+             ↓
+       Adapter Boundary
+             ↓
+ External Provider Representation
+```
+
+For example:
+
+```text
+GitHub PullRequest
+       ↓
+GitHub Adapter
+       ↓
+Acalys ReviewTarget
+       ↓
+Review Platform
+```
+
+and never:
+
+```text
+GitHub PullRequest
+       ↓
+ReviewAgent
+```
+
+No core review package should need to understand GitHub webhook payload structures.
+
+Likewise:
+
+```text
+GitLab merge request
+       ↓
+GitLab Adapter
+       ↓
+same ReviewTarget
+```
+
+and:
+
+```text
+local working tree
+       ↓
+CLI Adapter
+       ↓
+same ReviewTarget
+```
+
+Provider-specific logic must terminate at the provider boundary.
+
+---
+
+# 2. Phase 0 objective
+
+Implement the canonical contract layer covering at minimum:
+
+```text
+Identity
+Organizations
+Users
+Repositories
+Provider connections
+Git references
+Review targets
+Pull requests
+Pull-request revisions
+Change manifests
+Review requests
+Review runs
+Review state machines
+Review execution modes
+Candidate findings
+Verified findings
+Finding lifecycle
+Evidence
+Source locations
+Comments
+Review summaries
+Review conversations
+Review configuration
+Knowledge references
+Tool references
+CI evidence references
+Review decisions
+Pre-merge states
+Artifacts
+Errors
+Events
+Idempotency
+Tracing metadata
+Schema versions
+```
+
+All contracts must be:
+
+* strongly typed
+* runtime validated
+* serializable
+* versionable
+* provider-neutral
+* persistence-neutral
+* deterministic where practical
+* documented
+* testable
+* extensible without uncontrolled `any`
+* safe for queue/event transport
+* safe for REST/RPC transport
+* safe for storage
+* designed for distributed systems
+
+---
+
+# 3. First inspect the existing repository
+
+Before changing architecture:
+
+1. inspect the complete repository structure;
+2. inspect workspace configuration;
+3. inspect package manager configuration;
+4. inspect TypeScript configuration;
+5. identify existing shared packages;
+6. identify existing domain models;
+7. identify existing API contracts;
+8. identify existing IDs;
+9. identify existing validation libraries;
+10. identify existing serialization conventions;
+11. inspect existing database abstractions if present;
+12. inspect existing event/queue abstractions;
+13. inspect existing error models;
+14. inspect existing telemetry primitives;
+15. inspect test frameworks;
+16. identify naming conventions.
+
+Do not create duplicate infrastructure if a production-quality implementation already exists.
+
+Reuse good existing primitives where appropriate, but do not preserve poor abstractions merely for compatibility if Phase 0 is intended to establish the canonical foundation.
+
+Before implementation, produce internally a dependency map similar to:
+
+```text
+existing packages
+      │
+      ├── reusable
+      ├── needs refactor
+      ├── provider-specific leakage
+      └── obsolete
+```
+
+Then implement the canonical layer cleanly.
+
+---
+
+# 4. Target package structure
+
+Prefer a dedicated contract package.
+
+A suggested layout is:
+
+```text
+packages/
+└── review-contracts/
+    ├── src/
+    │   ├── identity/
+    │   ├── provider/
+    │   ├── repository/
+    │   ├── git/
+    │   ├── review-target/
+    │   ├── revision/
+    │   ├── change/
+    │   ├── review/
+    │   ├── finding/
+    │   ├── evidence/
+    │   ├── comment/
+    │   ├── conversation/
+    │   ├── configuration/
+    │   ├── knowledge/
+    │   ├── tools/
+    │   ├── ci/
+    │   ├── premerge/
+    │   ├── artifacts/
+    │   ├── events/
+    │   ├── errors/
+    │   ├── schema/
+    │   ├── validation/
+    │   └── index.ts
+    │
+    ├── schemas/
+    ├── tests/
+    ├── package.json
+    └── tsconfig.json
+```
+
+If the repository already has an appropriate canonical contract package, extend that instead.
+
+Do not create a giant:
+
+```text
+types.ts
+```
+
+containing the whole product.
+
+Contracts should be organized by bounded domain.
+
+---
+
+# 5. Branded identifiers
+
+Do not represent every identifier as a plain `string`.
+
+Introduce type-safe IDs.
+
+Conceptually:
+
+```ts
+type Brand<T, Name extends string> =
+  T & { readonly __brand: Name };
+
+type OrganizationId = Brand<string, "OrganizationId">;
+type UserId = Brand<string, "UserId">;
+type RepositoryId = Brand<string, "RepositoryId">;
+type PullRequestId = Brand<string, "PullRequestId">;
+type PullRequestRevisionId = Brand<string, "PullRequestRevisionId">;
+type ReviewRequestId = Brand<string, "ReviewRequestId">;
+type ReviewRunId = Brand<string, "ReviewRunId">;
+type FindingId = Brand<string, "FindingId">;
+type EvidenceId = Brand<string, "EvidenceId">;
+type ConversationId = Brand<string, "ConversationId">;
+type CommentId = Brand<string, "CommentId">;
+type ArtifactId = Brand<string, "ArtifactId">;
+```
+
+Implement safe factory/validation helpers.
+
+Do not allow accidental assignment such as:
+
+```ts
+const reviewRunId: ReviewRunId = repositoryId;
+```
+
+IDs must be safe for distributed generation.
+
+A sortable UUID strategy such as UUIDv7 is acceptable if compatible with the existing stack.
+
+Centralize generation.
+
+Do not have each package invent its own ID scheme.
+
+---
+
+# 6. Timestamp conventions
+
+Use one canonical serialized representation.
+
+Recommended:
+
+```text
+RFC 3339 / ISO 8601 UTC
+```
+
+Example:
+
+```text
+2026-08-15T15:30:12.421Z
+```
+
+At runtime, clearly distinguish:
+
+```text
+serialized timestamp
+```
+
+from:
+
+```text
+Date object
+```
+
+Avoid ambiguous local timestamps.
+
+All persisted review-domain timestamps should be UTC.
+
+---
+
+# 7. Schema versioning
+
+Every long-lived externally transported top-level contract must be versionable.
+
+For example:
+
+```ts
+interface VersionedContract {
+  schemaVersion: number;
+}
+```
+
+or an equivalent robust mechanism.
+
+Do not randomly add version properties everywhere.
+
+Define:
+
+* which objects require explicit schema versions;
+* which are nested internal values;
+* compatibility rules;
+* migration strategy;
+* decoding behavior for unsupported versions.
+
+Consider versioning at major contract boundaries such as:
+
+```text
+ReviewTarget
+ReviewRequest
+ReviewRunSnapshot
+ChangeManifest
+ReviewFinding
+Evidence
+ReviewConfig
+DomainEvent
+```
+
+The design must support future schema evolution without silent corruption.
+
+---
+
+# 8. Canonical provider model
+
+Define provider identity independently from repository identity.
+
+For example:
+
+```ts
+type SourceProvider =
+  | "github"
+  | "gitlab"
+  | "bitbucket"
+  | "local";
+```
+
+But architect this so provider growth does not require rewriting the domain.
+
+Define provider references:
+
+```ts
+interface ProviderReference {
+  provider: SourceProvider;
+  externalId: string;
+}
+```
+
+Potential provider-scoped references:
+
+```text
+installation
+organization
+repository
+pull request
+comment
+user
+check run
+commit
+```
+
+Never assume GitHub numeric PR numbers are globally unique.
+
+---
+
+# 9. Organization and tenancy model
+
+Define canonical ownership.
+
+At minimum:
+
+```text
+Organization
+User
+Membership
+Repository
+ProviderConnection
+```
+
+Architect for:
+
+```text
+one organization
+  ├── many provider connections
+  ├── many repositories
+  ├── many users
+  ├── many configurations
+  └── many review runs
+```
+
+Every tenant-bound aggregate must make tenant ownership explicit.
+
+Avoid designs where tenant resolution requires reverse traversal through unrelated tables.
+
+Define:
+
+```ts
+interface TenantContext {
+  organizationId: OrganizationId;
+}
+```
+
+This will later become essential for:
+
+* authorization
+* data isolation
+* billing
+* quotas
+* observability
+* encryption
+* retention
+* deletion
+
+---
+
+# 10. Repository contract
+
+Create a canonical repository representation.
+
+It should distinguish:
+
+```text
+Acalys repository identity
+```
+
+from:
+
+```text
+provider repository identity
+```
+
+Conceptually:
+
+```ts
+interface Repository {
+  id: RepositoryId;
+
+  organizationId: OrganizationId;
+
+  provider: SourceProvider;
+
+  providerRepositoryId: string;
+
+  owner: string;
+  name: string;
+
+  defaultBranch?: string;
+
+  visibility:
+    | "public"
+    | "private"
+    | "internal"
+    | "unknown";
+
+  lifecycle:
+    | "active"
+    | "disabled"
+    | "archived";
+
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+```
+
+Do not encode GitHub-specific fields into this core object.
+
+Provider metadata belongs in provider adapters or explicit extension metadata.
+
+Avoid uncontrolled:
+
+```ts
+metadata: any;
+```
+
+If metadata is necessary, constrain and document it.
+
+---
+
+# 11. Canonical Git references
+
+Define proper Git primitives.
+
+At minimum:
+
+```ts
+interface GitCommitRef {
+  sha: string;
+}
+
+interface GitBranchRef {
+  name: string;
+  sha: string;
+}
+
+interface GitComparison {
+  baseSha: string;
+  headSha: string;
+  mergeBaseSha?: string;
+}
+```
+
+Validate SHA formats appropriately.
+
+Do not assume SHA-1 forever if designing generic Git primitives.
+
+A hash representation may include:
+
+```ts
+interface GitObjectId {
+  algorithm: "sha1" | "sha256";
+  value: string;
+}
+```
+
+if appropriate.
+
+---
+
+# 12. ReviewTarget
+
+This is one of the most important Phase 0 contracts.
+
+A review target should represent what is being reviewed without depending on the source provider.
+
+Support future targets including:
+
+```text
+Pull request
+Commit range
+Single commit
+Working tree
+Staged changes
+Branch comparison
+```
+
+Use a discriminated union.
+
+For example:
+
+```ts
+type ReviewTarget =
+  | PullRequestReviewTarget
+  | CommitRangeReviewTarget
+  | CommitReviewTarget
+  | WorkingTreeReviewTarget;
+```
+
+Example PR target:
+
+```ts
+interface PullRequestReviewTarget {
+  kind: "pull_request";
+
+  repositoryId: RepositoryId;
+
+  provider: SourceProvider;
+
+  externalPullRequestId: string;
+
+  number?: number;
+
+  base: GitRef;
+  head: GitRef;
+
+  mergeBase?: GitRef;
+
+  title: string;
+
+  description?: string;
+
+  author: ActorReference;
+
+  draft: boolean;
+}
+```
+
+Avoid designing the whole review engine around pull requests only.
+
+Local review must eventually reuse the same engine.
+
+---
+
+# 13. Actors
+
+Create canonical actor types.
+
+Reviews can be initiated by:
+
+```text
+human
+provider bot
+system
+API client
+automation
+agent
+```
+
+For example:
+
+```ts
+type Actor =
+  | HumanActor
+  | SystemActor
+  | IntegrationActor
+  | AgentActor;
+```
+
+This will later be important for:
+
+* audit logs
+* comment attribution
+* review requests
+* fixes
+* automated review triggers
+* policy actions
+
+---
+
+# 14. Pull request aggregate
+
+Represent PR identity separately from its changing revisions.
+
+```text
+PullRequest
+    │
+    ├── metadata
+    │
+    └── revisions
+          ├── R0
+          ├── R1
+          ├── R2
+          └── R3
+```
+
+Canonical PR:
+
+```ts
+interface PullRequest {
+  id: PullRequestId;
+
+  organizationId: OrganizationId;
+  repositoryId: RepositoryId;
+
+  provider: SourceProvider;
+  externalId: string;
+
+  number?: number;
+
+  title: string;
+  description?: string;
+
+  author: ActorReference;
+
+  state:
+    | "open"
+    | "closed"
+    | "merged";
+
+  draft: boolean;
+
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+```
+
+Do not overwrite revision history when new commits arrive.
+
+---
+
+# 15. PullRequestRevision
+
+This is essential for incremental review.
+
+Define:
+
+```ts
+interface PullRequestRevision {
+  id: PullRequestRevisionId;
+
+  pullRequestId: PullRequestId;
+
+  sequence: number;
+
+  base: GitObjectReference;
+  head: GitObjectReference;
+  mergeBase?: GitObjectReference;
+
+  createdAt: Timestamp;
+
+  trigger: RevisionTrigger;
+}
+```
+
+Possible trigger:
+
+```ts
+type RevisionTrigger =
+  | "opened"
+  | "push"
+  | "reopened"
+  | "base_changed"
+  | "manual_refresh"
+  | "unknown";
+```
+
+Ensure `(pullRequestId, sequence)` semantics are deterministic.
+
+The system should be able to answer:
+
+```text
+Which revision did this review analyze?
+```
+
+with certainty.
+
+---
+
+# 16. ReviewRequest
+
+A `ReviewRequest` represents intent to perform a review.
+
+It is not the actual execution.
+
+Define a canonical request containing:
+
+```text
+tenant
+target
+revision
+trigger
+requested mode
+configuration reference
+initiator
+idempotency information
+priority
+```
+
+For example:
+
+```ts
+interface ReviewRequest {
+  schemaVersion: number;
+
+  id: ReviewRequestId;
+
+  organizationId: OrganizationId;
+  repositoryId: RepositoryId;
+
+  target: ReviewTarget;
+
+  revisionId?: PullRequestRevisionId;
+
+  trigger: ReviewTrigger;
+
+  requestedBy: ActorReference;
+
+  executionMode: ReviewExecutionMode;
+
+  configSnapshotId?: ReviewConfigSnapshotId;
+
+  idempotencyKey: string;
+
+  requestedAt: Timestamp;
+}
+```
+
+---
+
+# 17. Review execution modes
+
+The architecture must already account for:
+
+```text
+/review
+/deep-review
+```
+
+without implementing swarm behavior yet.
+
+Define:
+
+```ts
+type ReviewExecutionMode =
+  | "review"
+  | "deep_review";
+```
+
+Or clearer internal names:
+
+```ts
+type ReviewExecutionStrategy =
+  | "single"
+  | "swarm";
+```
+
+Potentially separate user-facing mode from execution strategy:
+
+```ts
+interface ReviewExecutionPolicy {
+  mode: "review" | "deep_review";
+  strategy: "single" | "swarm";
+}
+```
+
+Important invariant:
+
+```text
+/review
+→ single reviewer
+
+/deep-review
+→ reviewer swarm
+```
+
+Everything else should eventually use the same review pipeline.
+
+Do not implement different finding semantics or severity logic between these modes.
+
+---
+
+# 18. ReviewRun
+
+A ReviewRun is one concrete execution attempt.
+
+A request may potentially produce more than one run because of:
+
+* retries
+* manual reruns
+* recovery
+* future shadow evaluation
+* alternate model experiments
+
+Define:
+
+```ts
+interface ReviewRun {
+  id: ReviewRunId;
+
+  requestId: ReviewRequestId;
+
+  organizationId: OrganizationId;
+  repositoryId: RepositoryId;
+
+  target: ReviewTargetReference;
+
+  revisionId?: PullRequestRevisionId;
+
+  state: ReviewRunState;
+
+  executionMode: ReviewExecutionMode;
+
+  attempt: number;
+
+  startedAt?: Timestamp;
+  completedAt?: Timestamp;
+
+  failure?: ReviewRunFailure;
+}
+```
+
+Keep request intent separate from execution attempt.
+
+---
+
+# 19. ReviewRun state machine
+
+Do not define lifecycle merely as arbitrary strings.
+
+Implement an explicit state machine.
+
+Initial states:
+
+```text
+QUEUED
+  ↓
+PREPARING
+  ↓
+ANALYZING
+  ↓
+REVIEWING
+  ↓
+VERIFYING
+  ↓
+RECONCILING
+  ↓
+PUBLISHING
+  ↓
+COMPLETED
+```
+
+Terminal/error branches:
+
+```text
+FAILED
+CANCELLED
+SUPERSEDED
+```
+
+Potential canonical values:
+
+```ts
+type ReviewRunState =
+  | "queued"
+  | "preparing"
+  | "analyzing"
+  | "reviewing"
+  | "verifying"
+  | "reconciling"
+  | "publishing"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "superseded";
+```
+
+Implement allowed transitions.
+
+For example:
+
+```text
+queued -> preparing
+preparing -> analyzing
+analyzing -> reviewing
+reviewing -> verifying
+verifying -> reconciling
+reconciling -> publishing
+publishing -> completed
+```
+
+Do not allow:
+
+```text
+completed -> analyzing
+```
+
+without creating a new run.
+
+Expose transition validation functions.
+
+Example:
+
+```ts
+assertValidReviewRunTransition(from, to);
+```
+
+Test every legal and illegal transition.
+
+---
+
+# 20. ReviewTrigger
+
+Define why the review exists.
+
+Examples:
+
+```ts
+type ReviewTrigger =
+  | "pull_request_opened"
+  | "pull_request_updated"
+  | "manual"
+  | "cli"
+  | "ide"
+  | "api"
+  | "scheduled"
+  | "recheck"
+  | "configuration_changed";
+```
+
+Avoid provider-specific webhook names in canonical domain values.
+
+Provider adapters should convert:
+
+```text
+GitHub pull_request.synchronize
+```
+
+into:
+
+```text
+pull_request_updated
+```
+
+---
+
+# 21. ChangeManifest contract
+
+Although full change intelligence comes later, define the canonical schema now.
+
+At minimum:
+
+```ts
+interface ChangeManifest {
+  schemaVersion: number;
+
+  comparison: GitComparison;
+
+  files: ChangedFile[];
+
+  stats: ChangeStatistics;
+
+  languages: LanguageChangeSummary[];
+
+  changedSymbols?: ChangedSymbol[];
+
+  dependencyChanges?: DependencyChange[];
+
+  configChanges?: ConfigChange[];
+
+  testChanges?: TestChange[];
+
+  migrationChanges?: MigrationChange[];
+
+  riskSignals?: RiskSignal[];
+}
+```
+
+Changed file:
+
+```ts
+interface ChangedFile {
+  path: string;
+
+  previousPath?: string;
+
+  status:
+    | "added"
+    | "modified"
+    | "deleted"
+    | "renamed"
+    | "copied"
+    | "type_changed";
+
+  additions: number;
+  deletions: number;
+
+  binary: boolean;
+
+  language?: string;
+
+  generated?: boolean;
+}
+```
+
+Do not include enormous raw patch content directly inside every manifest record.
+
+Reference artifacts separately when appropriate.
+
+---
+
+# 22. SourceLocation
+
+This must be carefully designed because later it will drive GitHub/GitLab inline comments.
+
+Support:
+
+* file
+* line
+* line range
+* side/base/head
+* commit
+* symbol
+* optional column
+* deleted lines
+* renamed files
+
+Example:
+
+```ts
+interface SourceLocation {
+  repositoryId: RepositoryId;
+
+  revisionId?: PullRequestRevisionId;
+
+  path: string;
+
+  side: "base" | "head";
+
+  startLine: number;
+  endLine?: number;
+
+  startColumn?: number;
+  endColumn?: number;
+
+  commitSha?: string;
+
+  symbol?: SymbolReference;
+}
+```
+
+Validate:
+
+```text
+line >= 1
+endLine >= startLine
+column >= 1
+```
+
+Never rely on zero/one-based assumptions implicitly.
+
+Document them explicitly.
+
+---
+
+# 23. CandidateFinding versus ReviewFinding
+
+Separate them.
+
+The review agent produces:
+
+```text
+CandidateFinding
+```
+
+The platform eventually publishes:
+
+```text
+ReviewFinding
+```
+
+Candidate:
+
+```ts
+interface CandidateFinding {
+  id: CandidateFindingId;
+
+  reviewRunId: ReviewRunId;
+
+  title: string;
+
+  claim: string;
+
+  explanation: string;
+
+  category: FindingCategory;
+
+  proposedSeverity: FindingSeverity;
+
+  location: SourceLocation;
+
+  evidence: EvidenceReference[];
+
+  producedBy: AgentReference;
+
+  createdAt: Timestamp;
+}
+```
+
+Verified/published finding:
+
+```ts
+interface ReviewFinding {
+  schemaVersion: number;
+
+  id: FindingId;
+
+  reviewRunId: ReviewRunId;
+
+  title: string;
+
+  explanation: string;
+
+  category: FindingCategory;
+
+  severity: FindingSeverity;
+
+  confidence: FindingConfidence;
+
+  location: SourceLocation;
+
+  evidence: EvidenceReference[];
+
+  verification: VerificationSummary;
+
+  lifecycle: FindingLifecycle;
+
+  suggestedFix?: SuggestedFixReference;
+
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+```
+
+Do not let candidate and published finding share exactly the same type.
+
+They have different semantics.
+
+---
+
+# 24. Finding categories
+
+Create a canonical extensible taxonomy.
+
+Initial examples:
+
+```ts
+type FindingCategory =
+  | "correctness"
+  | "security"
+  | "reliability"
+  | "concurrency"
+  | "data_integrity"
+  | "performance"
+  | "resource_management"
+  | "api_contract"
+  | "compatibility"
+  | "migration"
+  | "testing"
+  | "maintainability"
+  | "configuration"
+  | "dependency"
+  | "other";
+```
+
+Do not overfit categories to a specific analyzer.
+
+Tool-specific rule IDs belong in evidence metadata.
+
+---
+
+# 25. Severity
+
+Define severity semantically.
+
+Suggested:
+
+```ts
+type FindingSeverity =
+  | "critical"
+  | "high"
+  | "medium"
+  | "low"
+  | "info";
+```
+
+Document what each means.
+
+For example:
+
+### Critical
+
+Likely catastrophic or immediately exploitable:
+
+* remote code execution
+* authentication bypass
+* severe data corruption
+* credential exposure
+* destructive production failure
+
+### High
+
+Major correctness/security/reliability issue with meaningful impact.
+
+### Medium
+
+Real bug or substantial issue that should normally be fixed.
+
+### Low
+
+Limited impact issue.
+
+### Info
+
+Useful observation not normally blocking.
+
+Keep severity separate from confidence.
+
+A critical issue may have low confidence while under investigation.
+
+---
+
+# 26. Confidence
+
+Do not use ambiguous arbitrary floats everywhere without semantics.
+
+Define either:
+
+```ts
+interface FindingConfidence {
+  score: number;
+  level:
+    | "low"
+    | "medium"
+    | "high"
+    | "very_high";
+}
+```
+
+or another strongly defined representation.
+
+Validate:
+
+```text
+0 <= score <= 1
+```
+
+Document score interpretation.
+
+Confidence must eventually be based on evidence, not merely a model self-rating.
+
+---
+
+# 27. Finding lifecycle
+
+Define explicit state transitions.
+
+Suggested lifecycle:
+
+```text
+candidate
+   ↓
+verified
+   ↓
+published
+   ↓
+resolved
+```
+
+Alternative paths:
+
+```text
+candidate -> rejected
+
+published -> superseded
+
+published -> stale
+
+published -> dismissed
+```
+
+Create:
+
+```ts
+type FindingState =
+  | "candidate"
+  | "verified"
+  | "rejected"
+  | "published"
+  | "resolved"
+  | "dismissed"
+  | "stale"
+  | "superseded";
+```
+
+But determine carefully whether candidate lifecycle should live on `CandidateFinding` versus `ReviewFinding`.
+
+Avoid contradictory state modeling.
+
+---
+
+# 28. Finding identity across revisions
+
+Design for incremental review now.
+
+A finding on revision R1 may correspond to the same conceptual issue on R2.
+
+Do not assume:
+
+```text
+new review = entirely new findings
+```
+
+Introduce concepts such as:
+
+```text
+FindingFingerprint
+FindingLineage
+FindingOccurrence
+```
+
+A possible design:
+
+```ts
+interface FindingFingerprint {
+  value: string;
+  algorithmVersion: number;
+}
+```
+
+Fingerprint might eventually include stable components such as:
+
+```text
+repository
+category
+symbol
+normalized claim
+location context
+```
+
+Do not finalize a brittle algorithm now, but make the contract capable of representing stable lineage.
+
+---
+
+# 29. Evidence system
+
+Evidence must be first-class.
+
+Never model a finding as only:
+
+```text
+title
+body
+line
+```
+
+Create:
+
+```ts
+interface Evidence {
+  schemaVersion: number;
+
+  id: EvidenceId;
+
+  reviewRunId: ReviewRunId;
+
+  type: EvidenceType;
+
+  source: EvidenceSource;
+
+  summary: string;
+
+  location?: SourceLocation;
+
+  strength?: EvidenceStrength;
+
+  artifact?: ArtifactReference;
+
+  createdAt: Timestamp;
+}
+```
+
+Evidence types:
+
+```ts
+type EvidenceType =
+  | "source"
+  | "static_analysis"
+  | "compiler"
+  | "test"
+  | "runtime"
+  | "ci"
+  | "git_history"
+  | "requirement"
+  | "knowledge"
+  | "agent_observation"
+  | "dependency"
+  | "external";
+```
+
+---
+
+# 30. Evidence provenance
+
+Every piece of evidence must explain where it came from.
+
+For example:
+
+```ts
+type EvidenceSource =
+  | ToolEvidenceSource
+  | AgentEvidenceSource
+  | CiEvidenceSource
+  | RepositoryEvidenceSource
+  | ExternalEvidenceSource;
+```
+
+Tool evidence:
+
+```ts
+interface ToolEvidenceSource {
+  kind: "tool";
+
+  toolId: string;
+  toolVersion?: string;
+  ruleId?: string;
+}
+```
+
+Agent evidence:
+
+```ts
+interface AgentEvidenceSource {
+  kind: "agent";
+
+  agentType:
+    | "reviewer"
+    | "verifier"
+    | "chat"
+    | "premerge"
+    | "fix";
+
+  runId: string;
+
+  model?: ModelReference;
+}
+```
+
+This enables later auditing.
+
+---
+
+# 31. Evidence strength
+
+Prepare for an evidence hierarchy.
+
+Possible:
+
+```ts
+type EvidenceStrength =
+  | "weak"
+  | "supporting"
+  | "strong"
+  | "deterministic";
+```
+
+Do not infer severity from evidence strength.
+
+Examples:
+
+```text
+LLM suspicion
+→ weak
+
+source trace
+→ supporting
+
+reproducible failing test
+→ strong
+
+compiler-proven violation
+→ deterministic
+```
+
+The exact scoring engine comes later.
+
+Phase 0 only defines the contract cleanly.
+
+---
+
+# 32. Verification contracts
+
+Create explicit verification outcomes.
+
+```ts
+type VerificationDecision =
+  | "verified"
+  | "rejected"
+  | "inconclusive";
+```
+
+Define:
+
+```ts
+interface VerificationSummary {
+  decision: VerificationDecision;
+
+  evidence: EvidenceReference[];
+
+  confidence: FindingConfidence;
+
+  reasonCode?: VerificationReasonCode;
+}
+```
+
+Potential reason codes:
+
+```text
+confirmed_by_runtime
+confirmed_by_static_trace
+confirmed_by_test
+confirmed_by_contract
+not_reachable
+false_positive
+already_guarded
+not_caused_by_change
+insufficient_evidence
+duplicate
+```
+
+Do not expose raw chain-of-thought.
+
+Only structured conclusions and evidence.
+
+---
+
+# 33. Review summary
+
+Review summary is not a collection of findings.
+
+Create a separate contract.
+
+```ts
+interface ReviewSummary {
+  reviewRunId: ReviewRunId;
+
+  overview: string;
+
+  changedAreas: ReviewSummaryArea[];
+
+  riskAreas: ReviewRiskArea[];
+
+  findingCounts: FindingCountSummary;
+
+  decision?: ReviewDecision;
+
+  generatedAt: Timestamp;
+}
+```
+
+Later the UI may render:
+
+```text
+Summary
+Walkthrough
+Findings
+Pre-merge checks
+```
+
+as separate views.
+
+---
+
+# 34. ReviewDecision
+
+Define a provider-neutral review decision.
+
+For example:
+
+```ts
+type ReviewDecision =
+  | "approve"
+  | "request_changes"
+  | "comment"
+  | "neutral";
+```
+
+Do not directly encode GitHub API review states.
+
+Provider adapters map these later.
+
+---
+
+# 35. Comments
+
+Separate provider comment identity from Acalys comment identity.
+
+```ts
+interface ReviewComment {
+  id: CommentId;
+
+  findingId?: FindingId;
+
+  providerReference?: ProviderCommentReference;
+
+  author: ActorReference;
+
+  body: string;
+
+  location?: SourceLocation;
+
+  createdAt: Timestamp;
+  updatedAt?: Timestamp;
+}
+```
+
+Eventually a finding can have:
+
+```text
+0..1 primary published comment
+```
+
+while a conversation can contain many messages.
+
+---
+
+# 36. Review conversations
+
+Define thread-based conversations now.
+
+```ts
+interface ReviewConversation {
+  id: ConversationId;
+
+  organizationId: OrganizationId;
+
+  repositoryId: RepositoryId;
+
+  pullRequestId?: PullRequestId;
+
+  findingId?: FindingId;
+
+  messages: ConversationMessageReference[];
+
+  state:
+    | "open"
+    | "resolved"
+    | "archived";
+}
+```
+
+Message:
+
+```ts
+interface ConversationMessage {
+  id: ConversationMessageId;
+
+  conversationId: ConversationId;
+
+  author: ActorReference;
+
+  body: string;
+
+  providerReference?: ProviderCommentReference;
+
+  createdAt: Timestamp;
+}
+```
+
+Do not couple this to the future Chat Agent implementation.
+
+---
+
+# 37. Suggested fixes
+
+Do not store arbitrary patches directly in a finding without structure.
+
+Define:
+
+```ts
+interface SuggestedFix {
+  id: SuggestedFixId;
+
+  findingId: FindingId;
+
+  description: string;
+
+  edits: FileEdit[];
+
+  validation?: SuggestedFixValidation;
+}
+```
+
+Possible edits:
+
+```ts
+interface FileEdit {
+  path: string;
+
+  baseBlobSha?: string;
+
+  operations: EditOperation[];
+}
+```
+
+The actual fix agent comes later.
+
+The contract should support it now.
+
+---
+
+# 38. Configuration model
+
+Separate:
+
+```text
+organization config
+repository config
+path config
+effective runtime config
+```
+
+Do not let later agents parse arbitrary `.yaml` directly.
+
+Configuration pipeline should be:
+
+```text
+raw user config
+      ↓
+parser
+      ↓
+schema validation
+      ↓
+normalization
+      ↓
+effective ReviewConfig
+```
+
+Define:
+
+```ts
+interface ReviewConfig {
+  schemaVersion: number;
+
+  review: ReviewBehaviorConfig;
+
+  paths: PathInstruction[];
+
+  tools: ToolConfig;
+
+  knowledge: KnowledgeConfig;
+
+  premerge: PreMergeConfig;
+
+  publication: PublicationConfig;
+}
+```
+
+---
+
+# 39. Configuration snapshots
+
+Every ReviewRun must eventually be reproducible.
+
+Therefore do not only reference the current repository configuration.
+
+Create a snapshot concept.
+
+```ts
+interface ReviewConfigSnapshot {
+  id: ReviewConfigSnapshotId;
+
+  repositoryId: RepositoryId;
+
+  config: ReviewConfig;
+
+  sourceHash: string;
+
+  createdAt: Timestamp;
+}
+```
+
+Then:
+
+```text
+ReviewRun R123
+used config snapshot C78
+```
+
+even if repository config changes tomorrow.
+
+---
+
+# 40. Path instructions
+
+Prepare for CodeRabbit-class path-specific behavior.
+
+Example contract:
+
+```ts
+interface PathInstruction {
+  id: string;
+
+  glob: string;
+
+  instructions: string;
+
+  priority?: number;
+}
+```
+
+Validation should reject invalid globs if practical.
+
+Define deterministic precedence if multiple rules match.
+
+For example:
+
+```text
+most specific
+then priority
+then declaration order
+```
+
+Document the chosen rule.
+
+---
+
+# 41. Tool references
+
+Do not implement the tool registry yet, but define stable tool identity.
+
+```ts
+interface ToolReference {
+  id: string;
+  version?: string;
+}
+```
+
+Potential execution status:
+
+```ts
+type ToolRunState =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "timed_out"
+  | "cancelled"
+  | "skipped";
+```
+
+Tool result references should be available to evidence later.
+
+---
+
+# 42. CI evidence references
+
+Prepare for consuming existing CI rather than always rerunning tools.
+
+Define:
+
+```ts
+interface CiCheckReference {
+  provider: SourceProvider;
+
+  externalId: string;
+
+  name: string;
+
+  status: CiCheckStatus;
+
+  conclusion?: CiCheckConclusion;
+
+  commitSha: string;
+}
+```
+
+Keep provider-neutral statuses.
+
+Provider adapters map GitHub/GitLab state values.
+
+---
+
+# 43. Knowledge references
+
+Define canonical knowledge source types.
+
+Examples:
+
+```ts
+type KnowledgeSourceType =
+  | "repository_instruction"
+  | "organization_instruction"
+  | "path_instruction"
+  | "learning"
+  | "pull_request"
+  | "issue"
+  | "external_document"
+  | "mcp"
+  | "web";
+```
+
+Do not implement retrieval in Phase 0.
+
+Only establish a stable representation.
+
+---
+
+# 44. Pre-merge contracts
+
+Keep review findings and merge policy separate.
+
+Define:
+
+```ts
+type PreMergeCheckStatus =
+  | "pending"
+  | "running"
+  | "passed"
+  | "failed"
+  | "inconclusive"
+  | "skipped";
+```
+
+A check:
+
+```ts
+interface PreMergeCheckResult {
+  id: PreMergeCheckResultId;
+
+  reviewRunId: ReviewRunId;
+
+  checkId: string;
+
+  status: PreMergeCheckStatus;
+
+  explanation?: string;
+
+  evidence: EvidenceReference[];
+}
+```
+
+Later the pre-merge engine can produce:
+
+```text
+PASS
+FAIL
+INCONCLUSIVE
+```
+
+without abusing review severity.
+
+---
+
+# 45. Artifact model
+
+Large payloads should not live directly inside queue messages or domain entities.
+
+Examples:
+
+* raw git diff
+* analyzer logs
+* SARIF
+* test output
+* coverage reports
+* stack traces
+* generated patch
+* screenshots
+* sandbox logs
+
+Define:
+
+```ts
+interface ArtifactReference {
+  id: ArtifactId;
+
+  kind: ArtifactKind;
+
+  contentType: string;
+
+  sizeBytes?: number;
+
+  checksum?: Checksum;
+
+  storageReference: string;
+}
+```
+
+Core contracts reference artifacts rather than embedding giant content.
+
+---
+
+# 46. Checksums and content identity
+
+Define a reusable checksum type.
+
+```ts
+interface Checksum {
+  algorithm:
+    | "sha256"
+    | "sha512";
+
+  value: string;
+}
+```
+
+Use it later for:
+
+* artifact integrity
+* config snapshots
+* repository index cache
+* change manifests
+* tool cache
+* idempotency support
+
+---
+
+# 47. Idempotency
+
+Distributed review systems receive retries.
+
+Design idempotency from Phase 0.
+
+Define:
+
+```ts
+interface IdempotencyContext {
+  key: string;
+  scope: string;
+}
+```
+
+Potential canonical review request key:
+
+```text
+organization
+repository
+revision
+execution mode
+trigger class
+config snapshot
+```
+
+Do not use timestamps as the primary idempotency key.
+
+A duplicate webhook should not automatically create duplicate reviews.
+
+---
+
+# 48. Domain events
+
+Define event contracts for future durable workflows.
+
+Use an envelope.
+
+Example:
+
+```ts
+interface DomainEvent<TType extends string, TPayload> {
+  schemaVersion: number;
+
+  id: EventId;
+
+  type: TType;
+
+  occurredAt: Timestamp;
+
+  organizationId?: OrganizationId;
+
+  correlationId?: string;
+
+  causationId?: string;
+
+  traceId?: string;
+
+  payload: TPayload;
+}
+```
+
+Initial event taxonomy might include:
+
+```text
+review.requested
+review.run.queued
+review.run.started
+review.run.state_changed
+review.run.completed
+review.run.failed
+
+repository.revision.created
+
+change_manifest.created
+
+finding.candidate_created
+finding.verified
+finding.rejected
+finding.published
+finding.resolved
+finding.dismissed
+finding.superseded
+
+conversation.message_created
+
+premerge.check_completed
+```
+
+Avoid overproducing tiny internal implementation events.
+
+Events should represent meaningful domain transitions.
+
+---
+
+# 49. Correlation and causation
+
+Distributed tracing should be possible from the domain level.
+
+Example:
+
+```text
+GitHub webhook
+   │
+   └── event A
+          │
+          └── ReviewRequest
+                 │
+                 └── ReviewRun
+                        │
+                        └── Finding
+```
+
+Provide:
+
+```text
+correlationId
+causationId
+traceId
+```
+
+where appropriate.
+
+Do not make them optional everywhere without thought.
+
+Define when they are required.
+
+---
+
+# 50. Error model
+
+Do not throw arbitrary strings through package boundaries.
+
+Create typed platform errors.
+
+Potential hierarchy:
+
+```text
+AcalysError
+├── ValidationError
+├── NotFoundError
+├── ConflictError
+├── UnauthorizedError
+├── ForbiddenError
+├── ProviderError
+├── RepositoryError
+├── SandboxError
+├── ToolExecutionError
+├── ReviewError
+├── ConfigurationError
+└── InternalError
+```
+
+Every serializable error should expose safe fields such as:
+
+```ts
+interface SerializedError {
+  code: string;
+
+  message: string;
+
+  retryable: boolean;
+
+  details?: Record<string, JsonValue>;
+}
+```
+
+Never serialize secrets, credentials, stack traces, or arbitrary thrown objects into external API responses.
+
+Internal logs may preserve more diagnostics safely.
+
+---
+
+# 51. Retry semantics
+
+Errors should classify whether an operation is:
+
+```text
+retryable
+non-retryable
+conditionally retryable
+```
+
+Examples:
+
+```text
+provider timeout
+→ retryable
+
+invalid ReviewConfig
+→ non-retryable
+
+repository temporarily unavailable
+→ retryable
+
+invalid target SHA
+→ usually non-retryable
+```
+
+Define this contract now.
+
+---
+
+# 52. JSON types
+
+Create safe recursive JSON value types instead of using `any`.
+
+```ts
+type JsonPrimitive =
+  | string
+  | number
+  | boolean
+  | null;
+
+type JsonValue =
+  | JsonPrimitive
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+```
+
+Avoid unconstrained metadata types.
+
+---
+
+# 53. Runtime validation
+
+TypeScript compile-time types are insufficient.
+
+Every external boundary must use runtime validation.
+
+Use the repository's existing production validation library if appropriate, otherwise choose one consistent solution such as Zod.
+
+Required validated boundaries:
+
+```text
+provider adapter → canonical contract
+HTTP → application
+queue → worker
+event bus → consumer
+configuration file → effective config
+database JSON → runtime
+artifact metadata → application
+```
+
+Do not scatter ad hoc validation across services.
+
+Centralize schemas alongside contracts.
+
+---
+
+# 54. Type/schema synchronization
+
+Do not manually maintain:
+
+```text
+TypeScript interface
++
+separate JSON schema
+```
+
+if they can drift.
+
+Choose a single source of truth where practical.
+
+For example:
+
+```text
+Zod schema
+   ↓
+inferred TypeScript type
+   ↓
+generated JSON Schema
+```
+
+or another robust pattern.
+
+Every important transport contract should have:
+
+```text
+schema
+type
+parser
+safeParse
+serialization test
+```
+
+---
+
+# 55. Serialization tests
+
+Every durable contract needs round-trip tests.
+
+Example:
+
+```text
+object
+  ↓
+serialize
+  ↓
+JSON
+  ↓
+validate
+  ↓
+deserialize
+  ↓
+equivalent canonical object
+```
+
+Test:
+
+* required fields
+* optional fields
+* unknown fields policy
+* invalid enum values
+* malformed IDs
+* malformed timestamps
+* version mismatch
+* nested validation
+* serialization stability
+
+---
+
+# 56. Unknown-field policy
+
+Decide deliberately whether schemas are:
+
+```text
+strict
+strip unknown
+passthrough
+```
+
+For canonical persisted/event contracts, strict behavior is generally safer.
+
+But consider forward compatibility carefully.
+
+Document the policy by boundary.
+
+Do not rely on library defaults.
+
+---
+
+# 57. Null versus undefined
+
+Establish a platform-wide rule.
+
+For example:
+
+```text
+undefined
+→ absent internal optional value
+
+null
+→ explicitly no value only where semantically meaningful
+```
+
+Serialized contracts should avoid inconsistent:
+
+```json
+{
+  "foo": null
+}
+```
+
+versus omitted fields unless semantics differ.
+
+Document the convention.
+
+---
+
+# 58. Determinism
+
+Canonical transformations should be deterministic.
+
+Examples:
+
+```text
+same provider event
+→ same normalized identity
+
+same revision
+→ same change comparison
+
+same canonical config
+→ same config hash
+
+same finding fingerprint inputs
+→ same fingerprint
+```
+
+Implement stable JSON hashing if needed.
+
+Never hash ordinary `JSON.stringify()` output without ensuring key ordering.
+
+---
+
+# 59. Provider-neutral boundary rules
+
+Create architectural enforcement.
+
+Core packages must not import:
+
+```text
+@octokit/*
+GitHub webhook types
+GitLab SDK types
+provider API response types
+```
+
+Provider-specific packages may import:
+
+```text
+review-contracts
+```
+
+but `review-contracts` must never import provider implementations.
+
+Desired dependency direction:
+
+```text
+review-contracts
+      ↑
+provider-github
+provider-gitlab
+review-engine
+repository-service
+api
+worker
+```
+
+Never:
+
+```text
+review-contracts
+      ↓
+provider-github
+```
+
+---
+
+# 60. Persistence-neutral contracts
+
+Do not embed ORM decorators into canonical domain types.
+
+Bad:
+
+```ts
+@Entity()
+interface ReviewFinding ...
+```
+
+Canonical contracts must remain independent from:
+
+* Prisma
+* Drizzle
+* TypeORM
+* PostgreSQL
+* MongoDB
+
+Persistence adapters may map domain contracts to storage models.
+
+---
+
+# 61. Agent-neutral contracts
+
+Likewise, canonical finding/evidence contracts must not depend on:
+
+```text
+OpenAI response format
+Anthropic tool result
+Gemini response
+specific model message schemas
+```
+
+Models are implementation details behind agent adapters.
+
+---
+
+# 62. Model references
+
+Still define provider-neutral model identity for provenance.
+
+Example:
+
+```ts
+interface ModelReference {
+  provider: string;
+  model: string;
+  revision?: string;
+}
+```
+
+This is metadata.
+
+Do not build routing logic in Phase 0.
+
+---
+
+# 63. Security requirements
+
+Even though Phase 0 does not execute untrusted code, contracts must be safe.
+
+Rules:
+
+* never include provider access tokens in domain events;
+* never include credentials in ReviewTarget;
+* never embed secret environment variables;
+* never persist raw OAuth tokens inside review entities;
+* never allow arbitrary filesystem paths where repository-relative paths are expected;
+* normalize paths;
+* reject path traversal;
+* cap untrusted string sizes at API boundaries;
+* validate URLs before future use;
+* avoid prototype-pollution-prone object handling;
+* use safe JSON parsing;
+* prohibit unserializable values;
+* avoid functions/classes inside transport contracts.
+
+---
+
+# 64. Repository-relative path type
+
+Consider introducing a validated type:
+
+```ts
+type RepositoryPath = Brand<string, "RepositoryPath">;
+```
+
+Validation must reject:
+
+```text
+/absolute/path
+../escape
+foo/../../escape
+NUL characters
+```
+
+Canonical form:
+
+```text
+src/auth/session.ts
+```
+
+not:
+
+```text
+./src/auth/session.ts
+```
+
+This becomes important for sandbox safety later.
+
+---
+
+# 65. Size constraints
+
+Define reasonable maximum sizes for important serialized fields.
+
+Examples:
+
+```text
+PR title
+PR description
+finding title
+finding explanation
+comment body
+path instructions
+external metadata
+```
+
+Do not let arbitrary provider text produce multi-megabyte queue messages.
+
+Large data goes into artifacts.
+
+---
+
+# 66. Database planning
+
+Phase 0 does not need to implement the final persistence layer unless the current architecture requires it, but the contracts must map cleanly to relational storage.
+
+At minimum produce a persistence planning document for:
+
+```text
+organizations
+users
+memberships
+provider_connections
+repositories
+pull_requests
+pull_request_revisions
+review_requests
+review_runs
+candidate_findings
+findings
+evidence
+finding_evidence
+comments
+conversations
+conversation_messages
+config_snapshots
+artifacts
+domain_event_outbox
+```
+
+Pay attention to:
+
+```text
+tenant foreign keys
+unique constraints
+revision sequence
+idempotency
+finding lineage
+JSONB boundaries
+timestamps
+soft deletion
+retention
+indexes
+```
+
+Do not dump the whole domain into one JSONB column.
+
+---
+
+# 67. Outbox readiness
+
+Design event persistence so a transactional outbox can be added or used.
+
+Desired future guarantee:
+
+```text
+database mutation
++
+domain event
+```
+
+should not suffer from:
+
+```text
+DB committed
+event publish failed
+```
+
+The contracts should therefore have proper event IDs and event envelopes.
+
+---
+
+# 68. Auditability
+
+Important changes should eventually be auditable.
+
+Define canonical audit metadata where appropriate:
+
+```ts
+interface AuditContext {
+  actor: ActorReference;
+
+  requestId?: string;
+
+  source:
+    | "api"
+    | "webhook"
+    | "cli"
+    | "web"
+    | "worker"
+    | "system";
+}
+```
+
+Do not turn every value object into an audit record.
+
+Keep audit concerns at mutation boundaries.
+
+---
+
+# 69. Observability metadata
+
+Review runs should be traceable later.
+
+Define:
+
+```ts
+interface TraceContext {
+  traceId: string;
+  spanId?: string;
+  correlationId?: string;
+}
+```
+
+Avoid making OpenTelemetry-specific SDK types part of canonical contracts.
+
+Use neutral primitives.
+
+---
+
+# 70. Privacy and retention readiness
+
+Prepare contracts to support later:
+
+```text
+organization deletion
+repository deletion
+review retention policy
+artifact expiration
+conversation retention
+PII removal
+```
+
+Do not make data ownership ambiguous.
+
+Every long-lived object should be traceable to a tenant/repository where appropriate.
+
+---
+
+# 71. Immutability rules
+
+Determine which records are immutable.
+
+Recommended:
+
+```text
+PullRequestRevision
+ReviewConfigSnapshot
+Evidence
+DomainEvent
+Artifact checksum metadata
+```
+
+should generally be immutable.
+
+Mutable lifecycle aggregates:
+
+```text
+ReviewRun state
+Finding lifecycle
+Conversation state
+PullRequest current metadata
+```
+
+may change through explicit transitions.
+
+Document this.
+
+---
+
+# 72. Snapshot semantics
+
+A review must be reproducible.
+
+Eventually:
+
+```text
+ReviewRun
+   │
+   ├── revision snapshot
+   ├── config snapshot
+   ├── knowledge snapshot/version
+   ├── tool versions
+   └── model metadata
+```
+
+Phase 0 must provide the identifiers needed to represent that state.
+
+Do not rely on “whatever configuration is current now.”
+
+---
+
+# 73. Concurrency semantics
+
+Plan for:
+
+```text
+two identical webhooks
+two workers processing same job
+new PR revision while old review is running
+manual review while automatic review runs
+review cancelled during publication
+```
+
+Contracts and state transitions must allow the orchestration layer to resolve these safely.
+
+Introduce:
+
+```text
+revision sequence
+run attempt
+idempotency key
+superseded state
+```
+
+where needed.
+
+---
+
+# 74. Supersession
+
+A review may become obsolete while running.
+
+Example:
+
+```text
+R3 review starts
+     ↓
+developer pushes R4
+     ↓
+R3 may continue or become superseded
+```
+
+Represent this explicitly.
+
+Do not represent obsolete runs as generic failures.
+
+---
+
+# 75. Cancellation
+
+Define cancellation semantics.
+
+A run can be:
+
+```text
+cancel_requested
+```
+
+internally before reaching:
+
+```text
+cancelled
+```
+
+if the workflow engine needs two-phase cancellation.
+
+Determine whether that distinction belongs in the canonical domain or orchestration implementation.
+
+Make an intentional decision.
+
+---
+
+# 76. API DTO versus domain contract
+
+Do not automatically expose internal objects directly over the public API.
+
+Define clear separation where necessary:
+
+```text
+Domain
+Application DTO
+External API DTO
+```
+
+But avoid pointless duplication.
+
+Document which Phase 0 types are:
+
+```text
+domain contracts
+transport contracts
+API contracts
+event contracts
+```
+
+---
+
+# 77. Commands versus events
+
+Establish conceptual distinction.
+
+Command:
+
+```text
+ReviewRequested
+```
+
+means:
+
+> please perform this action.
+
+Event:
+
+```text
+ReviewRunCompleted
+```
+
+means:
+
+> this already happened.
+
+Do not use one generic message model for both without semantics.
+
+---
+
+# 78. Review commands
+
+Possible future command contracts:
+
+```text
+RequestReview
+CancelReview
+ReReview
+DismissFinding
+ResolveConversation
+RequestFix
+RunPreMergeCheck
+```
+
+Phase 0 only needs the foundational contract pattern, not necessarily every future command.
+
+---
+
+# 79. Enums versus extensibility
+
+Be careful with closed TypeScript unions if third-party plugins will need extension.
+
+For core platform invariants, unions are appropriate.
+
+For plugin-defined values such as:
+
+```text
+tool IDs
+custom check IDs
+external knowledge source IDs
+```
+
+use validated strings/namespaces.
+
+Example:
+
+```text
+semgrep
+acalys.compiler.typescript
+organization.custom-check.foo
+```
+
+---
+
+# 80. Namespaced identifiers
+
+Define conventions such as:
+
+```text
+acalys.review.correctness
+tool.semgrep
+github.check.codeql
+org.acme.check.no-direct-sql
+```
+
+where extensibility benefits from namespacing.
+
+Document allowed character sets.
+
+---
+
+# 81. Contract documentation
+
+Every major contract must include:
+
+* purpose
+* lifecycle
+* ownership
+* invariants
+* serialized example
+* what creates it
+* what consumes it
+* whether immutable
+* whether versioned
+
+Do not generate only API docs.
+
+Create architectural documentation.
+
+Suggested:
+
+```text
+docs/review/phase-0/
+├── architecture.md
+├── domain-model.md
+├── state-machines.md
+├── contracts.md
+├── events.md
+├── versioning.md
+├── provider-boundaries.md
+├── persistence-plan.md
+└── examples/
+```
+
+---
+
+# 82. Mermaid diagrams
+
+Document important relationships using Mermaid.
+
+Required diagrams:
+
+### Domain relationship
+
+```text
+Organization
+   ↓
+Repository
+   ↓
+PullRequest
+   ↓
+Revision
+   ↓
+ReviewRequest
+   ↓
+ReviewRun
+   ↓
+CandidateFinding
+   ↓
+Finding
+   ↓
+Comment
+```
+
+### Review run state machine
+
+### Finding lifecycle
+
+### Provider normalization boundary
+
+### Event causation flow
+
+### Revision/incremental-review model
+
+---
+
+# 83. Example fixtures
+
+Create canonical JSON fixtures.
+
+Examples:
+
+```text
+github-pr-review-target.json
+gitlab-mr-review-target.json
+local-working-tree-target.json
+
+review-request.json
+review-run.json
+change-manifest.json
+candidate-finding.json
+verified-finding.json
+static-analysis-evidence.json
+runtime-evidence.json
+config-snapshot.json
+domain-event.json
+```
+
+Provider examples should normalize to equivalent Acalys domain structures where appropriate.
+
+Fixtures must be validated in tests.
+
+---
+
+# 84. Test architecture
+
+Phase 0 requires strong testing.
+
+Implement:
+
+## Unit tests
+
+For:
+
+* ID factories
+* timestamps
+* repository paths
+* enums
+* schemas
+* state transitions
+* fingerprints
+* config precedence
+* validation functions
+
+## Contract tests
+
+For every major serialized contract.
+
+## Property-based tests where useful
+
+For:
+
+* IDs
+* paths
+* serialization
+* state transitions
+* checksum validation
+
+## Negative tests
+
+Malformed:
+
+```text
+ID
+timestamp
+path
+SHA
+enum
+schema version
+nested object
+location
+confidence
+artifact size
+```
+
+must be rejected.
+
+## Dependency-boundary tests
+
+Prevent core packages from importing provider SDKs.
+
+This can be enforced with:
+
+* ESLint architecture rules
+* dependency-cruiser
+* Nx boundaries
+* custom tests
+
+depending on the repository stack.
+
+---
+
+# 85. Compile-time exhaustiveness
+
+Use exhaustive switching on discriminated unions.
+
+Example:
+
+```ts
+switch (target.kind) {
+  case "pull_request":
+    ...
+    break;
+
+  case "commit":
+    ...
+    break;
+
+  case "commit_range":
+    ...
+    break;
+
+  case "working_tree":
+    ...
+    break;
+
+  default:
+    return assertNever(target);
+}
+```
+
+Implement a common:
+
+```ts
+assertNever()
+```
+
+helper.
+
+This prevents silent behavior when variants are added.
+
+---
+
+# 86. No unchecked `any`
+
+Phase 0 should contain no avoidable:
+
+```ts
+any
+```
+
+Especially prohibit it in:
+
+```text
+schemas
+provider normalization
+domain events
+error details
+metadata
+config
+```
+
+Use:
+
+```text
+unknown
+```
+
+at unsafe boundaries and validate before use.
+
+---
+
+# 87. No implementation placeholders
+
+Do not finish Phase 0 with fake production behavior such as:
+
+```ts
+throw new Error("TODO");
+```
+
+inside exported functions that appear implemented.
+
+If functionality belongs to later phases:
+
+* define the contract;
+* define the interface;
+* document it as future implementation;
+* do not pretend it works.
+
+Avoid dead mock implementations in production packages.
+
+---
+
+# 88. No AI reviewer implementation yet
+
+Do not implement:
+
+```text
+LLM prompt
+model call
+Review Agent
+Verification Agent
+Claude-like swarm
+Codex execution
+fix agent
+```
+
+in Phase 0.
+
+Only define the contracts those systems will eventually consume.
+
+This separation is intentional.
+
+---
+
+# 89. No repository cloning yet
+
+Do not implement:
+
+```text
+git clone
+worktree management
+repository caching
+```
+
+unless unavoidable for existing build integration.
+
+That belongs to later phases.
+
+Phase 0 may define:
+
+```text
+RepositorySnapshotReference
+```
+
+but not the full snapshot subsystem.
+
+---
+
+# 90. No static analyzer execution yet
+
+Do not integrate the 50+ tool ecosystem yet.
+
+Define:
+
+```text
+ToolReference
+ToolRunReference
+ToolEvidenceSource
+```
+
+only.
+
+Tool registry and execution come later.
+
+---
+
+# 91. No webhook business logic yet
+
+Do not build the complete GitHub App webhook layer.
+
+You may define provider-neutral canonical normalization interfaces.
+
+For example:
+
+```ts
+interface SourceProviderAdapter {
+  normalizeReviewTarget(...): Promise<ReviewTarget>;
+}
+```
+
+But actual GitHub webhook processing belongs to Phase 1.
+
+---
+
+# 92. Architectural interfaces to define now
+
+At minimum consider interfaces for future boundaries:
+
+```ts
+interface ReviewRequestRepository {}
+interface ReviewRunRepository {}
+interface FindingRepository {}
+interface EvidenceRepository {}
+interface ConfigSnapshotRepository {}
+
+interface SourceProviderAdapter {}
+
+interface ArtifactStore {}
+
+interface DomainEventPublisher {}
+
+interface Clock {}
+
+interface IdGenerator {}
+```
+
+Do not overabstract trivial pure functions.
+
+Focus on boundaries where external infrastructure will vary.
+
+---
+
+# 93. Clock abstraction
+
+Time-sensitive domain logic should not call:
+
+```ts
+new Date()
+```
+
+everywhere.
+
+Define a small clock interface:
+
+```ts
+interface Clock {
+  now(): Timestamp;
+}
+```
+
+Provide:
+
+```text
+SystemClock
+FixedClock
+```
+
+for deterministic tests.
+
+---
+
+# 94. ID generator abstraction
+
+Likewise:
+
+```ts
+interface IdGenerator<T> {
+  next(): T;
+}
+```
+
+or domain-specific factories.
+
+Tests must be deterministic.
+
+---
+
+# 95. Hashing abstraction
+
+If fingerprints/config hashes are introduced:
+
+```ts
+interface ContentHasher {
+  hash(data: Uint8Array | string): Checksum;
+}
+```
+
+Keep implementation swappable.
+
+---
+
+# 96. Validation error quality
+
+Errors should point to paths.
+
+Example:
+
+```text
+ReviewFinding.location.startLine:
+Expected positive integer, received 0
+```
+
+Do not return:
+
+```text
+Invalid input
+```
+
+for everything.
+
+Validation errors should be suitable for API debugging while remaining safe.
+
+---
+
+# 97. Performance considerations
+
+Contract validation must be safe for high-throughput workers.
+
+Avoid pathological schemas.
+
+Do not repeatedly validate large nested payloads unnecessarily.
+
+Large artifacts should remain references.
+
+Set maximum list sizes where appropriate.
+
+For example:
+
+```text
+finding evidence references
+path instructions
+review summary areas
+```
+
+should have sane bounds.
+
+---
+
+# 98. Backward compatibility policy
+
+Define a policy now.
+
+Example:
+
+### Patch changes
+
+Non-breaking implementation/documentation changes.
+
+### Minor contract version
+
+Backward-compatible optional fields.
+
+### Major schema version
+
+Breaking serialized shape change.
+
+Define:
+
+* how old messages are decoded;
+* how migrations happen;
+* whether workers support N and N-1;
+* what happens for unknown future versions.
+
+---
+
+# 99. Contract ownership
+
+Define which package owns each concept.
+
+Example:
+
+```text
+review-contracts/repository
+→ RepositoryId
+→ Repository
+→ RepositoryPath
+
+review-contracts/review
+→ ReviewRequest
+→ ReviewRun
+→ ReviewExecutionMode
+
+review-contracts/finding
+→ CandidateFinding
+→ ReviewFinding
+→ lifecycle
+
+review-contracts/evidence
+→ Evidence
+→ EvidenceReference
+```
+
+Do not define duplicate `RepositoryId` types in several packages.
+
+---
+
+# 100. Import discipline
+
+Public imports should come from stable package entry points.
+
+Prefer:
+
+```ts
+import {
+  ReviewRun,
+  ReviewRunId,
+} from "@acalys/review-contracts/review";
+```
+
+or a well-designed root export.
+
+Avoid deep unstable imports such as:
+
+```text
+src/internal/foo/bar.ts
+```
+
+across package boundaries.
+
+---
+
+# 101. Generated schema artifacts
+
+If JSON schemas are generated, place them in a deterministic output directory.
+
+Example:
+
+```text
+packages/review-contracts/generated/schemas/
+```
+
+Generated files must:
+
+* be reproducible;
+* be checked for drift in CI;
+* have stable names;
+* include schema version information.
+
+---
+
+# 102. Formatting and linting
+
+Phase 0 must pass the repository's existing:
+
+```text
+lint
+format
+typecheck
+test
+build
+```
+
+commands.
+
+Do not introduce a second formatter or linting philosophy unnecessarily.
+
+---
+
+# 103. CI quality gates
+
+Add CI checks for:
+
+```text
+contract tests
+schema generation drift
+TypeScript compile
+lint
+dependency boundaries
+serialization fixtures
+state-machine tests
+```
+
+If CI already exists, integrate cleanly.
+
+---
+
+# 104. Documentation examples must compile
+
+Where practical, code snippets in architecture docs should be validated or derived from real types.
+
+Do not let documentation drift immediately.
+
+---
+
+# 105. Migration from pre-existing types
+
+If the repository already contains older review-related types:
+
+1. inventory them;
+2. map them to canonical Phase 0 types;
+3. eliminate duplicate concepts;
+4. introduce adapters where needed;
+5. deprecate old exports;
+6. update internal imports;
+7. add migration notes.
+
+Do not leave:
+
+```text
+OldReviewFinding
+NewReviewFinding
+ReviewFindingV2
+CanonicalFinding
+```
+
+all existing indefinitely.
+
+---
+
+# 106. Naming quality
+
+Use precise names.
+
+Prefer:
+
+```text
+ReviewRun
+PullRequestRevision
+CandidateFinding
+VerificationSummary
+EvidenceReference
+```
+
+over:
+
+```text
+Job
+Thing
+Result
+Data
+Payload
+Info
+Item
+```
+
+Avoid generic abstractions that obscure semantics.
+
+---
+
+# 107. Domain invariants
+
+Implement and test invariants such as:
+
+```text
+ReviewRun.repositoryId
+must match
+ReviewTarget.repositoryId
+```
+
+and:
+
+```text
+PullRequestRevision.pullRequestId
+must refer to same repository context
+```
+
+and:
+
+```text
+Finding location repository
+must belong to review target repository
+```
+
+and:
+
+```text
+published finding
+must not have verification=REJECTED
+```
+
+and:
+
+```text
+resolved finding
+must have previously been published
+```
+
+Where cross-aggregate validation cannot occur inside pure schemas, document which application service must enforce it.
+
+---
+
+# 108. Domain service boundaries
+
+Identify invariants that require services.
+
+Potential pure domain services:
+
+```text
+ReviewRunTransitionService
+FindingLifecycleService
+ConfigResolutionService
+FindingFingerprintService
+RevisionSequencingService
+```
+
+Keep these deterministic and infrastructure-free.
+
+---
+
+# 109. ReviewConfig resolution
+
+Design deterministic resolution:
+
+```text
+platform defaults
+        ↓
+organization config
+        ↓
+repository config
+        ↓
+path instructions
+        ↓
+request overrides if allowed
+```
+
+Output:
+
+```text
+EffectiveReviewConfig
+```
+
+Store a snapshot before a review starts.
+
+Do not mutate configuration while a review is executing.
+
+---
+
+# 110. Provider capability model
+
+Different providers support different features.
+
+Prepare:
+
+```ts
+interface ProviderCapabilities {
+  inlineComments: boolean;
+  reviewDecision: boolean;
+  suggestionBlocks: boolean;
+  threadedComments: boolean;
+  checks: boolean;
+}
+```
+
+Do not hard-code assumptions that every provider behaves exactly like GitHub.
+
+---
+
+# 111. Publication target
+
+Define provider-neutral publication intent.
+
+Example:
+
+```ts
+interface PublicationTarget {
+  provider: SourceProvider;
+  repository: ProviderRepositoryReference;
+  changeRequest: ProviderChangeRequestReference;
+}
+```
+
+Actual API calls come later.
+
+---
+
+# 112. Local review compatibility
+
+Every contract decision should be checked against local use.
+
+Future:
+
+```text
+acalys review
+```
+
+may review:
+
+```text
+working tree
+staged changes
+HEAD~3..HEAD
+branch comparison
+```
+
+Do not require:
+
+```text
+pullRequestId
+provider
+comment thread
+```
+
+for all review runs.
+
+Use optional/provider-specific aggregates correctly.
+
+---
+
+# 113. Future `/deep-review` compatibility
+
+Phase 0 must support multiple agents without making the Finding schema agent-specific.
+
+Candidate findings should preserve producer identity:
+
+```text
+reviewer-A
+reviewer-B
+reviewer-C
+```
+
+but final findings are platform findings.
+
+Later:
+
+```text
+Candidate A
+Candidate B
+Candidate C
+      ↓
+aggregation
+      ↓
+one ReviewFinding
+```
+
+The final finding should support evidence from multiple candidate producers.
+
+---
+
+# 114. Future Codex-style execution compatibility
+
+Evidence must support future:
+
+```text
+runtime reproduction
+temporary test
+command execution
+build failure
+sandbox artifact
+```
+
+without schema redesign.
+
+Provide enough evidence/artifact references now.
+
+Do not implement execution yet.
+
+---
+
+# 115. Future 50+ analyzer compatibility
+
+Tool evidence must support:
+
+```text
+tool ID
+tool version
+rule ID
+severity
+source location
+structured properties
+artifact link
+```
+
+without assuming any one output format.
+
+Eventually SARIF may be supported, but canonical Evidence must not equal SARIF.
+
+SARIF should be one ingestion format.
+
+---
+
+# 116. Future review memory compatibility
+
+Knowledge contracts should support:
+
+```text
+repository learning
+organization learning
+path-scoped learning
+issue context
+PR history
+external documentation
+```
+
+without making every review entity depend directly on embeddings.
+
+Embedding/vector storage is an implementation detail.
+
+---
+
+# 117. Future billing compatibility
+
+Do not implement billing now.
+
+But ReviewRun should have enough stable identity to later attach usage records such as:
+
+```text
+model tokens
+sandbox seconds
+tool compute
+storage
+reviewer count
+```
+
+Usage should be a separate subsystem, not fields scattered throughout ReviewRun.
+
+---
+
+# 118. Future evaluation compatibility
+
+A review run should support attaching evaluation labels.
+
+Potential future:
+
+```text
+true positive
+false positive
+missed issue
+accepted suggestion
+dismissed finding
+```
+
+Do not bake these into production Finding lifecycle.
+
+Evaluation metadata should be separate.
+
+---
+
+# 119. Future policy engine compatibility
+
+Policy checks may refer to findings.
+
+Example:
+
+```text
+FAIL if any verified critical security finding exists.
+```
+
+Therefore provide stable queryable fields:
+
+```text
+severity
+category
+state
+verification
+repository
+revision
+```
+
+Avoid storing all meaningful semantics only inside prose.
+
+---
+
+# 120. No chain-of-thought persistence
+
+Never create contracts intended to store private model chain-of-thought.
+
+Persist only:
+
+```text
+structured hypothesis
+evidence
+tool calls if needed
+summary reasoning
+verification decision
+public explanation
+```
+
+Do not store hidden reasoning traces as a domain feature.
+
+---
+
+# 121. Security classification metadata
+
+Prepare a mechanism for sensitive artifacts.
+
+For example:
+
+```ts
+type DataClassification =
+  | "public"
+  | "tenant_private"
+  | "sensitive";
+```
+
+Useful later for:
+
+```text
+source code
+logs
+secrets detected in source
+external documents
+```
+
+Do not overcomplicate if existing security classification primitives already exist.
+
+---
+
+# 122. Redaction readiness
+
+Provider inputs and tool outputs may accidentally contain secrets.
+
+Artifact/evidence contracts should allow:
+
+```text
+redacted
+redactionReason
+```
+
+or equivalent safe handling.
+
+Do not place secret values directly into finding explanations.
+
+---
+
+# 123. Stable ordering
+
+Where serialized arrays influence hashes or reproducibility, define ordering.
+
+Examples:
+
+```text
+changed files
+language summaries
+evidence references
+path instructions
+```
+
+Either:
+
+* preserve source order intentionally; or
+* canonicalize/sort.
+
+Document it.
+
+---
+
+# 124. Equality semantics
+
+Provide equality/comparison helpers for:
+
+```text
+Git refs
+repository references
+source locations
+finding fingerprints
+provider references
+```
+
+Avoid repeated ad hoc comparisons.
+
+---
+
+# 125. Logging safety
+
+Create utilities for safe debug serialization.
+
+Do not log full:
+
+```text
+PR description
+source code
+external document
+provider payload
+```
+
+by default.
+
+Domain objects should be loggable through summarized representations.
+
+---
+
+# 126. Example end-to-end Phase 0 object relationship
+
+This should be representable after Phase 0:
+
+```text
+Organization
+    │
+    ▼
+Repository
+    │
+    ▼
+PullRequest
+    │
+    ▼
+PullRequestRevision R3
+    │
+    ▼
+ReviewRequest
+    │
+    ▼
+ReviewRun
+    │
+    ▼
+ChangeManifest
+    │
+    ▼
+CandidateFinding
+    │
+    ├── Evidence A
+    ├── Evidence B
+    └── Evidence C
+    │
+    ▼
+VerificationSummary
+    │
+    ▼
+ReviewFinding
+    │
+    ▼
+ReviewComment
+```
+
+Even though many later services producing these objects are not implemented yet.
+
+---
+
+# 127. Required Phase 0 deliverables
+
+At completion, provide all of the following.
+
+## A. Canonical contract package
+
+Production-quality implementation.
+
+## B. Runtime schemas
+
+For every externally transported/durable major contract.
+
+## C. ID/value-object utilities
+
+Including:
+
+```text
+IDs
+timestamps
+repository paths
+Git references
+checksums
+```
+
+## D. State-machine implementations
+
+At least:
+
+```text
+ReviewRun
+Finding lifecycle
+```
+
+## E. Provider-neutral abstraction definitions
+
+For future:
+
+```text
+GitHub
+GitLab
+local
+```
+
+## F. Event envelope and core domain events
+
+## G. Error taxonomy
+
+## H. Configuration model and effective config resolution
+
+At least foundational implementation.
+
+## I. Contract JSON fixtures
+
+## J. Comprehensive tests
+
+## K. Architecture documentation
+
+## L. Persistence planning
+
+## M. Dependency-boundary enforcement
+
+## N. Schema-generation/drift checks if applicable
+
+---
+
+# 128. Suggested implementation sequence
+
+Implement in this order.
+
+### Step 1 — foundational primitives
+
+```text
+Brand
+IDs
+Timestamp
+JsonValue
+Checksum
+RepositoryPath
+Git references
+Actor
+```
+
+### Step 2 — tenancy/provider
+
+```text
+Organization
+User
+Repository
+ProviderReference
+ProviderCapabilities
+```
+
+### Step 3 — targets and revisions
+
+```text
+ReviewTarget
+PullRequest
+PullRequestRevision
+GitComparison
+```
+
+### Step 4 — requests and runs
+
+```text
+ReviewRequest
+ReviewExecutionMode
+ReviewRun
+ReviewRunStateMachine
+```
+
+### Step 5 — change contracts
+
+```text
+ChangeManifest
+ChangedFile
+ChangedSymbol
+RiskSignal
+```
+
+### Step 6 — evidence
+
+```text
+Evidence
+EvidenceSource
+EvidenceReference
+ArtifactReference
+```
+
+### Step 7 — findings
+
+```text
+CandidateFinding
+VerificationSummary
+ReviewFinding
+FindingLifecycle
+FindingFingerprint
+```
+
+### Step 8 — review output
+
+```text
+ReviewSummary
+ReviewDecision
+ReviewComment
+ReviewConversation
+```
+
+### Step 9 — configuration/knowledge/tools/CI/premerge
+
+Build foundational contracts.
+
+### Step 10 — events/errors
+
+### Step 11 — schemas and fixtures
+
+### Step 12 — persistence plan
+
+### Step 13 — architecture boundary enforcement
+
+### Step 14 — exhaustive tests
+
+### Step 15 — documentation
+
+### Step 16 — final regression run
+
+---
+
+# 129. Acceptance criteria
+
+Phase 0 is complete only when all of these are true.
+
+## Architecture
+
+* provider-specific types do not leak into canonical review contracts;
+* persistence technology does not leak into domain contracts;
+* model-provider types do not leak into finding/evidence contracts;
+* review targets support PR and future non-PR reviews;
+* PR revisions are immutable first-class objects;
+* ReviewRequest and ReviewRun are separate concepts;
+* review execution mode supports single and future swarm execution;
+* candidate and verified/published findings are separate;
+* evidence is first-class;
+* verification is first-class;
+* finding lifecycle is explicit;
+* incremental-review lineage can be represented;
+* configuration snapshots can be represented;
+* artifacts are references rather than giant inline blobs;
+* events are versioned and traceable.
+
+## Type safety
+
+* no avoidable `any`;
+* external data enters through `unknown`;
+* all important boundaries use runtime schemas;
+* discriminated unions are exhaustive;
+* branded IDs prevent category mistakes.
+
+## Correctness
+
+* all state transitions are tested;
+* invalid transitions fail;
+* invalid paths fail;
+* invalid IDs fail;
+* invalid timestamps fail;
+* invalid confidence scores fail;
+* invalid line ranges fail;
+* invalid schema versions fail.
+
+## Distributed-system readiness
+
+* idempotency is modeled;
+* correlation/causation can be modeled;
+* retryability is represented;
+* supersession is represented;
+* cancellation is represented or explicitly delegated;
+* immutable revision/config identities exist.
+
+## Testing
+
+All:
+
+```text
+typecheck
+lint
+unit tests
+contract tests
+fixture tests
+build
+```
+
+must pass.
+
+No skipped failing tests.
+
+No commented-out tests.
+
+No test-only hacks in production code.
+
+---
+
+# 130. Required final report
+
+When Phase 0 is finished, return a concise but technically detailed report containing:
+
+## 1. What was implemented
+
+List packages/modules.
+
+## 2. Final architecture
+
+Show package dependency diagram.
+
+## 3. Canonical domain model
+
+Show main relationships.
+
+## 4. State machines
+
+Show ReviewRun and Finding lifecycle.
+
+## 5. Runtime validation
+
+Explain schema strategy.
+
+## 6. Provider isolation
+
+Explain how GitHub/GitLab/local adapters will plug in.
+
+## 7. Persistence readiness
+
+Explain mapping and planned database tables.
+
+## 8. Event architecture
+
+Explain event envelope and meaningful domain events.
+
+## 9. Tests
+
+Provide exact counts where available.
+
+## 10. Build status
+
+Show results of:
+
+```text
+typecheck
+lint
+test
+build
+```
+
+## 11. Known limitations
+
+Only real remaining Phase 0 limitations.
+
+## 12. Phase 1 readiness
+
+Explicitly state exactly which interfaces Phase 1 should implement next.
+
+---
+
+# 131. Engineering quality bar
+
+Treat this code as the foundation of a serious cloud developer platform.
+
+Do not optimize for:
+
+```text
+fast demo
+few files
+minimum code
+temporary architecture
+```
+
+Optimize for:
+
+```text
+correct domain boundaries
+maintainability
+testability
+versionability
+distributed-system safety
+provider neutrality
+clear ownership
+future extensibility
+security
+observability
+production operation
+```
+
+At the same time, avoid speculative abstraction that has no foreseeable consumer.
+
+Every abstraction should solve a concrete future architectural requirement described above.
+
+---
+
+# 132. Critical architectural invariants
+
+These are non-negotiable.
+
+```text
+GitHub != domain model
+
+PullRequest != PullRequestRevision
+
+ReviewRequest != ReviewRun
+
+CandidateFinding != ReviewFinding
+
+Evidence != Finding
+
+Review finding != Pre-merge check
+
+Review Agent != provider API
+
+Configuration source != effective config
+
+Large tool output != queue payload
+
+Provider ID != Acalys ID
+
+Schema type != trusted runtime object
+
+/review and /deep-review != separate review engines
+```
+
+And most importantly:
+
+```text
+                   Provider Adapters
+                          ↓
+                Canonical Contracts
+                          ↓
+                 Review Platform
+                          ↓
+                  Agent Runtime
+```
+
+Never reverse that dependency direction.
+
+---
+
+# 133. Phase 0 definition of done
+
+Phase 0 is done when the repository possesses a **coherent, versioned, runtime-validated, provider-neutral canonical language for describing the entire Acalys Review lifecycle**, even though the services that perform those operations will be implemented in later phases.
+
+At that point Phase 1 should be able to implement:
+
+```text
+GitHub App
+   ↓
+Webhook normalization
+   ↓
+ReviewTarget
+   ↓
+PullRequest
+   ↓
+PullRequestRevision
+   ↓
+ReviewRequest
+   ↓
+ReviewRun
+```
+
+without modifying the fundamental Phase 0 domain contracts.
+
+If implementing Phase 1 immediately requires redesigning the central domain model, Phase 0 was not complete enough.
+
+Build Phase 0 so that later systems plug into it rather than rewrite it.

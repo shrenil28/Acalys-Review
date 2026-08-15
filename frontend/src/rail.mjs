@@ -1,0 +1,21 @@
+import fs from "node:fs";
+const t=(await(await fetch("http://127.0.0.1:9222/json/list")).json()).find(x=>x.type==="page");
+const ws=new WebSocket(t.webSocketDebuggerUrl);let id=0;const pend=new Map();const errs=[];
+const send=(m,p={})=>new Promise(r=>{const i=++id;pend.set(i,r);ws.send(JSON.stringify({id:i,method:m,params:p}))});
+ws.addEventListener("message",e=>{const m=JSON.parse(e.data);
+ if(m.id&&pend.has(m.id)){pend.get(m.id)(m);pend.delete(m.id)}
+ if(m.method==="Runtime.exceptionThrown")errs.push(m.params.exceptionDetails.exception?.description?.split("\n")[0]);});
+await new Promise(r=>ws.addEventListener("open",r));
+await send("Runtime.enable");await send("Page.enable");
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const ev=async x=>(await send("Runtime.evaluate",{expression:x,returnByValue:true})).result.result.value;
+await ev(`localStorage.setItem("cr:sidebar-collapsed","true")`);
+await send("Page.navigate",{url:"http://localhost:5173/"});await sleep(2500);
+console.log("avatar in rail:", await ev(`(()=>{const b=document.querySelector('aside [aria-label="Account menu"]');if(!b)return 'MISSING';const r=b.getBoundingClientRect();return {x:Math.round(r.x),y:Math.round(r.y),atBottom:r.y>600};})()`));
+await ev(`document.querySelector('aside [aria-label="Account menu"]').click()`);
+await sleep(400);
+console.log("menu opened:", await ev(`(()=>{const rows=[...document.querySelectorAll('button')].map(b=>b.textContent.trim());return {profile:rows.includes('Profile Settings'),logout:rows.includes('Log out'),theme:rows.some(r=>r==='')};})()`));
+console.log("header divider:", await ev(`getComputedStyle(document.querySelector('header')).borderBottomWidth`));
+console.log("errors:", errs.length?errs.slice(0,2):"none");
+const s=await send("Page.captureScreenshot",{format:"png"});fs.writeFileSync("rail_proof.png",Buffer.from(s.result.data,"base64"));
+ws.close();

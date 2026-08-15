@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+
+# Editor / OS
+.DS_Store
+.idea/
+*.swp
+
+# Tooling caches
+.eslintcache
+.vitest/
+.turbo/

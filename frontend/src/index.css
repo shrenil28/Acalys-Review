@@ -1,0 +1,156 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Two themes. `:root` holds light; `.dark` overrides it. The dark ramp is
+  sampled from app.coderabbit.ai (a 305° hue ramp); light is its counterpart.
+  Chart colours are duplicated as hex because Chrome rejects oklch() inside
+  SVG presentation attributes.
+*/
+@layer base {
+  :root {
+    --cr-canvas: oklch(0.977 0.0015 286);
+    --cr-shell: oklch(0.958 0.002 286);
+    --cr-surface: oklch(1 0 0);
+    --cr-surface-raised: oklch(0.988 0.001 286);
+    --cr-line: oklch(0.922 0.003 286);
+    --cr-line-strong: oklch(0.861 0.005 286);
+
+    --cr-fg: oklch(0.23 0.006 286);
+    --cr-fg-muted: oklch(0.44 0.008 286);
+    --cr-fg-subtle: oklch(0.56 0.009 286);
+    --cr-fg-faint: oklch(0.68 0.008 286);
+
+    --cr-brand: oklch(0.63 0.19 45);
+    --cr-brand-soft: oklch(0.955 0.035 62);
+    --cr-brand-border: oklch(0.85 0.08 58);
+
+    --cr-ok: oklch(0.58 0.15 149.579);
+    --cr-warn: oklch(0.65 0.16 70);
+    --cr-danger: oklch(0.55 0.22 25.331);
+    --cr-info: oklch(0.55 0.18 254.624);
+    --cr-purple: oklch(0.55 0.2 305.504);
+
+    --cr-hover: oklch(0 0 0 / 0.045);
+    --cr-active: oklch(0 0 0 / 0.08);
+
+    --cr-chart-grid: #e4e4e7;
+    --cr-chart-tick: #71717a;
+    --cr-chart-legend: #52525b;
+    --cr-chart-cursor: rgba(0, 0, 0, 0.04);
+  }
+
+  .dark {
+    --cr-canvas: oklch(0.213 0.0098 305);
+    --cr-shell: oklch(0.177 0.0084 305);
+    --cr-surface: oklch(0.252 0.0112 305);
+    --cr-surface-raised: oklch(0.288 0.0126 305);
+    --cr-line: oklch(0.312 0.014 305);
+    --cr-line-strong: oklch(0.401 0.0161 305);
+
+    --cr-fg: oklch(0.949 0.0035 305);
+    --cr-fg-muted: oklch(0.767 0.0105 305);
+    --cr-fg-subtle: oklch(0.585 0.0161 305);
+    --cr-fg-faint: oklch(0.401 0.0161 305);
+
+    --cr-brand: oklch(0.75 0.183 55.934);
+    --cr-brand-soft: oklch(0.286 0.066 53.813);
+    --cr-brand-border: oklch(0.408 0.1 57.5);
+
+    --cr-ok: oklch(0.723 0.176 149.579);
+    --cr-warn: oklch(0.795 0.184 86.047);
+    --cr-danger: oklch(0.637 0.237 25.331);
+    --cr-info: oklch(0.707 0.165 254.624);
+    --cr-purple: oklch(0.714 0.203 305.504);
+
+    --cr-hover: oklch(1 0 0 / 0.06);
+    --cr-active: oklch(1 0 0 / 0.09);
+
+    --cr-chart-grid: #3b3740;
+    --cr-chart-tick: #8b8493;
+    --cr-chart-legend: #b9b4bf;
+    --cr-chart-cursor: rgba(255, 255, 255, 0.04);
+  }
+
+  * {
+    border-color: var(--cr-line);
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--cr-canvas);
+    color: var(--cr-fg);
+    font-family: Geist, ui-sans-serif, system-ui, sans-serif;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* CodeRabbit uses thin, low-contrast scrollbars throughout the app chrome. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--cr-line);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--cr-line-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--cr-brand);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .hover-surface {
+    background-color: transparent;
+    transition: background-color 120ms ease;
+  }
+  .hover-surface:hover {
+    background-color: var(--cr-hover);
+  }
+}
+
+@layer utilities {
+  .bg-hover {
+    background-color: var(--cr-hover);
+  }
+  .bg-active {
+    background-color: var(--cr-active);
+  }
+  .grid-lines {
+    background-image: linear-gradient(
+        to right,
+        var(--cr-line) 1px,
+        transparent 1px
+      ),
+      linear-gradient(to bottom, var(--cr-line) 1px, transparent 1px);
+    background-size: 32px 32px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

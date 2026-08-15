@@ -1,0 +1,11 @@
+const t=(await(await fetch("http://127.0.0.1:9222/json/list")).json()).find(x=>x.type==="page");
+const ws=new WebSocket(t.webSocketDebuggerUrl);let id=0;const pend=new Map();
+const send=(m,p={})=>new Promise(r=>{const i=++id;pend.set(i,r);ws.send(JSON.stringify({id:i,method:m,params:p}))});
+ws.addEventListener("message",e=>{const m=JSON.parse(e.data);if(m.id&&pend.has(m.id)){pend.get(m.id)(m);pend.delete(m.id)}});
+await new Promise(r=>ws.addEventListener("open",r));
+await send("Runtime.enable");
+const ev=async x=>(await send("Runtime.evaluate",{expression:x,returnByValue:true})).result.result.value;
+await new Promise(r=>setTimeout(r,2500));
+console.log(await ev(`(()=>{const el=document.querySelector('#root > div');const cs=getComputedStyle(el);const r=el.getBoundingClientRect();
+ return {cls:el.className.slice(0,60), borderTop:cs.borderTopWidth+' '+cs.borderTopColor, top:r.top, height:Math.round(r.height), viewport:window.innerHeight, rootH:getComputedStyle(document.getElementById('root')).height};})()`));
+ws.close();

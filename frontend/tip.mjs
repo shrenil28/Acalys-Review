@@ -1,0 +1,16 @@
+const t=(await(await fetch("http://127.0.0.1:9222/json/list")).json()).find(x=>x.type==="page");
+const ws=new WebSocket(t.webSocketDebuggerUrl);let id=0;const pend=new Map();
+const send=(m,p={})=>new Promise(r=>{const i=++id;pend.set(i,r);ws.send(JSON.stringify({id:i,method:m,params:p}))});
+ws.addEventListener("message",e=>{const m=JSON.parse(e.data);if(m.id&&pend.has(m.id)){pend.get(m.id)(m);pend.delete(m.id)}});
+await new Promise(r=>ws.addEventListener("open",r));
+await send("Runtime.enable");await send("Page.enable");
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const ev=async x=>(await send("Runtime.evaluate",{expression:x,returnByValue:true})).result.result.value;
+await ev(`localStorage.setItem("cr:sidebar-collapsed","true")`);
+await send("Page.navigate",{url:"http://localhost:5173/"});await sleep(2500);
+const box=await ev(`(()=>{const el=document.querySelector('aside a[aria-label="Explore"]');const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,iconTop:Math.round(r.top),iconRight:Math.round(r.right)};})()`);
+await send("Input.dispatchMouseEvent",{type:"mouseMoved",x:box.x,y:box.y,buttons:0});
+await sleep(500);
+console.log("icon:", box);
+console.log("tooltip:", await ev(`(()=>{const tip=document.querySelector('[role=tooltip]');if(!tip)return 'MISSING';const r=tip.getBoundingClientRect();return {text:tip.textContent,left:Math.round(r.left),top:Math.round(r.top)};})()`));
+ws.close();
