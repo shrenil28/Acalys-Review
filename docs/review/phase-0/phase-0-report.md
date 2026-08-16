@@ -310,6 +310,10 @@ Seven commits, one per checkpoint, each bisectable.
 
 ## 11. Limitations — what Phase 0 does **not** do
 
+> **Acalys today is a production-quality foundation for a CodeRabbit-class review system.
+> It is not a production-quality review system.** Those are different claims, and only the
+> first is supported by this report.
+
 Stated plainly rather than implied:
 
 - **No reviewer.** No prompt, no model call, no agent of any kind (§89).
