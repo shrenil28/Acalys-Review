@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "id": "0192f8a1-0000-7000-8000-0000000000c7",
+  "repositoryId": "0192f8a1-0000-7000-8000-000000000002",
+  "config": {
+    "schemaVersion": 1,
+    "review": {
+      "trigger": "on_push",
+      "depth": "standard",
+      "reviewDrafts": false,
+      "supersedeOnPush": true,
+      "categories": [
+        "correctness",
+        "security",
+        "reliability",
+        "concurrency",
+        "data_integrity",
+        "performance",
+        "resource_management",
+        "api_contract",
+        "compatibility",
+        "migration",
+        "testing",
+        "maintainability",
+        "configuration",
+        "dependency",
+        "other"
+      ]
+    },
+    "paths": [
+      {
+        "id": "org.acme.migrations",
+        "glob": "db/migrations/*.sql",
+        "instructions": "Flag destructive DDL that ships without a rollback path.",
+        "priority": 10
+      }
+    ],
+    "tools": {
+      "enabled": true,
+      "allowed": [],
+      "denied": ["tool.semgrep"],
+      "timeoutSeconds": 300
+    },
+    "knowledge": {
+      "learningsEnabled": true,
+      "useLinkedIssues": true,
+      "useRepositoryInstructions": true,
+      "useExternalSources": false
+    },
+    "premerge": {
+      "enabled": true,
+      "checks": ["acalys.premerge.description", "acalys.premerge.title"],
+      "blockingChecks": ["acalys.premerge.title"]
+    },
+    "publication": {
+      "postSummary": true,
+      "postInlineComments": true,
+      "postSuggestedFixes": true,
+      "minSeverityToPublish": "low",
+      "minConfidenceToPublish": 0.5,
+      "maxCommentsPerRun": 50,
+      "submitReviewDecision": true
+    }
+  },
+  "sourceHash": {
+    "algorithm": "sha256",
+    "value": "c4a1e7b30d5f28196a3c7e2b5d8f104963a2c7b5d8e1f4096b3a7c2d5e8f1049"
+  },
+  "layers": ["platform_default", "organization", "repository"],
+  "createdAt": "2026-08-16T10:00:00.000Z"
+}

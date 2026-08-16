@@ -29,10 +29,15 @@
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "schemas:generate": "tsx scripts/generate-schemas.ts",
+    "schemas:check": "tsx scripts/generate-schemas.ts --check"
   },
   "dependencies": {
     "uuidv7": "^1.0.2",
     "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.12"
   }
 }

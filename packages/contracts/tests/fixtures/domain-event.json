@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "0192f8a1-0000-7000-8000-0000000000e1",
+  "type": "finding.published",
+  "occurredAt": "2026-08-16T10:03:58.000Z",
+  "organizationId": "0192f8a1-0000-7000-8000-000000000001",
+  "trace": {
+    "correlationId": "0192f8a1-0000-7000-8000-0000000000d0",
+    "causationId": "0192f8a1-0000-7000-8000-0000000000d4",
+    "traceId": "4bf92f3577b34da6a3ce929d0e0e4736"
+  },
+  "payload": {
+    "repositoryId": "0192f8a1-0000-7000-8000-000000000002",
+    "reviewRunId": "0192f8a1-0000-7000-8000-000000000003",
+    "findingId": "0192f8a1-0000-7000-8000-000000000008",
+    "severity": "critical",
+    "category": "security"
+  }
+}

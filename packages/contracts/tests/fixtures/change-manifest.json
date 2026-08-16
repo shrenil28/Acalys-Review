@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "repositoryId": "0192f8a1-0000-7000-8000-000000000002",
+  "revisionId": "0192f8a1-0000-7000-8000-000000000006",
+  "comparison": {
+    "base": {
+      "algorithm": "sha1",
+      "value": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+    },
+    "head": {
+      "algorithm": "sha1",
+      "value": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c"
+    },
+    "mergeBase": {
+      "algorithm": "sha1",
+      "value": "0011223344556677889900aabbccddeeff001122"
+    }
+  },
+  "files": [
+    {
+      "path": "src/auth/session.ts",
+      "status": "modified",
+      "additions": 64,
+      "deletions": 12,
+      "binary": false,
+      "language": "lang.typescript"
+    },
+    {
+      "path": "src/stream/sse.ts",
+      "status": "added",
+      "additions": 210,
+      "deletions": 0,
+      "binary": false,
+      "language": "lang.typescript"
+    },
+    {
+      "path": "src/stream/sse.test.ts",
+      "status": "added",
+      "additions": 138,
+      "deletions": 0,
+      "binary": false,
+      "language": "lang.typescript"
+    }
+  ],
+  "stats": {
+    "filesChanged": 3,
+    "additions": 412,
+    "deletions": 12,
+    "filesAdded": 2,
+    "filesModified": 1,
+    "filesDeleted": 0,
+    "filesRenamed": 0,
+    "binaryFiles": 0,
+    "generatedFiles": 0
+  },
+  "languages": [
+    {
+      "language": "lang.typescript",
+      "files": 3,
+      "additions": 412,
+      "deletions": 12
+    }
+  ],
+  "riskSignals": [
+    {
+      "id": "acalys.risk.auth-surface",
+      "summary": "Session verification changed alongside a new streaming path.",
+      "paths": ["src/auth/session.ts"]
+    }
+  ],
+  "truncated": false,
+  "generatedAt": "2026-08-16T10:00:12.000Z"
+}

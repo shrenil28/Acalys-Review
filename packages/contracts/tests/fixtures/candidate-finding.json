@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "0192f8a1-0000-7000-8000-000000000007",
+  "reviewRunId": "0192f8a1-0000-7000-8000-000000000003",
+  "title": "SQL injection in Session.verify",
+  "claim": "The `token` request parameter reaches the query template in Session.verify without parameterization, so a crafted token alters the executed SQL.",
+  "explanation": "`Session.verify` interpolates the caller-supplied token directly into a template-literal query. Any caller able to reach the session endpoint can append arbitrary SQL, which runs with the application's database role.",
+  "category": "security",
+  "proposedSeverity": "critical",
+  "proposedConfidence": {
+    "score": 0.71,
+    "level": "high"
+  },
+  "location": {
+    "repositoryId": "0192f8a1-0000-7000-8000-000000000002",
+    "path": "src/auth/session.ts",
+    "side": "head",
+    "lines": {
+      "start": 82,
+      "end": 84
+    },
+    "symbol": {
+      "name": "verify",
+      "kind": "method",
+      "qualifiedName": "auth.Session.verify",
+      "container": "Session"
+    }
+  },
+  "evidence": [
+    {
+      "evidenceId": "0192f8a1-0000-7000-8000-00000000000a"
+    }
+  ],
+  "producedBy": {
+    "kind": "agent",
+    "agentType": "reviewer",
+    "agentRunId": "review-3f2a-01"
+  },
+  "createdAt": "2026-08-16T10:01:30.000Z"
+}

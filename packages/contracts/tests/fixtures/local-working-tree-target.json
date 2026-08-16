@@ -1,0 +1,13 @@
+{
+  "kind": "working_tree",
+  "schemaVersion": 1,
+  "repositoryId": "0192f8a1-0000-7000-8000-000000000002",
+  "baseline": {
+    "name": "main",
+    "objectId": {
+      "algorithm": "sha1",
+      "value": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d"
+    }
+  },
+  "stagedOnly": false
+}

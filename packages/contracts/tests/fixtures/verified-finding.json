@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "id": "0192f8a1-0000-7000-8000-000000000008",
+  "organizationId": "0192f8a1-0000-7000-8000-000000000001",
+  "repositoryId": "0192f8a1-0000-7000-8000-000000000002",
+  "reviewRunId": "0192f8a1-0000-7000-8000-000000000003",
+  "revisionId": "0192f8a1-0000-7000-8000-000000000006",
+  "candidateIds": ["0192f8a1-0000-7000-8000-000000000007"],
+  "title": "SQL injection in Session.verify",
+  "explanation": "`Session.verify` interpolates the caller-supplied token directly into a template-literal query. Any caller able to reach the session endpoint can append arbitrary SQL, which runs with the application's database role.",
+  "category": "security",
+  "severity": "critical",
+  "confidence": {
+    "score": 0.96,
+    "level": "very_high"
+  },
+  "location": {
+    "repositoryId": "0192f8a1-0000-7000-8000-000000000002",
+    "path": "src/auth/session.ts",
+    "side": "head",
+    "lines": {
+      "start": 82,
+      "end": 84
+    },
+    "symbol": {
+      "name": "verify",
+      "kind": "method",
+      "qualifiedName": "auth.Session.verify",
+      "container": "Session"
+    }
+  },
+  "evidence": [
+    {
+      "evidenceId": "0192f8a1-0000-7000-8000-00000000000a"
+    },
+    {
+      "evidenceId": "0192f8a1-0000-7000-8000-00000000000b"
+    }
+  ],
+  "fingerprint": {
+    "algorithm": "acalys.fingerprint.symbol-anchor",
+    "algorithmVersion": 1,
+    "value": "7c5e2a90b4d8f1063e9a2c7b5d4f8e1069a3b7c2d5e8f1046b9c3a7d2e5f8104"
+  },
+  "verification": {
+    "decision": "verified",
+    "reasonCodes": ["confirmed_by_runtime", "confirmed_by_static_trace"],
+    "evidence": [
+      {
+        "evidenceId": "0192f8a1-0000-7000-8000-00000000000a"
+      },
+      {
+        "evidenceId": "0192f8a1-0000-7000-8000-00000000000b"
+      }
+    ],
+    "confidence": {
+      "score": 0.96,
+      "level": "very_high"
+    },
+    "verifiedBy": {
+      "kind": "agent",
+      "agentType": "verifier",
+      "agentRunId": "verify-3f2a-01"
+    },
+    "summary": "Reproduced against the head revision with a crafted token.",
+    "verifiedAt": "2026-08-16T10:03:20.000Z"
+  },
+  "state": "published",
+  "history": [
+    {
+      "from": "verified",
+      "to": "published",
+      "at": "2026-08-16T10:03:58.000Z"
+    }
+  ],
+  "createdAt": "2026-08-16T10:03:48.000Z",
+  "updatedAt": "2026-08-16T10:03:58.000Z"
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "0192f8a1-0000-7000-8000-00000000000b",
+  "reviewRunId": "0192f8a1-0000-7000-8000-000000000003",
+  "type": "runtime",
+  "provenance": {
+    "kind": "agent",
+    "agentType": "verifier",
+    "agentRunId": "verify-3f2a-01"
+  },
+  "strength": "deterministic",
+  "summary": "Crafted session token executed the injected clause against the test database.",
+  "location": {
+    "repositoryId": "0192f8a1-0000-7000-8000-000000000002",
+    "path": "src/auth/session.ts",
+    "side": "head",
+    "lines": { "start": 82, "end": 84 }
+  },
+  "createdAt": "2026-08-16T10:03:20.000Z"
+}

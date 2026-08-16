@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Acalys Review — cloud code-review platform",
+  "description": "Acalys Review \u2014 cloud code-review platform",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -20,7 +20,7 @@
     "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
     "schemas:generate": "npm run schemas:generate --workspace @acalys/contracts",
     "schemas:check": "npm run schemas:check --workspace @acalys/contracts",
-    "verify": "npm run typecheck && npm run lint && npm run depcruise && npm run test"
+    "verify": "npm run typecheck && npm run lint && npm run depcruise && npm run schemas:check && npm run test"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
