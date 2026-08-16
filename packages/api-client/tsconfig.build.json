@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": "src",
+    "outDir": "dist",
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true
+  },
+  // A project reference, not a build-order convention: `tsc -b` builds
+  // contracts first and resolves the `paths` above to its emitted
+  // declarations. Without it, this package would compile only when someone
+  // remembered to build contracts beforehand.
+  "references": [{ "path": "../contracts/tsconfig.build.json" }],
+  "include": ["src"]
+}

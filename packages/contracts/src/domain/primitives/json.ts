@@ -34,6 +34,44 @@ export type JsonObject = { readonly [key: string]: JsonValue };
 export type JsonValue = JsonPrimitive | JsonArray | JsonObject;
 
 /**
+ * An object that is *about to be* serialized, as opposed to one already
+ * serialized.
+ *
+ * The difference is `undefined`. {@link JsonObject} describes JSON as it
+ * exists on the wire, where a key is either present with a value or absent —
+ * there is no `undefined` in JSON. But a TypeScript object with an optional
+ * field has `undefined` as a possible value *before* serialization, and under
+ * `exactOptionalPropertyTypes` that makes `{ reason?: string }` fail to
+ * satisfy `JsonObject` even though it serializes perfectly.
+ *
+ * Both types are needed and neither substitutes for the other:
+ *
+ * | Use | Type |
+ * | --- | --- |
+ * | a value parsed *from* JSON | {@link JsonObject} |
+ * | a value that will be written *to* JSON | `JsonSerializableObject` |
+ *
+ * The looser type is safe because dropping an undefined-valued key is exactly
+ * what both `JSON.stringify` and {@link canonicalJson} do, deterministically
+ * and by the same rule as §57's "absent means absent". Inside an *array*,
+ * `undefined` remains an error in both — there is no key to drop, and the
+ * position would silently become `null`. That asymmetry is why
+ * {@link JsonSerializableValue} permits `undefined` at object values but not
+ * at array elements.
+ *
+ * The relaxation is **recursive**. A domain object nests: a `ReviewTarget`
+ * holds a `ProviderChangeRequestReference` whose `number` is optional, three
+ * levels down. Loosening only the top level would reject it for a reason the
+ * author could not see from the field they were writing.
+ */
+export type JsonSerializableValue =
+  JsonPrimitive | readonly JsonSerializableValue[] | JsonSerializableObject;
+
+export type JsonSerializableObject = {
+  readonly [key: string]: JsonSerializableValue | undefined;
+};
+
+/**
  * Runtime counterpart of {@link JsonValue}.
  *
  * Finite-number checking is the part that matters: `z.number()` alone accepts

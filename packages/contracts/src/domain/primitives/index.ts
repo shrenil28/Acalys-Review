@@ -3,6 +3,8 @@ export { assertNever } from "./assert-never.js";
 export {
   type JsonArray,
   type JsonObject,
+  type JsonSerializableObject,
+  type JsonSerializableValue,
   type JsonPrimitive,
   type JsonValue,
   isJsonValue,

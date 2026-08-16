@@ -2,7 +2,13 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    // `composite` makes this project referenceable, so dependents build it
+    // first via `tsc -b` rather than relying on the order npm happens to walk
+    // the workspaces in.
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true
   },
   "include": ["src"]
 }

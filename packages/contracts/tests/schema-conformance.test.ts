@@ -172,6 +172,32 @@ import {
   reviewConfigSnapshotSchema,
   type ReviewConfigSnapshot,
 } from "../src/domain/configuration/config-snapshot.js";
+import {
+  traceContextSchema,
+  type TraceContext,
+} from "../src/internal/events/envelope.js";
+import {
+  apiErrorDtoSchema,
+  conversationDtoSchema,
+  findingDtoSchema,
+  knowledgeItemDtoSchema,
+  preMergeCheckDtoSchema,
+  pullRequestSummaryDtoSchema,
+  repositoryDtoSchema,
+  reviewProgressEventSchema,
+  reviewRunDtoSchema,
+  reviewSummaryDtoSchema,
+  type ApiErrorDto,
+  type ConversationDto,
+  type FindingDto,
+  type KnowledgeItemDto,
+  type PreMergeCheckDto,
+  type PullRequestSummaryDto,
+  type RepositoryDto,
+  type ReviewProgressEvent,
+  type ReviewRunDto,
+  type ReviewSummaryDto,
+} from "../src/api/v1/index.js";
 
 /**
  * Guards the one thing P0.txt §54 asks for and that nothing else checks: the
@@ -298,6 +324,23 @@ describe("schema/type conformance (P0.txt §54)", () => {
     );
     assertSchemaMatchesInterface<ReviewConfigSnapshot>()(
       reviewConfigSnapshotSchema,
+    );
+
+    // Checkpoint D2 — the internal envelope and every public DTO
+    assertSchemaMatchesInterface<TraceContext>()(traceContextSchema);
+    assertSchemaMatchesInterface<ApiErrorDto>()(apiErrorDtoSchema);
+    assertSchemaMatchesInterface<RepositoryDto>()(repositoryDtoSchema);
+    assertSchemaMatchesInterface<PullRequestSummaryDto>()(
+      pullRequestSummaryDtoSchema,
+    );
+    assertSchemaMatchesInterface<ReviewRunDto>()(reviewRunDtoSchema);
+    assertSchemaMatchesInterface<ReviewSummaryDto>()(reviewSummaryDtoSchema);
+    assertSchemaMatchesInterface<FindingDto>()(findingDtoSchema);
+    assertSchemaMatchesInterface<ConversationDto>()(conversationDtoSchema);
+    assertSchemaMatchesInterface<PreMergeCheckDto>()(preMergeCheckDtoSchema);
+    assertSchemaMatchesInterface<KnowledgeItemDto>()(knowledgeItemDtoSchema);
+    assertSchemaMatchesInterface<ReviewProgressEvent>()(
+      reviewProgressEventSchema,
     );
 
     expect(true).toBe(true);

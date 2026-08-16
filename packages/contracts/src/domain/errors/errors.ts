@@ -28,7 +28,13 @@ import type { JsonValue } from "../primitives/json.js";
  *   decide. A provider 503 is retryable; a provider 422 is not, and both
  *   surface as `ProviderError`.
  */
-export type Retryability = "retryable" | "non_retryable" | "conditional";
+export const RETRYABILITIES = [
+  "retryable",
+  "non_retryable",
+  "conditional",
+] as const;
+
+export type Retryability = (typeof RETRYABILITIES)[number];
 
 /**
  * The wire form of an error: what an API response or a persisted job failure

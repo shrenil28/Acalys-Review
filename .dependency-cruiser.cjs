@@ -92,6 +92,22 @@ module.exports = {
       to: { path: "^packages/contracts/src/internal" },
     },
     {
+      name: "api-client-must-not-import-internal",
+      severity: "error",
+      comment:
+        "The typed SDK is what apps/web calls. Anything it can import, the UI can transitively see, so it is held to the same boundary as the UI itself.",
+      from: { path: "^packages/api-client" },
+      to: { path: "^packages/contracts/src/internal" },
+    },
+    {
+      name: "api-client-must-not-import-domain",
+      severity: "error",
+      comment:
+        "The SDK speaks DTOs. Importing the domain layer would put branded ids and execution contracts on the wire path, and would make a domain refactor a client-breaking change.",
+      from: { path: "^packages/api-client" },
+      to: { path: "^packages/contracts/src/domain" },
+    },
+    {
       name: "backend-must-not-import-web",
       severity: "error",
       comment:
