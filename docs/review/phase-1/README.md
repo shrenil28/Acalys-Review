@@ -106,33 +106,75 @@ until users complain.
 
 So Phase 1 ships an evaluation corpus alongside the reviewer, not after it.
 
-**The corpus.** Several hundred real pull requests, frozen: known defects, and clean
-changes that must produce nothing. Clean changes matter as much as buggy ones — a reviewer
-that finds problems everywhere scores well on recall and gets turned off.
+### Four buckets, not one benchmark
 
-**Measured on every reviewer change:**
+A single undifferentiated corpus produces a single aggregate score, and an aggregate that
+moved tells you something broke without telling you _what_. Split by what each bucket is
+capable of detecting, a regression names its own cause.
+
+| Bucket                    | Contents                                                                                                     | Detects a regression in                      |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------- |
+| **Positive correctness**  | known bugs with precise expected findings                                                                    | the analyzer, and context planning           |
+| **Clean PRs**             | changes that must produce nothing                                                                            | the verifier, and false-positive suppression |
+| **Incremental sequences** | one PR across 2–5 revisions                                                                                  | fingerprinting and reconciliation            |
+| **Adversarial**           | misleading comments, prompt injection, huge diffs, generated files, odd Git histories, contradictory context | robustness and safety                        |
+
+The mapping is the point. If recall drops, the analyzer or the context it was given
+changed. If false positives per PR rise while recall holds, the verifier or the
+suppression stage did. If stability drops while both hold, fingerprinting or
+reconciliation did. Three different investigations, distinguished before anyone opens a
+log.
+
+**Clean PRs are not filler.** A reviewer that finds problems everywhere scores well on
+recall and gets turned off. This bucket is the only thing that measures the failure mode
+that actually loses users.
+
+**Incremental sequences are the bucket most likely to be skipped**, because they are the
+most tedious to assemble — you need real consecutive revisions, not synthetic ones. They
+are also the only way to observe the property the fingerprint contract exists for. The
+contract makes stability _possible_; only this bucket proves it _happens_.
+
+### Metrics, by bucket
 
 ```
-precision                      false positives / PR
-recall                         duplicate finding rate
-critical bug recall            verification rejection rate
-security bug recall            finding stability across pushes
-severity calibration           resolved-finding detection
-confidence calibration         comment usefulness
-latency                        tokens / review          cost / review
+positive        recall · critical bug recall · security bug recall · severity calibration
+clean           false positives / PR · comment usefulness
+positive+clean  precision · confidence calibration
+incremental     finding stability · resolved-finding detection · duplicate finding rate
+adversarial     pass/fail only — see below
+all buckets     latency · tokens per review · cost per review
 ```
+
+`precision` deliberately spans two buckets: computed on positives alone it flatters any
+reviewer that only speaks when certain, and on clean PRs alone it is undefined. It is only
+meaningful over both.
+
+**Cost per review** is measured everywhere and is easy to omit. A reviewer that is
+excellent and uneconomic is not shippable, and cost regressions are otherwise silent.
+
+### The adversarial bucket is scored differently
+
+It is not graded on precision and recall. It is graded pass/fail on things the reviewer
+must **never** do, regardless of how good its findings are:
+
+- act on an instruction embedded in source, a comment, or a linked issue
+- emit a secret into a finding, an artifact, or a log
+- fail unbounded on a huge diff rather than truncating and saying so
+- treat a misleading comment as ground truth over the code it describes
+
+A reviewer can score well on the other three buckets and fail here, and that combination
+ships an incident rather than a weak product. Grading it on the same scale would let a
+strong average hide it.
+
+### Thresholds
 
 **Selected regressions are CI-blocking.** Which ones, and at what thresholds, is a decision
-to make once there is a baseline — setting thresholds before any measurement would be
-guessing. But the _gate_ is designed in now, so the reviewer is built against it rather
-than measured after the fact.
+to make once there is a baseline — a number invented beforehand gets tuned to whatever the
+reviewer happens to do rather than to what is acceptable. The _gate_ is designed in now, so
+the reviewer is built against it rather than measured after the fact.
 
-Two of these deserve emphasis because they are easy to omit:
-
-- **Finding stability across pushes.** The fingerprint contract makes stability
-  _possible_; only an eval over real consecutive revisions proves it _happens_.
-- **Cost per review.** A reviewer that is excellent and uneconomic is not shippable, and
-  cost regressions are silent without a gate.
+The adversarial bucket is the exception: it is CI-blocking from the first run, because its
+criteria are absolute rather than comparative and there is no baseline to establish.
 
 ---
 
@@ -176,8 +218,8 @@ Phase 1 is complete when all of these hold:
 2. A push produces an incremental review, and every prior finding is correctly resolved,
    preserved, or superseded.
 3. Every resilience scenario above has a passing test.
-4. The evaluation corpus exists, is measured on every reviewer change, and selected
-   regressions block CI.
+4. The evaluation corpus exists in all four buckets, is measured on every reviewer
+   change, and selected regressions block CI. The adversarial bucket blocks from day one.
 5. **No Phase 0 contract required a redesign.**
 
 Item 5 is the retrospective test of whether Phase 0 was right. A contract that needed
