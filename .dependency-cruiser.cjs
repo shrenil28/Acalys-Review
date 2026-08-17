@@ -92,6 +92,33 @@ module.exports = {
       to: { path: "^packages/contracts/src/internal" },
     },
     {
+      name: "web-must-not-import-providers",
+      severity: "error",
+      comment:
+        "A provider adapter is where GitHub's vocabulary lives. The UI reaching one would put provider payload shapes into the frontend — the leak the whole adapter boundary exists to prevent (P0.txt §1).",
+      from: { path: "^apps/web" },
+      to: { path: "^packages/providers/" },
+    },
+    {
+      name: "providers-must-not-import-api-layer",
+      severity: "error",
+      comment:
+        "An adapter normalizes to the DOMAIN. Importing the public DTO layer would let provider concepts reach the frontend contract, and would couple ingestion to the API's versioning.",
+      from: { path: "^packages/providers/" },
+      to: { path: "^packages/contracts/src/api" },
+    },
+    {
+      name: "providers-must-not-import-each-other",
+      severity: "error",
+      comment:
+        "GitHub and GitLab adapters must stay independent. A shared helper between them is a shared assumption, and shared assumptions are how one provider's model becomes the other's.",
+      from: { path: "^packages/providers/([^/]+)/" },
+      to: {
+        path: "^packages/providers/([^/]+)/",
+        pathNot: "^packages/providers/$1/",
+      },
+    },
+    {
       name: "api-client-must-not-import-internal",
       severity: "error",
       comment:

@@ -6,7 +6,8 @@
   "description": "Acalys Review \u2014 cloud code-review platform",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "packages/providers/*"
   ],
   "scripts": {
     "dev": "npm run dev --workspace apps/web",

@@ -31,7 +31,11 @@ export default defineConfig({
   test: {
     // Only workspace packages authored in Phase 0 and later. apps/web is
     // inherited verbatim and carries no tests.
-    include: ["packages/*/tests/**/*.test.ts", "packages/*/src/**/*.test.ts"],
+    include: [
+      "packages/*/tests/**/*.test.ts",
+      "packages/providers/*/tests/**/*.test.ts",
+      "packages/*/src/**/*.test.ts",
+    ],
     environment: "node",
     // Phase 0 is pure contract code: no I/O, no timers, no network. A test
     // that needs more than a second is a design smell, not a slow machine.

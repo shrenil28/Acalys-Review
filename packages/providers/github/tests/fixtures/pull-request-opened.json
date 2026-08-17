@@ -1,0 +1,93 @@
+{
+  "action": "opened",
+  "number": 412,
+  "pull_request": {
+    "url": "https://api.github.com/repos/acalys/acalys/pulls/412",
+    "id": 2145998877,
+    "node_id": "PR_kwDOABCD1234",
+    "html_url": "https://github.com/acalys/acalys/pull/412",
+    "diff_url": "https://github.com/acalys/acalys/pull/412.diff",
+    "number": 412,
+    "state": "open",
+    "locked": false,
+    "title": "Stream agent responses over SSE",
+    "user": {
+      "login": "shrenil28",
+      "id": 58412990,
+      "node_id": "MDQ6VXNlcjU4NDEyOTkw",
+      "type": "User",
+      "site_admin": false
+    },
+    "body": "Replaces the buffered response with an SSE stream and adds backpressure handling.",
+    "created_at": "2026-08-16T09:58:11Z",
+    "updated_at": "2026-08-16T09:58:11Z",
+    "closed_at": null,
+    "merged_at": null,
+    "merge_commit_sha": "cafebabe00112233445566778899aabbccddeeff",
+    "draft": false,
+    "merged": false,
+    "mergeable": null,
+    "rebaseable": null,
+    "mergeable_state": "unknown",
+    "requested_reviewers": [],
+    "labels": [
+      {
+        "id": 208045946,
+        "name": "backend",
+        "color": "0e8a16",
+        "default": false
+      },
+      {
+        "id": 208045947,
+        "name": "needs-review",
+        "color": "d93f0b",
+        "default": false
+      }
+    ],
+    "head": {
+      "label": "acalys:feat/sse-streaming",
+      "ref": "feat/sse-streaming",
+      "sha": "9f8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c",
+      "user": { "login": "acalys", "id": 1112223 },
+      "repo": {
+        "id": 1296269,
+        "node_id": "MDEwOlJlcG9zaXRvcnkxMjk2MjY5",
+        "name": "acalys",
+        "full_name": "acalys/acalys",
+        "private": true,
+        "owner": { "login": "acalys", "id": 1112223, "type": "Organization" },
+        "default_branch": "main"
+      }
+    },
+    "base": {
+      "label": "acalys:main",
+      "ref": "main",
+      "sha": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+      "user": { "login": "acalys", "id": 1112223 },
+      "repo": {
+        "id": 1296269,
+        "name": "acalys",
+        "full_name": "acalys/acalys",
+        "private": true,
+        "owner": { "login": "acalys", "id": 1112223, "type": "Organization" },
+        "default_branch": "main"
+      }
+    },
+    "author_association": "MEMBER",
+    "auto_merge": null,
+    "active_lock_reason": null
+  },
+  "repository": {
+    "id": 1296269,
+    "node_id": "MDEwOlJlcG9zaXRvcnkxMjk2MjY5",
+    "name": "acalys",
+    "full_name": "acalys/acalys",
+    "private": true,
+    "owner": { "login": "acalys", "id": 1112223, "type": "Organization" },
+    "html_url": "https://github.com/acalys/acalys",
+    "default_branch": "main",
+    "visibility": "private"
+  },
+  "sender": { "login": "shrenil28", "id": 58412990, "type": "User" },
+  "installation": { "id": 44556677, "node_id": "MDIzOkludGVncmF0aW9u" }
+}
