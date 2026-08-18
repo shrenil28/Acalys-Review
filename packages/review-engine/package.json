@@ -1,0 +1,26 @@
+{
+  "name": "@acalys/review-engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Analyzers. What turns supplied context into candidate findings.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@acalys/code-intelligence": "*",
+    "@acalys/contracts": "*",
+    "typescript": "^5.9.3"
+  }
+}
