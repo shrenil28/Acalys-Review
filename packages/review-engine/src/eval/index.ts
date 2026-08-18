@@ -11,3 +11,10 @@ export {
   evaluateCorpus,
   runCase,
 } from "./run.js";
+export {
+  EVAL_PUBLICATION_CONFIG,
+  evaluateFunnel,
+  runFunnelCase,
+  type CandidateJourney,
+  type FunnelReport,
+} from "./funnel.js";

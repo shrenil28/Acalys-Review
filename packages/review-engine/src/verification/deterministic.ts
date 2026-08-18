@@ -117,12 +117,76 @@ function declaredAsync(
   return seen ? isAsync : undefined;
 }
 
-/** What the verifier itself found at the claimed line. */
-interface SiteObservation {
-  readonly found: boolean;
-  readonly callee: string | undefined;
-  readonly guarded: boolean;
-}
+/**
+ * What the verifier itself found at the claimed line.
+ *
+ * Three outcomes, and the middle one is the correction this type exists to
+ * carry. The first version had a single `found: boolean`, which conflated:
+ *
+ * ```
+ * nothing is there                          the planner did not supply it
+ * something is there, in a shape I model    a real observation
+ * something is there, in a shape I do not   my reach, not the claim's truth
+ * ```
+ *
+ * All three arrived as `found: false`, and the caller turned that into
+ * `rejected` with 0.8 confidence — so every claim the verifier could not parse
+ * was recorded as the analyzer being wrong. The end-to-end corpus made it
+ * visible immediately: five of ten true defects rejected, precision still 1.0,
+ * and every dashboard blaming the analyzer for the verifier's narrowness.
+ */
+type SiteObservation =
+  /** A modelled shape, observed. Only this can support a rejection. */
+  | {
+      readonly kind: "recognized";
+      readonly callee: string | undefined;
+      readonly guarded: boolean;
+    }
+  /**
+   * A statement covers the line and contains a call this verifier does not
+   * model — in a condition, an argument, a return position.
+   *
+   * `inconclusive`. The call might be exactly the mechanism claimed; this
+   * verifier cannot follow it there. Rejecting would suppress every finding
+   * from the next analyzer anyone writes, before that analyzer had a chance to
+   * be wrong.
+   */
+  | { readonly kind: "unmodelled_call" }
+  /**
+   * A statement covers the line, contains no call, and is not one of the shapes
+   * this verifier knows it cannot analyze.
+   *
+   * `rejected`, and this is the one place the verifier may say
+   * `claimed_mechanism_not_present`. Every mechanism it models is call-based,
+   * so a line holding ordinary code with no call anywhere in it positively
+   * lacks the mechanism — that is an observation, not an absence of one.
+   */
+  | { readonly kind: "no_call" }
+  /**
+   * A shape this verifier explicitly knows it does not model — today, a `catch`
+   * clause.
+   *
+   * `inconclusive`. The swallowed-error family is not call-based, so "no call
+   * here" refutes nothing about it: the mechanism *is* the empty handler. A
+   * verifier that applied its call-based reasoning here would reject a real
+   * defect and report it as an analyzer false positive.
+   *
+   * This is an **abstain list, and it should shrink.** Every entry is a shape
+   * the verifier ought to learn to analyze; until it does, saying so is the
+   * honest answer, and the funnel baseline is what measures the cost of each
+   * remaining entry in lost recall.
+   */
+  | { readonly kind: "unmodelled_shape" }
+  /**
+   * Nothing at the claimed location, or the file was never supplied.
+   *
+   * Also `inconclusive`, and for the sharper reason: this is the *planner*
+   * failing, and the P1-H rule is that missing evidence may degrade
+   * `verified → inconclusive` and must never reach `rejected`. Otherwise a
+   * worse planner produces better precision, and the metric rewards breaking
+   * the system.
+   */
+  | { readonly kind: "absent" };
 
 function observeSite(
   context: VerificationContext,
@@ -131,21 +195,47 @@ function observeSite(
 ): SiteObservation {
   const item = context.items.find((entry) => entry.path === path);
   if (item === undefined) {
-    return { found: false, callee: undefined, guarded: false };
+    return { kind: "absent" };
   }
 
   const source = parse(path, item.content);
-  let result: SiteObservation = {
-    found: false,
-    callee: undefined,
-    guarded: false,
-  };
+  let result: SiteObservation = { kind: "absent" };
+  // Set as soon as any statement covers the claimed line, whether or not this
+  // verifier models its shape. It is what separates "the planner gave me
+  // nothing" from "I was given code I cannot read".
+  let covered = false;
+  // Whether any call expression appears on the claimed line at all. The line
+  // between refuting and abstaining: no call means the modelled mechanism is
+  // positively absent; a call this verifier cannot follow means it cannot say.
+  let sawCall = false;
+  // A shape on the abstain list. Tracked separately from `sawCall` because the
+  // reason to abstain is different: not "a call I cannot follow" but "a
+  // mechanism family I do not implement".
+  let sawUnmodelledShape = false;
 
   const visit = (node: ts.Node): void => {
-    if (result.found) return;
+    if (result.kind === "recognized") return;
     const start =
       source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
     const end = source.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
+
+    if (ts.isStatement(node) && start <= line && line <= end) {
+      covered = true;
+    }
+
+    if (ts.isCallExpression(node) && start <= line && line <= end) {
+      sawCall = true;
+    }
+
+    // The swallowed-error family. Its mechanism is the handler, not a call, so
+    // this verifier's call-based reasoning says nothing about it either way.
+    if (
+      (ts.isCatchClause(node) || ts.isTryStatement(node)) &&
+      start <= line &&
+      line <= end
+    ) {
+      sawUnmodelledShape = true;
+    }
 
     if (ts.isExpressionStatement(node) && start <= line && line <= end) {
       const expression = node.expression;
@@ -153,7 +243,7 @@ function observeSite(
       // The guards a reader would call deliberate, observed independently
       // rather than taken from the claim.
       if (ts.isVoidExpression(expression) || ts.isAwaitExpression(expression)) {
-        result = { found: true, callee: undefined, guarded: true };
+        result = { kind: "recognized", callee: undefined, guarded: true };
         return;
       }
 
@@ -184,7 +274,7 @@ function observeSite(
         }
 
         result = {
-          found: true,
+          kind: "recognized",
           callee,
           guarded: methods.includes("catch") || methods.includes("finally"),
         };
@@ -196,6 +286,10 @@ function observeSite(
   };
 
   ts.forEachChild(source, visit);
+  if (result.kind === "absent" && covered) {
+    if (sawUnmodelledShape) return { kind: "unmodelled_shape" };
+    return sawCall ? { kind: "unmodelled_call" } : { kind: "no_call" };
+  }
   return result;
 }
 
@@ -239,11 +333,37 @@ export function verifyDeterministically(
     input.location.startLine,
   );
 
-  if (!site.found) {
+  if (site.kind === "absent") {
+    // The planner did not supply the claimed location. A planner gap, not a
+    // refutation — and treating it as one would make precision improve as the
+    // planner got worse.
+    return decide("inconclusive", ["context_incomplete"], 0.2);
+  }
+
+  if (site.kind === "no_call") {
+    // Positively observed: the line holds code, and it contains no call. Every
+    // mechanism this verifier models is call-based, so the claimed mechanism is
+    // absent — an observation, and the only shape that licenses this reason.
     return decide("rejected", ["claimed_mechanism_not_present"], 0.8);
   }
 
+  if (site.kind === "unmodelled_shape") {
+    // A mechanism family this verifier does not implement. Abstaining is the
+    // honest answer; the alternative is refuting a claim it never examined.
+    return decide("inconclusive", ["context_incomplete"], 0.2);
+  }
+
+  if (site.kind === "unmodelled_call") {
+    // A call is there, in a position this verifier cannot follow — a condition,
+    // an argument, a return. It may be exactly the mechanism claimed. Saying
+    // `rejected` here is how a narrow verifier silently deletes a working
+    // analyzer's findings while every precision number stays at 1.0.
+    return decide("inconclusive", ["insufficient_evidence"], 0.25);
+  }
+
   if (site.guarded) {
+    // Affirmative: a `.catch()` or `.finally()` is present at the claimed site.
+    // This the verifier genuinely observed, so it may refute.
     return decide("rejected", ["guarded_on_all_paths"], 0.85);
   }
 
