@@ -66,6 +66,22 @@ export interface VerificationRow {
   readonly verifierVersion: string;
 }
 
+/**
+ * What the analysis actually covered.
+ *
+ * Written in the transaction that records the analysis, so a run can never
+ * claim findings without also saying how much of the change produced them.
+ */
+export interface AnalysisCoverage {
+  readonly clustersTotal: number;
+  readonly clustersAnalyzed: number;
+  readonly clustersSkipped: number;
+  readonly contextTokens: number;
+  readonly complete: boolean;
+  /** Required when `complete` is false: "bounded, reason unknown" is unusable. */
+  readonly stopReason?: string | undefined;
+}
+
 export interface PublicationIntentRow {
   readonly kind: "review" | "inline_comment" | "summary" | "check";
   readonly logicalKey: string;
@@ -94,6 +110,19 @@ export interface PublicationIntentRow {
  */
 export type StageOutcome =
   | { readonly kind: "advanced"; readonly state: string }
+  /**
+   * The work was done against a revision the run no longer points at.
+   *
+   * Distinct from `refused`: the run may still be in exactly the expected
+   * state, and retrying the transition would succeed while writing findings
+   * that describe code nobody is looking at any more. The work must be redone,
+   * not re-committed.
+   */
+  | {
+      readonly kind: "stale";
+      readonly expectedRevisionId: string;
+      readonly actualRevisionId: string | undefined;
+    }
   | { readonly kind: "refused"; readonly actualState: string | undefined }
   | { readonly kind: "illegal"; readonly from: string; readonly to: string }
   | {
@@ -176,6 +205,17 @@ export class ReviewStageStore {
     prerequisites: readonly (
       "candidates" | "verifications" | "findings"
     )[] = [],
+    options?: {
+      /**
+       * The revision the caller's work describes.
+       *
+       * Supplied by any stage whose output is revision-specific — which is all
+       * of them once a real analyzer is involved.
+       */
+      readonly expectedRevisionId?: string | undefined;
+      /** Coverage, written in the same transaction as the transition. */
+      readonly coverage?: AnalysisCoverage | undefined;
+    },
   ): Promise<StageOutcome> {
     if (!canTransition(from as ReviewRunState, to as ReviewRunState)) {
       return Promise.resolve({ kind: "illegal", from, to });
@@ -184,13 +224,36 @@ export class ReviewStageStore {
     return this.#inTransaction(async (client) => {
       // The run is locked for the duration, so a concurrent worker blocks here
       // rather than producing a second copy of this stage's output.
-      const current = await client.query<{ state: string }>(
-        "SELECT state FROM review_runs WHERE id = $1 FOR UPDATE",
+      const current = await client.query<{
+        state: string;
+        revision_id: string;
+      }>(
+        "SELECT state, revision_id FROM review_runs WHERE id = $1 FOR UPDATE",
         [runId],
       );
       const state = current.rows[0]?.state;
       if (state !== from) {
         return { kind: "refused", actualState: state };
+      }
+
+      // The identity the work was done against, re-checked at commit rather
+      // than before the work started.
+      //
+      // Analysis takes seconds to minutes. Checking that a run is current and
+      // then analyzing is a classic time-of-check/time-of-use race: by the time
+      // the result is written, a new push may have superseded the revision the
+      // findings describe. Publishing them anyway means commenting on code that
+      // is no longer there.
+      //
+      // Checked inside the transaction that commits the result, so it either
+      // holds at commit time or the stage fails closed.
+      const expected = options?.expectedRevisionId;
+      if (expected !== undefined && current.rows[0]?.revision_id !== expected) {
+        return {
+          kind: "stale",
+          expectedRevisionId: expected,
+          actualRevisionId: current.rows[0]?.revision_id,
+        };
       }
 
       // Defence in depth. Under the atomic design this cannot fail; it exists
@@ -347,6 +410,29 @@ export class ReviewStageStore {
       // Between the output and the transition: the window that decides whether
       // `state = analyzing` entails candidates exist.
       await this.#faults.afterOutput?.();
+
+      const coverage = options?.coverage;
+      if (coverage !== undefined) {
+        await client.query(
+          `UPDATE review_runs
+              SET analysis_clusters_total = $2,
+                  analysis_clusters_analyzed = $3,
+                  analysis_clusters_skipped = $4,
+                  analysis_context_tokens = $5,
+                  analysis_complete = $6,
+                  analysis_stop_reason = $7
+            WHERE id = $1`,
+          [
+            runId,
+            coverage.clustersTotal,
+            coverage.clustersAnalyzed,
+            coverage.clustersSkipped,
+            coverage.contextTokens,
+            coverage.complete,
+            coverage.stopReason ?? null,
+          ],
+        );
+      }
 
       await client.query(
         `UPDATE review_runs

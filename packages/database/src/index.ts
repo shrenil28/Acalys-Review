@@ -42,6 +42,7 @@ export {
 export {
   ReviewStageStore,
   type CandidateFindingRow,
+  type AnalysisCoverage,
   type PublicationIntentRow,
   type StageFaultInjector,
   type StageOutcome,

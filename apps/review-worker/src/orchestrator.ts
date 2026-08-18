@@ -53,6 +53,20 @@ export type AdvanceOutcome =
   /** Another worker moved it — supersession, cancellation, a concurrent peer. */
   | { readonly kind: "refused"; readonly actualState: string | undefined }
   /**
+   * The work described a revision the run no longer points at.
+   *
+   * Separate from `refused` because the recovery differs: a refusal means
+   * someone else advanced the run and this worker should stop, while stale work
+   * means the run is still ours and the analysis must be **redone** against the
+   * current revision. Committing it would publish comments about code that is
+   * no longer there.
+   */
+  | {
+      readonly kind: "stale";
+      readonly expectedRevisionId: string;
+      readonly actualRevisionId: string | undefined;
+    }
+  /**
    * The state claims a stage happened and its artifact is missing.
    *
    * Unreachable under the atomic design, so reaching it means something outside
@@ -131,6 +145,12 @@ export async function advance(
         return { kind: "advanced", from, to };
       case "refused":
         return { kind: "refused", actualState: outcome.actualState };
+      case "stale":
+        return {
+          kind: "stale",
+          expectedRevisionId: outcome.expectedRevisionId,
+          actualRevisionId: outcome.actualRevisionId,
+        };
       case "prerequisite_missing":
         return {
           kind: "invariant_violation",

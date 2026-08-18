@@ -77,6 +77,7 @@ export const DEGRADATION_REASONS = [
   "reasoning_call_cap_reached",
   "deadline_exceeded",
   "analyzer_failed",
+  "cancelled",
 ] as const;
 
 export type DegradationReason = (typeof DEGRADATION_REASONS)[number];
@@ -163,8 +164,24 @@ export function createMemoryCache(): AnalysisCache {
   };
 }
 
+/**
+ * Asked before each unit of work starts.
+ *
+ * Cooperative rather than pre-emptive: a cluster already running is allowed to
+ * finish, because killing it mid-write is how partial state gets persisted.
+ * What cancellation guarantees is that **no further work starts** — which is
+ * the guarantee a user pressing cancel actually wants, and the one that stops a
+ * superseded run from spending budget on a revision nobody will read.
+ */
+export interface CancellationSignal {
+  readonly cancelled: () => boolean;
+  /** Why, for the degradation record. */
+  readonly reason?: string | undefined;
+}
+
 export interface ExecutionOptions {
   readonly analyzer: ClusterAnalyzer;
+  readonly cancellation?: CancellationSignal | undefined;
   readonly limits?: Partial<ExecutionLimits> | undefined;
   readonly cache?: AnalysisCache | undefined;
   readonly now?: (() => number) | undefined;
@@ -270,6 +287,19 @@ export async function runAnalysis(
       cursor += 1;
       const cluster = admitted[index];
       if (cluster === undefined) return;
+
+      // Checked between clusters, which is exactly where the race lives: a
+      // cancellation arriving during cluster N must stop cluster N+1.
+      if (options.cancellation?.cancelled() === true) {
+        degradations.push({
+          clusterId: cluster.id,
+          reason: "cancelled",
+          detail:
+            options.cancellation.reason ??
+            "cancelled before this cluster started",
+        });
+        continue;
+      }
 
       if (now() - started > limits.deadlineMs) {
         degradations.push({

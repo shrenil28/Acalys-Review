@@ -158,13 +158,32 @@ export interface TestDatabase {
  * The name and port are derived from the caller's label so the isolation is
  * visible in `docker ps` during a hung run.
  */
+/**
+ * The host port Docker assigned.
+ *
+ * Read back rather than assumed. `docker port` is the only authority on it, and
+ * parsing its output is cheaper than any scheme for predicting it.
+ */
+async function publishedPort(container: string): Promise<number> {
+  const { stdout: mapping } = await run("docker", [
+    "port",
+    container,
+    "5432/tcp",
+  ]);
+  // Formats seen: "0.0.0.0:49154", "[::]:49154", and both on separate lines.
+  const match = /:(\d+)\s*$/m.exec(mapping.trim());
+  const port = match?.[1] === undefined ? Number.NaN : Number(match[1]);
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error(
+      `Could not determine the published port for ${container}. ` +
+        `\`docker port\` returned: ${mapping.trim()}`,
+    );
+  }
+  return port;
+}
+
 export async function startPostgres(label = "default"): Promise<TestDatabase> {
   const CONTAINER = `acalys-test-postgres-${label}`;
-  // Deterministic per label, so a crashed run's container is found and removed
-  // by the next one rather than leaking a random port.
-  const PORT =
-    55_400 +
-    ([...label].reduce((total, char) => total + char.charCodeAt(0), 0) % 90);
   // Removed first, so a container left by an interrupted run does not make the
   // next one fail with a stale schema.
   await run("docker", ["rm", "-f", CONTAINER]).catch(() => undefined);
@@ -178,7 +197,21 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "-e",
     `POSTGRES_DB=${DATABASE}`,
     "-p",
-    `${String(PORT)}:5432`,
+    // Docker picks the host port.
+    //
+    // This used to be derived from the label — `55_400 + charCodeSum % 90` —
+    // which is a 90-slot hash over arbitrary strings, so collisions were a
+    // matter of when. "hardening" collided with an existing suite and the
+    // container failed to start; vitest reported the ten tests inside as
+    // *skipped* while the suite itself failed, which is the exact shape of the
+    // three vacuous-test bugs this project has already shipped.
+    //
+    // Deterministic ports existed so a stale container could be found and
+    // removed. The container **name** already does that, and it is derived from
+    // the label too — so the port was buying nothing and costing a collision
+    // class. Letting Docker assign one removes the class rather than making it
+    // less likely.
+    "0:5432",
     IMAGE,
     // fsync off: this database is discarded, and durability of the *test*
     // database is not what is under test. The transaction semantics that are
@@ -187,6 +220,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "fsync=off",
   ]);
 
+  const PORT = await publishedPort(CONTAINER);
   await waitForReady(CONTAINER, PORT);
 
   const pool = new pg.Pool({
@@ -206,6 +240,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "0002_review_ingestion.sql",
     "0003_review_stages.sql",
     "0004_publication_ledger.sql",
+    "0005_analysis_coverage.sql",
   ].map((name) =>
     readFileSync(
       fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)),
