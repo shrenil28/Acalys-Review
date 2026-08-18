@@ -317,6 +317,28 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
       "whether the provider is idempotent is not in the repository at all; a verifier that decided this would be inventing an answer",
   },
   {
+    // Exercises the branch where the checker binds nothing at all — distinct
+    // from the file being absent. Added because a mutation that assumed an
+    // unbindable callee was synchronous SURVIVED: no challenge reached that
+    // line, so the "never guess" rule was asserted in prose and tested nowhere.
+    id: "dynamic-callee-unbindable",
+    gold: "should_abstain",
+    files: {
+      "src/dispatch.ts": [
+        "export function run(getHandler: () => (value: number) => unknown): void {",
+        "  getHandler()(1);",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "the promise returned by the handler is discarded",
+      "src/dispatch.ts",
+      2,
+    ),
+    because:
+      "the callee is itself the result of a call, so the checker binds no symbol at all — and an unbindable callee must abstain rather than be assumed synchronous",
+  },
+  {
     id: "location-outside-context",
     gold: "should_abstain",
     files: {

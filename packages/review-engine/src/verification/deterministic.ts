@@ -32,6 +32,7 @@
 
 import ts from "typescript";
 
+import { resolveCallProduct } from "./binding.js";
 import { assertReasonForCapability, assessCompetence } from "./competence.js";
 import {
   assertReasonsSupport,
@@ -54,68 +55,6 @@ function parse(path: string, source: string): ts.SourceFile {
     true,
     path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
-}
-
-function isAsyncDeclaration(node: ts.Node): boolean {
-  const asyncKeyword =
-    ts.canHaveModifiers(node) &&
-    (ts.getModifiers(node) ?? []).some(
-      (modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword,
-    );
-  if (asyncKeyword) return true;
-
-  const typed = node as { type?: ts.TypeNode };
-  return (
-    typed.type !== undefined &&
-    ts.isTypeReferenceNode(typed.type) &&
-    ts.isIdentifier(typed.type.typeName) &&
-    typed.type.typeName.text === "Promise"
-  );
-}
-
-/**
- * Whether a name is declared asynchronous anywhere in the verifier's context.
- *
- * Returns `undefined` for "the context does not contain this declaration",
- * which is a different fact from "it is not asynchronous". Collapsing the two
- * is what turns a planner gap into a rejection.
- */
-function declaredAsync(
-  context: VerificationContext,
-  name: string,
-): boolean | undefined {
-  let seen = false;
-  let isAsync = false;
-
-  for (const item of context.items) {
-    const source = parse(item.path, item.content);
-    const visit = (node: ts.Node): void => {
-      const named = node as ts.NamedDeclaration;
-      const nameNode = named.name;
-      if (
-        nameNode !== undefined &&
-        ts.isIdentifier(nameNode) &&
-        nameNode.text === name &&
-        (ts.isFunctionDeclaration(node) ||
-          ts.isMethodDeclaration(node) ||
-          ts.isVariableDeclaration(node))
-      ) {
-        seen = true;
-        if (
-          isAsyncDeclaration(node) ||
-          (ts.isVariableDeclaration(node) &&
-            node.initializer !== undefined &&
-            isAsyncDeclaration(node.initializer))
-        ) {
-          isAsync = true;
-        }
-      }
-      ts.forEachChild(node, visit);
-    };
-    ts.forEachChild(source, visit);
-  }
-
-  return seen ? isAsync : undefined;
 }
 
 /**
@@ -395,23 +334,49 @@ export function verifyDeterministically(
     return decide("rejected", ["guarded_on_all_paths"], 0.85);
   }
 
-  const callee = site.callee;
-  if (callee === undefined) {
-    return decide("inconclusive", ["insufficient_evidence"], 0.3);
-  }
-
-  const asyncInContext = declaredAsync(context, callee);
-
-  if (asyncInContext === undefined) {
-    // The declaration that would settle it was never supplied.
-    return decide("inconclusive", ["insufficient_evidence"], 0.3);
-  }
-
-  const evidenceClaimsAsync = input.evidence.some(
-    (item) =>
-      item.observation.includes(callee) &&
-      /async|Promise/.test(item.observation),
+  // ── Epistemic independence, at the one fact that decides the claim ─────
+  //
+  // The analyzer settles "is this call asynchronous?" by finding a declaration
+  // with a matching NAME. So did this verifier, and the result was that both
+  // confirmed a floating promise on a callee that is a synchronous parameter
+  // shadowing an async import — the same mistake, made twice, reported as
+  // corroboration.
+  //
+  // The checker is asked what the call expression's TYPE is. Scope, shadowing,
+  // imports and aliases are resolved as a side effect of its ordinary work, and
+  // no name is ever compared to a declaration. That is a genuinely different
+  // derivation channel, which is the only kind of second opinion worth paying
+  // for.
+  const binding = resolveCallProduct(
+    context,
+    input.location.path,
+    input.location.startLine,
   );
+
+  if (binding.kind === "unresolved") {
+    // Never guessed. "It is not asynchronous" and "I could not tell" are the
+    // two facts this checkpoint exists to keep apart.
+    return decide("inconclusive", ["insufficient_evidence"], 0.3);
+  }
+
+  const asyncInContext = binding.producesPromise;
+
+  // The callee's NAME is used for one thing only, and never to settle the
+  // claim: matching supplied evidence back to the call so a disagreement can be
+  // reported as a disagreement. It is read after the binding, not before —
+  // the earlier order let a callee this parser could not name short-circuit to
+  // `insufficient_evidence` before the checker was ever consulted, so the whole
+  // resolver was unreachable for exactly the callees it handles best. A
+  // mutation that assumed such callees were synchronous survived the suite
+  // because the code it mutated could not run.
+  const callee = site.callee;
+  const evidenceClaimsAsync =
+    callee !== undefined &&
+    input.evidence.some(
+      (item) =>
+        item.observation.includes(callee) &&
+        /async|Promise/.test(item.observation),
+    );
 
   if (!asyncInContext && evidenceClaimsAsync) {
     // Something is known, and it conflicts with the supplied support — the most

@@ -52,48 +52,56 @@ describe("The funnel baseline", () => {
     ).toEqual([]);
   });
 
-  it("verification currently COSTS precision — the P1-J.3 target", async () => {
-    // ── The finding the false-positive bucket exists to produce ───────────
+  it("verification now BUYS precision, without costing more recall", async () => {
+    // ── The demonstration step 2 exists to produce ────────────────────────
     //
-    // The aspiration is that verification may cost recall — that is the trade
-    // it exists to make — but never precision. Right now it costs both:
+    // Before epistemic independence:
     //
-    //     candidate precision   10/11   the analyzer's own accuracy
-    //     published precision    5/6    after verification
+    //     candidate precision   10/11
+    //     published precision    5/6     verification made it WORSE
+    //     published recall       0.5
     //
-    // It lost five true defects to `inconclusive` and caught **zero** of the
-    // analyzer's false positives. Asserted in its true, wrong direction rather
-    // than aspirationally, because a test that asserts the goal fails from the
-    // day it is written and gets deleted, while one that asserts reality has to
-    // be edited deliberately when reality changes.
+    // After:
     //
-    // When P1-J.3 inverts this, this test flips and its comment goes with it.
+    //     candidate precision   10/11
+    //     published precision    5/5     the analyzer's false positive stopped
+    //     published recall       0.5     unchanged
+    //
+    // The verifier removed the analyzer's only false positive and cost nothing
+    // extra in recall. That is the first point at which it pays for itself on
+    // the natural corpus rather than on hand-written challenges.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
 
-    expect(report.candidatePrecision).toBeDefined();
-    expect(report.publishedPrecision).toBeDefined();
-    expect(report.publishedPrecision ?? 1).toBeLessThan(
-      report.candidatePrecision ?? 0,
+    expect(report.publishedPrecision).toBe(1);
+    expect(report.candidatePrecision).toBe(0.9091);
+    expect(report.publishedPrecision ?? 0).toBeGreaterThan(
+      report.candidatePrecision ?? 1,
     );
+    expect(report.falsePositivesPublished).toBe(0);
+    expect(report.falsePositivesCaught).toBe(1);
   });
 
-  it("the verifier shares the analyzer's blind spot", async () => {
-    // ── Structural independence is not epistemic independence ─────────────
+  it("no longer shares the analyzer's blind spot", async () => {
+    // ── Structural independence was never the hard part ───────────────────
     //
-    // P1-H goes to real lengths to stop the verifier seeing the analyzer's
-    // context, confidence, reasoning or rule identity, and there is no API
-    // through which any of it could arrive. All of that holds.
+    // P1-H stopped the analyzer's context, confidence, reasoning and rule
+    // identity reaching the verifier, and there is no API through which any of
+    // it could. All of that held — and the verifier still confirmed
+    // `fp-shadowed-by-parameter`, because both sides settled the disputed fact
+    // the same way: find a declaration whose NAME matches.
     //
-    // And the verifier still confirms `fp-shadowed-by-parameter`, because
-    // `declaredAsync` resolves callees **by name** — exactly as the analyzer
-    // does. `save` is a synchronous parameter shadowing an imported async
-    // function; both components look up the name, both find the import, and the
-    // second one agreeing with the first is not corroboration. It is the same
-    // mistake made twice.
+    //     structural independence   inputs are not shared
+    //     epistemic independence    the METHOD of settling the fact is not
     //
-    // The lesson for the model-backed verifier: independence of *inputs* buys
-    // nothing if the *method* is shared. A second opinion from a copy of the
-    // same reasoning is not a second opinion.
+    // Only the second buys anything. The verifier now asks the TypeScript
+    // checker which declaration the callee binds to; `save` binds to the
+    // synchronous parameter shadowing the async import, and the claim stops.
+    //
+    // It stops as `inconclusive` rather than `rejected`, which is the better
+    // answer: the verifier's own binding says synchronous while the analyzer's
+    // supplied evidence says asynchronous, and
+    // `conflicting_independent_evidence` is exactly what that reason is for.
+    // Something IS known, and what is known disagrees.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
 
     const shadowed = report.journeys.filter(
@@ -101,11 +109,8 @@ describe("The funnel baseline", () => {
     );
     expect(shadowed.length, "the analyzer no longer produces this").toBe(1);
     expect(shadowed[0]?.wanted).toBe(false);
-    expect(
-      shadowed[0]?.published,
-      "if this is now false, the verifier learned to resolve scope — update the comment above",
-    ).toBe(true);
-    expect(report.falsePositivesPublished).toBe(1);
+    expect(shadowed[0]?.promoted).toBe(false);
+    expect(shadowed[0]?.published).toBe(false);
   });
 
   it("distinguishes a measured zero from an absent denominator", async () => {
@@ -115,7 +120,7 @@ describe("The funnel baseline", () => {
     // argument for deleting the verifier, when it was an argument about the
     // corpus. Now the corpus has one, so the rate is defined and genuinely 0.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
-    expect(report.falsePositiveCatchRate).toBe(0);
+    expect(report.falsePositiveCatchRate).toBe(1);
 
     const empty = await evaluateFunnel([]);
     // No candidates at all: every ratio is undefined rather than a confident 0
@@ -186,13 +191,10 @@ describe("The funnel baseline", () => {
     //     published recall 0.5     the verifier's reach, not the analyzer's
     //                              accuracy. Five defects sit at
     //                              `inconclusive`.
-    //     published precision      LOWER than the analyzer's own. Verification
-    //                              currently costs precision as well as recall,
-    //                              which is the case against it that P1-J.3 has
-    //                              to answer.
-    //     false positives caught 0 and now genuinely measured, against one real
-    //                              analyzer false positive rather than against
-    //                              an empty denominator.
+    //     published precision 1.0  every published finding is real, against an
+    //                              analyzer precision of 10/11 — verification
+    //                              now buys precision instead of costing it.
+    //     false positives caught 1 measured against a real denominator.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
 
     expect({
@@ -206,16 +208,16 @@ describe("The funnel baseline", () => {
       publishedPrecision: report.publishedPrecision,
     }).toEqual({
       candidates: 11,
-      verified: 6,
+      verified: 5,
       rejected: 0,
-      inconclusive: 5,
-      promoted: 6,
-      published: 6,
+      inconclusive: 6,
+      promoted: 5,
+      published: 5,
       publishedRecall: 0.5,
-      // 5 of 6 published findings are real. The sixth is
-      // `fp-shadowed-by-parameter`, verified by a verifier that resolves names
-      // the same way the analyzer does.
-      publishedPrecision: 0.8333,
+      // Every published finding is real. The analyzer's one false positive is
+      // stopped by a verifier that binds callees through the checker rather
+      // than by name.
+      publishedPrecision: 1,
     });
   });
 });

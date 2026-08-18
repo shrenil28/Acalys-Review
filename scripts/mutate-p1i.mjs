@@ -222,6 +222,23 @@ const MUTATIONS = [
     suite: "packages/review-engine/tests/competence.test.ts",
   },
   {
+    id: 26,
+    name: "a shadowing parameter is treated as asynchronous (name-based answer)",
+    file: "packages/review-engine/src/verification/binding.ts",
+    find: "    return ts.isFunctionTypeNode(type)\n      ? isPromiseAnnotation(type.type)\n      : undefined;",
+    replace: "    return ts.isFunctionTypeNode(type) ? true : undefined;",
+    suite: "packages/review-engine/tests/funnel-baseline.test.ts",
+  },
+  {
+    id: 27,
+    name: "an unbindable callee is assumed synchronous",
+    file: "packages/review-engine/src/verification/binding.ts",
+    find: '    return { kind: "unresolved", why: "the checker could not bind the callee" };',
+    replace:
+      '    return { kind: "resolved", producesPromise: false, via: "typescript_checker", declaredAt: undefined };',
+    suite: "packages/review-engine/tests/verifier-capability.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",

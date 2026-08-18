@@ -54,7 +54,7 @@ describe("Verifier capability, on injected challenges", () => {
     const abstentions = report.outcomes.filter(
       (outcome) => outcome.gold === "should_abstain",
     );
-    expect(abstentions).toHaveLength(3);
+    expect(abstentions).toHaveLength(4);
     expect(abstentions.every((outcome) => outcome.correct)).toBe(true);
   });
 
@@ -104,7 +104,11 @@ describe("Verifier capability, on injected challenges", () => {
       should_abstain: {
         verified: 0,
         rejected: 0,
-        inconclusive: 3,
+        // Four, since `dynamic-callee-unbindable` joined: a callee reached
+        // through a computed property binds to no declaration, and the rule
+        // that such a callee is never assumed synchronous had been asserted in
+        // prose and tested nowhere — a mutation that assumed it SURVIVED.
+        inconclusive: 4,
         unavailable: 0,
       },
     });
@@ -114,7 +118,7 @@ describe("Verifier capability, on injected challenges", () => {
     // Fail-closed: an empty matrix satisfies every zero above.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
     expect(report.outcomes).toHaveLength(VERIFIER_CHALLENGES.length);
-    expect(report.outcomes.length).toBeGreaterThanOrEqual(10);
+    expect(report.outcomes.length).toBeGreaterThanOrEqual(11);
     expect(report.provenance).toBe("injected");
     for (const gold of ["should_verify", "should_reject", "should_abstain"]) {
       expect(
