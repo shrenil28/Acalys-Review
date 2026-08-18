@@ -56,9 +56,66 @@ export const VERIFICATION_REASONS = [
   "not_caused_by_change",
   "insufficient_evidence",
   "context_incomplete",
+  // Independent context and the supplied evidence disagree. Distinct from
+  // insufficiency: something *is* known, and what is known conflicts. Folding
+  // it into `insufficient_evidence` would hide the most interesting signal a
+  // verifier produces — a claim whose own support contradicts the repository.
+  "conflicting_independent_evidence",
 ] as const;
 
 export type VerificationReason = (typeof VERIFICATION_REASONS)[number];
+
+/**
+ * Which decision each reason can justify. Exhaustive and table-driven, like the
+ * lifecycle matrices.
+ *
+ * Without it, `{ decision: "verified", reasons: ["claim_contradicted_by_context"] }`
+ * is well-typed and semantically impossible — and the first person to hit it
+ * will be reading a published finding.
+ */
+export const REASON_SUPPORTS: Readonly<
+  Record<VerificationReason, VerificationDecision>
+> = {
+  evidence_supports_claim: "verified",
+  independent_context_confirms: "verified",
+
+  claim_contradicted_by_context: "rejected",
+  claimed_mechanism_not_present: "rejected",
+  guarded_on_all_paths: "rejected",
+  not_caused_by_change: "rejected",
+
+  insufficient_evidence: "inconclusive",
+  context_incomplete: "inconclusive",
+  conflicting_independent_evidence: "inconclusive",
+};
+
+/**
+ * Rejects a decision its reasons cannot justify.
+ *
+ * Called on the way out of every verifier, so a confirming reason can never
+ * appear under a rejection and a refuting one can never appear under a
+ * verification.
+ */
+export function assertReasonsSupport(
+  decision: VerificationDecision,
+  reasons: readonly VerificationReason[],
+): void {
+  if (reasons.length === 0) {
+    throw new Error(
+      `A completed verification must say why. \`${decision}\` arrived with no reason code.`,
+    );
+  }
+
+  const wrong = reasons.filter(
+    (reason) => REASON_SUPPORTS[reason] !== decision,
+  );
+  if (wrong.length > 0) {
+    throw new Error(
+      `Reason(s) ${wrong.join(", ")} cannot justify \`${decision}\` — ` +
+        `they support \`${REASON_SUPPORTS[wrong[0] as VerificationReason]}\`.`,
+    );
+  }
+}
 
 /**
  * Why verification could not run.

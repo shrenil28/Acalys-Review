@@ -12,6 +12,8 @@ export {
 export {
   EXECUTION_FAILURES,
   PUBLICATION_POLICY,
+  REASON_SUPPORTS,
+  assertReasonsSupport,
   VERIFICATION_DECISIONS,
   VERIFICATION_REASONS,
   isJudgement,
@@ -34,3 +36,9 @@ export {
   type RepositorySnapshot,
   type VerificationPolicy,
 } from "./plan-context.js";
+export {
+  DETERMINISTIC_VERIFIER_ID,
+  DETERMINISTIC_VERIFIER_VERSION,
+  deterministicVerifier,
+  verifyDeterministically,
+} from "./deterministic.js";
