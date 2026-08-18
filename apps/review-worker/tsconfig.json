@@ -1,0 +1,25 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@acalys/contracts": ["../../packages/contracts/src/index.ts"],
+      "@acalys/contracts/domain": [
+        "../../packages/contracts/src/domain/index.ts"
+      ],
+      "@acalys/contracts/api/v1": [
+        "../../packages/contracts/src/api/v1/index.ts"
+      ],
+      "@acalys/contracts/internal": [
+        "../../packages/contracts/src/internal/index.ts"
+      ],
+      "@acalys/database": ["../../packages/database/src/index.ts"],
+      "@acalys/provider-github": [
+        "../../packages/providers/github/src/index.ts"
+      ],
+      "@acalys/webhook-gateway": ["../../apps/webhook-gateway/src/index.ts"]
+    }
+  },
+  "include": ["src", "tests"]
+}

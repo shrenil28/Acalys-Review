@@ -145,6 +145,153 @@ export class ReviewIngestionStore {
   }
 
   /**
+   * Reads a stored delivery by row id.
+   *
+   * A job carries only the row id; the bytes live on the delivery. That
+   * indirection is deliberate — a job is a small, frequently-updated row, and
+   * copying a 25 MiB payload into it per attempt would be absurd.
+   */
+  public findDeliveryById(id: string): Promise<
+    | {
+        readonly id: string;
+        readonly event: string;
+        readonly action: string | null;
+        readonly payload: Buffer;
+        readonly bodyDigest: string;
+      }
+    | undefined
+  > {
+    return this.#withClient(async (client) => {
+      const result = await client.query<{
+        id: string;
+        event: string;
+        action: string | null;
+        payload: Buffer;
+        body_digest: string;
+      }>(
+        `SELECT id, event, action, payload, body_digest
+           FROM webhook_deliveries WHERE id = $1`,
+        [id],
+      );
+      const row = result.rows[0];
+      return row === undefined
+        ? undefined
+        : {
+            id: row.id,
+            event: row.event,
+            action: row.action,
+            payload: row.payload,
+            bodyDigest: row.body_digest,
+          };
+    });
+  }
+
+  /**
+   * Resolves a provider repository to platform identity.
+   *
+   * The webhook carries GitHub's numeric id; everything downstream needs the
+   * platform's `RepositoryId` and the owning organization. A miss is **not**
+   * necessarily permanent — a delivery can outrun installation sync, arriving
+   * before the repository row exists — so the caller classifies it as
+   * retryable rather than dead-lettering immediately.
+   */
+  public findRepository(
+    provider: string,
+    providerExternalId: string,
+  ): Promise<
+    | {
+        readonly repositoryId: string;
+        readonly organizationId: string;
+        readonly installationId: string | null;
+      }
+    | undefined
+  > {
+    return this.#withClient(async (client) => {
+      const result = await client.query<{
+        id: string;
+        organization_id: string;
+        installation_id: string | null;
+      }>(
+        `SELECT id, organization_id, installation_id FROM repositories
+          WHERE provider = $1 AND provider_external_id = $2`,
+        [provider, providerExternalId],
+      );
+      const row = result.rows[0];
+      return row === undefined
+        ? undefined
+        : {
+            repositoryId: row.id,
+            organizationId: row.organization_id,
+            installationId: row.installation_id,
+          };
+    });
+  }
+
+  /**
+   * Records the pull request as it stands now.
+   *
+   * Mutable by design, and that is safe: nothing here affects the correctness
+   * of a past review. Everything a review's correctness depends on — base,
+   * head, merge base — lives on the immutable revision instead.
+   *
+   * `DO UPDATE` rather than `DO NOTHING`: a redelivery for the same PR usually
+   * carries newer metadata (a retitle, a label, a state change), and dropping
+   * it would leave the triage view stale forever.
+   */
+  public upsertPullRequest(
+    scope: TenantScope,
+    input: {
+      readonly providerExternalId: string;
+      readonly number: number;
+      readonly title: string;
+      readonly description: string | null;
+      readonly author: unknown;
+      readonly state: string;
+      readonly draft: boolean;
+      readonly labels: readonly string[];
+      readonly createdAt: Date;
+      readonly updatedAt: Date;
+    },
+  ): Promise<{ readonly id: string; readonly existed: boolean }> {
+    return this.#withClient(async (client) => {
+      const result = await client.query<{ id: string; inserted: boolean }>(
+        `INSERT INTO pull_requests (
+           id, organization_id, repository_id, provider, provider_external_id,
+           number, title, description, author, state, draft, labels,
+           created_at, updated_at
+         ) VALUES ($1,$2,$3,'github',$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+         ON CONFLICT (repository_id, provider_external_id) DO UPDATE SET
+           title = EXCLUDED.title,
+           description = EXCLUDED.description,
+           state = EXCLUDED.state,
+           draft = EXCLUDED.draft,
+           labels = EXCLUDED.labels,
+           updated_at = EXCLUDED.updated_at
+         RETURNING id, (xmax = 0) AS inserted`,
+        [
+          randomUUID(),
+          scope.organizationId,
+          scope.repositoryId,
+          input.providerExternalId,
+          input.number,
+          input.title,
+          input.description,
+          JSON.stringify(input.author),
+          input.state,
+          input.draft,
+          JSON.stringify(input.labels),
+          input.createdAt,
+          input.updatedAt,
+        ],
+      );
+      const row = result.rows[0];
+      if (row === undefined)
+        throw new Error("pull_requests upsert returned no row");
+      return { id: row.id, existed: !row.inserted };
+    });
+  }
+
+  /**
    * Records a revision, converging on head SHA.
    *
    * `sequence` is assigned as `max + 1` **within the transaction**, so two

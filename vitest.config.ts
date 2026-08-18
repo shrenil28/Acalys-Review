@@ -38,6 +38,10 @@ export default defineConfig({
         find: /^@acalys\/provider-github$/,
         replacement: workspace("packages/providers/github/src/index.ts"),
       },
+      {
+        find: /^@acalys\/webhook-gateway$/,
+        replacement: workspace("apps/webhook-gateway/src/index.ts"),
+      },
     ],
   },
   test: {
@@ -46,7 +50,7 @@ export default defineConfig({
     include: [
       "packages/*/tests/**/*.test.ts",
       "packages/providers/*/tests/**/*.test.ts",
-      "apps/webhook-gateway/tests/**/*.test.ts",
+      "apps/*/tests/**/*.test.ts",
       "packages/*/src/**/*.test.ts",
     ],
     environment: "node",

@@ -9,6 +9,7 @@ import {
   type JobRequest,
 } from "../src/index.js";
 import {
+  assertSuiteIsActuallyRunning,
   dockerAvailable,
   startPostgres,
   type TestDatabase,
@@ -39,6 +40,12 @@ describeWithPostgres("Postgres webhook inbox", () => {
 
   beforeAll(async () => {
     database = await startPostgres("inbox");
+    // Fail closed: a suite that reports success without running is worse
+    // than one that fails.
+    await assertSuiteIsActuallyRunning(database, [
+      "webhook_deliveries",
+      "webhook_jobs",
+    ]);
   }, 120_000);
 
   afterAll(async () => {

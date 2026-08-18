@@ -46,8 +46,14 @@ jobs:
       - name: Dependency boundaries
         run: npm run depcruise
 
+      # Fail closed. Three separate bugs in this project shared one shape: the
+      # suite reported success while the property was never exercised. In CI a
+      # missing Docker must fail the run, never silently skip the integration
+      # suites.
       - name: Tests
         run: npm run test
+        env:
+          ACALYS_REQUIRE_POSTGRES: "1"
 
       # Generated JSON Schema must match the Zod source of truth (§101).
       # Enabled from Checkpoint E, when generation lands.

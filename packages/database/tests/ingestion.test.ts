@@ -10,6 +10,7 @@ import {
   type TenantScope,
 } from "../src/index.js";
 import {
+  assertSuiteIsActuallyRunning,
   dockerAvailable,
   startPostgres,
   type TestDatabase,
@@ -45,6 +46,13 @@ describeWithPostgres(
 
     beforeAll(async () => {
       database = await startPostgres("ingestion");
+      // Fail closed: a suite that reports success without running is worse
+      // than one that fails.
+      await assertSuiteIsActuallyRunning(database, [
+        "review_runs",
+        "review_requests",
+        "pull_request_revisions",
+      ]);
     }, 120_000);
 
     afterAll(async () => {

@@ -24,12 +24,59 @@ const IMAGE = "postgres:16-alpine";
 const PASSWORD = "acalys-test";
 const DATABASE = "acalys_test";
 
+/**
+ * Whether integration tests may be skipped at all.
+ *
+ * `ACALYS_REQUIRE_POSTGRES=1` makes a missing Docker a hard failure. CI sets
+ * it, so an infrastructure problem there can never masquerade as a green run —
+ * which is the whole of the fail-closed rule below.
+ */
+export const POSTGRES_REQUIRED = process.env["ACALYS_REQUIRE_POSTGRES"] === "1";
+
 export function dockerAvailable(): boolean {
   try {
     execFileSync("docker", ["info"], { stdio: "ignore", timeout: 20_000 });
     return true;
   } catch {
+    if (POSTGRES_REQUIRED) {
+      throw new Error(
+        "ACALYS_REQUIRE_POSTGRES=1 but Docker is unavailable. Refusing to skip: " +
+          "an integration suite that reports success without running is worse " +
+          "than one that fails.",
+      );
+    }
     return false;
+  }
+}
+
+/**
+ * Suite-level guard against a green-but-empty run.
+ *
+ * Three separate bugs in this project shared one shape: **the suite reported
+ * success while the property was never exercised.** An unawaited `fc.assert`,
+ * a misspelled field masked by `?? 0`, and two test files fighting over one
+ * container that turned 16 assertions into silent skips.
+ *
+ * Vigilance does not fix a recurring class of bug; a mechanism does. Every
+ * Postgres-backed suite calls this after setup, so a database that failed to
+ * start or a schema that failed to migrate fails the suite instead of quietly
+ * degrading it to zero assertions.
+ */
+export async function assertSuiteIsActuallyRunning(
+  database: TestDatabase,
+  expectedTables: readonly string[],
+): Promise<void> {
+  const result = await database.pool.query<{ table_name: string }>(
+    `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'`,
+  );
+  const present = new Set(result.rows.map((row) => row.table_name));
+  const missing = expectedTables.filter((table) => !present.has(table));
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Schema is not migrated; missing: ${missing.join(", ")}. ` +
+        "Refusing to run assertions against an empty database.",
+    );
   }
 }
 
