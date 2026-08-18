@@ -50,9 +50,36 @@ export const GOLD_OUTCOMES = [
 
 export type GoldOutcome = (typeof GOLD_OUTCOMES)[number];
 
+/**
+ * Where a challenge came from.
+ *
+ * `historical_regression` is a candidate the analyzer **actually produced**
+ * before it was fixed, replayed with its real claim, evidence and location. It
+ * is kept because the alternative is that fixing the analyzer silently deletes
+ * the verifier's only evidence of catching a real mistake — and then a
+ * regression in either component looks the same from outside.
+ *
+ * With both, the two failures are distinguishable:
+ *
+ * ```
+ * analyzer regression   the live corpus case starts speaking again
+ * verifier regression   the replayed candidate stops being filtered
+ * ```
+ *
+ * Never counted in natural analyzer precision. These candidates are not
+ * evidence about what the analyzer produces today.
+ */
+export const CHALLENGE_SOURCES = [
+  "constructed",
+  "injected_historical_regression",
+] as const;
+
+export type ChallengeSource = (typeof CHALLENGE_SOURCES)[number];
+
 export interface VerifierChallenge {
   readonly id: string;
   readonly gold: GoldOutcome;
+  readonly source?: ChallengeSource | undefined;
   readonly files: Readonly<Record<string, string>>;
   readonly input: Omit<VerificationInput, "repositoryId" | "revisionId">;
   readonly because: string;
@@ -337,6 +364,50 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
     ),
     because:
       "the callee is itself the result of a call, so the checker binds no symbol at all — and an unbindable callee must abstain rather than be assumed synchronous",
+  },
+  // ── historical regression ──────────────────────────────────────────────
+  {
+    id: "historical-shadowed-parameter",
+    gold: "should_reject",
+    source: "injected_historical_regression",
+    files: {
+      "src/shadow.ts": [
+        'import { save } from "./store.js";',
+        "export function run(save: (value: number) => void): void {",
+        "  save(1);",
+        "}",
+      ].join("\n"),
+      "src/store.ts": ASYNC_STORE,
+    },
+    // The claim and evidence the analyzer really emitted, not a simplified
+    // restatement. An easier synthetic version would test a claim the analyzer
+    // never made, and the regression cover would be for the wrong thing.
+    input: {
+      candidateId: "historical:shadow",
+      claim: {
+        statement: "The promise returned by `save()` is discarded.",
+        steps: [
+          "`save` is asynchronous, so this call returns a Promise",
+          "nothing in this statement observes that Promise",
+          "so a rejection becomes an unhandled rejection and the caller continues as if the work completed",
+        ],
+        trigger: "every execution that reaches this statement",
+        consequence:
+          "the caller proceeds before the work is done, and a failure is invisible",
+      },
+      location: { path: "src/shadow.ts", startLine: 3, endLine: 3 },
+      evidence: [
+        {
+          type: "static_analysis",
+          observation:
+            "`save` is declared at src/store.ts:1 with the `async` modifier",
+        },
+      ],
+      remediation: "await the call or attach a rejection handler",
+      proposedSeverity: "high",
+    },
+    because:
+      "the analyzer produced exactly this before it learned about lexical shadowing; the verifier binds the callee through the checker, finds the synchronous parameter, and must keep refusing it however the analyzer changes",
   },
   {
     id: "location-outside-context",

@@ -330,3 +330,118 @@ export function isTestFor(testPath: string, subjectPath: string): boolean {
     (testBase.startsWith(`${base}.`) || testBase.startsWith(`${base}-`))
   );
 }
+
+/**
+ * Whether a name is bound by an enclosing lexical scope at a position.
+ *
+ * # Why this exists rather than a call to the TypeScript checker
+ *
+ * The analyzer reported a floating promise on this code:
+ *
+ * ```ts
+ * import { save } from "./store.js";          // async
+ * export function run(save: (v: number) => void): void {
+ *   save(1);                                   // the PARAMETER, synchronous
+ * }
+ * ```
+ *
+ * It resolved the callee by searching declarations for a matching **name**, and
+ * so did the verifier — independently, and to the same wrong answer. Structural
+ * independence held completely; the mistake still survived twice, because both
+ * sides settled the disputed fact the same way.
+ *
+ * The verifier now binds callees through the TypeScript checker. The obvious
+ * fix here would be to do that too, and it would be a mistake: two components
+ * calling one binder is one derivation with two callers, and the next defect in
+ * that binder is a defect in both. So the analyzer instead walks lexical scopes
+ * over the AST — a different implementation, in a different package, that can
+ * be wrong in different ways.
+ *
+ * Agreement then means something. Today both conclude that `save` binds to the
+ * parameter, and they reach it by unrelated routes.
+ *
+ * # Deliberately narrow
+ *
+ * It answers one question — *does an enclosing scope declare this name?* — and
+ * says nothing about what the binding is or whether it is asynchronous. A
+ * broader "resolve this symbol" helper shared between analyzer and verifier is
+ * exactly the coupling being avoided.
+ */
+export function isLexicallyShadowed(
+  source: string,
+  path: string,
+  name: string,
+  line: number,
+): boolean {
+  const file = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    path.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+
+  const lineOf = (node: ts.Node): { start: number; end: number } => ({
+    start: file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1,
+    end: file.getLineAndCharacterOfPosition(node.getEnd()).line + 1,
+  });
+
+  let shadowed = false;
+
+  const declaresName = (node: ts.Node): boolean => {
+    // Parameters and locally declared functions/variables. Imports are
+    // deliberately excluded: an imported name is not a shadow, it is the outer
+    // binding the analyzer already resolved.
+    if (ts.isParameter(node) || ts.isVariableDeclaration(node)) {
+      return ts.isIdentifier(node.name) && node.name.text === name;
+    }
+    if (ts.isFunctionDeclaration(node) && node.name !== undefined) {
+      return node.name.text === name;
+    }
+    return false;
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (shadowed) return;
+
+    const isScope =
+      ts.isFunctionDeclaration(node) ||
+      ts.isFunctionExpression(node) ||
+      ts.isArrowFunction(node) ||
+      ts.isMethodDeclaration(node) ||
+      ts.isBlock(node);
+
+    if (isScope) {
+      const span = lineOf(node);
+      // Only scopes that actually contain the position can shadow it. A
+      // sibling function declaring the same name is not a shadow, and treating
+      // it as one would suppress real findings — the failure mode opposite to
+      // the one this fixes, and just as silent.
+      if (span.start <= line && line <= span.end) {
+        const declarations: ts.Node[] = [];
+        if (ts.canHaveModifiers(node)) {
+          const parameters = (
+            node as { parameters?: ts.NodeArray<ts.ParameterDeclaration> }
+          ).parameters;
+          if (parameters !== undefined) declarations.push(...parameters);
+        }
+        for (const statement of ts.isBlock(node) ? node.statements : []) {
+          if (ts.isVariableStatement(statement)) {
+            declarations.push(...statement.declarationList.declarations);
+          } else if (ts.isFunctionDeclaration(statement)) {
+            declarations.push(statement);
+          }
+        }
+        if (declarations.some(declaresName)) {
+          shadowed = true;
+          return;
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  ts.forEachChild(file, visit);
+  return shadowed;
+}

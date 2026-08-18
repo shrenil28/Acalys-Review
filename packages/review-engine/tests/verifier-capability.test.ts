@@ -74,6 +74,32 @@ describe("Verifier capability, on injected challenges", () => {
     expect(report.pairsDiscriminated).toBe(1);
   });
 
+  it("still filters the candidate the analyzer used to produce", () => {
+    // ── Regression cover that survives the analyzer being fixed ───────────
+    //
+    // The live corpus case now asserts the analyzer stays SILENT, which
+    // protects analyzer precision and exercises the verifier not at all. This
+    // replays the candidate the analyzer really produced before the fix, with
+    // its original claim, evidence and location.
+    //
+    // With both, the two regressions are distinguishable:
+    //
+    //     analyzer regression   the live case starts speaking again
+    //     verifier regression   this replay stops being filtered
+    //
+    // Without it, fixing the analyzer would have quietly deleted the only
+    // evidence that the verifier catches anything.
+    const report = evaluateChallenges(VERIFIER_CHALLENGES);
+    const replay = report.outcomes.find(
+      (outcome) => outcome.id === "historical-shadowed-parameter",
+    );
+
+    expect(replay, "the historical replay is missing").toBeDefined();
+    // The requirement is that it is not CONFIRMED. Refuting it is better and is
+    // the recorded gold; abstaining still stops publication.
+    expect(replay?.actual).not.toBe("verified");
+  });
+
   it("records the committed capability matrix", () => {
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
 
@@ -98,7 +124,19 @@ describe("Verifier capability, on injected challenges", () => {
       should_reject: {
         verified: 0,
         rejected: 3,
-        inconclusive: 2,
+        // Three, since the historical replay joined. It comes back
+        // `inconclusive` rather than `rejected`: the verifier's own binding
+        // says the callee is synchronous while the analyzer's supplied
+        // evidence says asynchronous, and it treats that as a conflict rather
+        // than trusting its own independent derivation over evidence handed to
+        // it.
+        //
+        // Recorded as a MISS, not relabelled. `should_reject` is the right
+        // gold — the repository does settle this — and a verifier that
+        // weighted its own binding above supplied evidence would refute it.
+        // Changing the label to fit the implementation is how a corpus stops
+        // measuring anything.
+        inconclusive: 3,
         unavailable: 0,
       },
       should_abstain: {
@@ -118,7 +156,7 @@ describe("Verifier capability, on injected challenges", () => {
     // Fail-closed: an empty matrix satisfies every zero above.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
     expect(report.outcomes).toHaveLength(VERIFIER_CHALLENGES.length);
-    expect(report.outcomes.length).toBeGreaterThanOrEqual(11);
+    expect(report.outcomes.length).toBeGreaterThanOrEqual(12);
     expect(report.provenance).toBe("injected");
     for (const gold of ["should_verify", "should_reject", "should_abstain"]) {
       expect(

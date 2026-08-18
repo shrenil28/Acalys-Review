@@ -51,6 +51,8 @@ import type {
   CorrectnessFamily,
   Suppression,
 } from "../finding.js";
+import { isLexicallyShadowed } from "@acalys/code-intelligence";
+
 import { propose } from "../finding.js";
 
 export const ANALYZER_ID = "acalys.correctness.async-completion";
@@ -314,6 +316,24 @@ export function analyzeAsyncCompletion(
 
     const source = parse(item.path, item.suppliedContent);
 
+    /**
+     * Whether the callee at a line is bound by an enclosing local scope.
+     *
+     * `declarations` is a map from NAME to async declarations found across the
+     * supplied context, and a name is not a binding. A parameter, a local
+     * `const`, or a nested function declaring the same name shadows the import,
+     * and the promise the analyzer is about to report does not exist.
+     *
+     * Resolved through `@acalys/code-intelligence`'s lexical scope walk rather
+     * than the TypeScript checker. The verifier uses the checker; if the
+     * analyzer did too, one binder would settle the disputed fact for both
+     * sides and the next defect in it would be a defect in both. Two
+     * implementations, in two packages, that can be wrong in different ways —
+     * so their agreement carries information.
+     */
+    const shadowed = (name: string, line: number): boolean =>
+      isLexicallyShadowed(item.suppliedContent, item.path, name, line);
+
     const emit = (
       node: ts.Node,
       ruleId: string,
@@ -377,7 +397,14 @@ export function analyzeAsyncCompletion(
         if (ts.isCallExpression(condition)) {
           const name = calleeName(condition);
           const declared =
-            name === undefined ? undefined : declarations.get(name);
+            name === undefined ||
+            shadowed(
+              name,
+              source.getLineAndCharacterOfPosition(condition.getStart(source))
+                .line + 1,
+            )
+              ? undefined
+              : declarations.get(name);
           const evidence =
             name === undefined || declared === undefined
               ? undefined
@@ -480,7 +507,14 @@ export function analyzeAsyncCompletion(
 
         const name = root === undefined ? undefined : calleeName(root);
         const declared =
-          name === undefined ? undefined : declarations.get(name);
+          name === undefined ||
+          shadowed(
+            name,
+            source.getLineAndCharacterOfPosition(node.getStart(source)).line +
+              1,
+          )
+            ? undefined
+            : declarations.get(name);
 
         if (
           name !== undefined &&

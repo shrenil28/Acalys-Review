@@ -99,13 +99,26 @@ export interface FunnelReport {
   readonly withheld: number;
 
   /**
-   * Spurious candidates verification did not verify. The benefit.
+   * Analyzer false positives the verifier **refuted**.
    *
-   * Counts `rejected` and `inconclusive` alike: both stop the candidate, and
-   * insisting on `rejected` would credit the verifier only when it is certain,
-   * which is not how the suppression actually works.
+   * Split from the ones it merely declined to confirm, because the two are
+   * different strengths of evidence and collapsing them overstates the
+   * verifier:
+   *
+   * ```
+   * refuted    "I established this claim is false"
+   * abstained  "I found enough disagreement not to stand behind it"
+   * ```
+   *
+   * Both stop publication, and only the first is the verifier proving the
+   * analyzer wrong. Reporting one number called "caught" credits the stronger
+   * claim for the weaker work.
    */
-  readonly falsePositivesCaught: number;
+  readonly falsePositivesRefuted: number;
+  /** Analyzer false positives that ended `inconclusive`. Also stopped. */
+  readonly falsePositivesAbstained: number;
+  /** Refuted plus abstained: everything that did not reach a developer. */
+  readonly falsePositivesFiltered: number;
   /** Real defects verification did not verify. The cost. */
   readonly truePositivesLost: number;
   /** Spurious candidates that reached publication anyway. The residue. */
@@ -137,9 +150,11 @@ export interface FunnelReport {
 
   /**
    * Of the false positives the analyzer produced, how many verification
-   * stopped. `undefined` when the corpus contains none to stop.
+   * stopped by any means. `undefined` when the corpus contains none to stop.
    */
-  readonly falsePositiveCatchRate: Ratio;
+  readonly falsePositiveFilterRate: Ratio;
+  /** And how many it actually refuted. The stronger claim, measured apart. */
+  readonly falsePositiveRefutationRate: Ratio;
 
   /** Context tokens across analysis and verification, per published finding. */
   readonly tokensPerPublishedFinding: Ratio;
@@ -402,7 +417,19 @@ export async function evaluateFunnel(
     promoted: count((journey) => journey.promoted),
     published,
     withheld: count((journey) => journey.promoted && !journey.published),
-    falsePositivesCaught: count(
+    falsePositivesRefuted: count(
+      (journey) =>
+        !journey.wanted &&
+        journey.attempt.status === "completed" &&
+        journey.attempt.decision === "rejected",
+    ),
+    falsePositivesAbstained: count(
+      (journey) =>
+        !journey.wanted &&
+        journey.attempt.status === "completed" &&
+        journey.attempt.decision === "inconclusive",
+    ),
+    falsePositivesFiltered: count(
       (journey) => !journey.wanted && !journey.promoted,
     ),
     truePositivesLost: count((journey) => journey.wanted && !journey.promoted),
@@ -413,9 +440,18 @@ export async function evaluateFunnel(
     publishedRecall: ratio(truePositivesPublished, plantedTotal),
     losses,
     planted: plantedTotal,
-    // `undefined`, not zero, when the analyzer produced nothing false to catch.
-    falsePositiveCatchRate: ratio(
+    // `undefined`, not zero, when the analyzer produced nothing false to stop.
+    falsePositiveFilterRate: ratio(
       count((journey) => !journey.wanted && !journey.promoted),
+      spuriousCandidates,
+    ),
+    falsePositiveRefutationRate: ratio(
+      count(
+        (journey) =>
+          !journey.wanted &&
+          journey.attempt.status === "completed" &&
+          journey.attempt.decision === "rejected",
+      ),
       spuriousCandidates,
     ),
     tokensPerPublishedFinding: ratio(

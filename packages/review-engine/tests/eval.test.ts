@@ -33,58 +33,38 @@ describe("Analyzer corpus", () => {
     const report = await evaluateCorpus(ANALYZER_CORPUS);
     expect(report.cases.length).toBe(ANALYZER_CORPUS.length);
     expect(report.cases.length).toBeGreaterThanOrEqual(14);
-    for (const bucket of [
-      "positive",
-      "clean",
-      "incremental",
-      "adversarial",
-      // The fifth bucket. `clean` asserts the analyzer stays silent, so it
-      // exercises nothing downstream — verification is never asked about a
-      // case the analyzer said nothing on. `false_positive` is where the
-      // analyzer *speaks and is wrong*, which is the only input that can
-      // measure whether verification earns its cost.
-      "false_positive",
-    ]) {
+    for (const bucket of ["positive", "clean", "incremental", "adversarial"]) {
       expect(report.cases.some((c) => c.bucket === bucket)).toBe(true);
     }
   }, 60_000);
 
-  it("finds every planted defect", async () => {
+  it("finds every planted defect, and names any it missed", async () => {
     const report = await evaluateCorpus(ANALYZER_CORPUS);
     expect(report.recall).toBe(1);
-
     // Failures carry the `because` of the case, so a red test states its own
-    // cause rather than printing an id. The known false positive is excluded:
-    // it is a failure by construction, and `failures()` counts spurious
-    // findings alongside missed ones.
-    expect(
-      failures(report).filter(
-        (failure) => !failure.includes("fp-shadowed-by-parameter"),
-      ),
-    ).toEqual([]);
+    // cause rather than printing an id.
+    expect(failures(report)).toEqual([]);
   }, 60_000);
 
-  it("produces nothing on clean code, and is wrong exactly once elsewhere", async () => {
+  it("produces nothing at all on clean code", async () => {
     // The adoption metric. A reviewer with excellent recall and two false
     // positives per clean pull request gets switched off, and its recall stops
     // mattering that afternoon.
     const report = await evaluateCorpus(ANALYZER_CORPUS);
     expect(report.falsePositivesOnCleanCases).toBe(0);
 
-    // ── Precision is no longer 1.0, and that is a correction ──────────────
+    // ── Back to 1.0, and this time it is earned ───────────────────────────
     //
-    // It read 1.0 because every case in the corpus was one the analyzer got
-    // right. Seven plausible lookalikes were then probed — a promise awaited
-    // through a variable, a handled `.catch()`, an explicit `void`, a returned
-    // promise, a `.then()` chain, a rethrowing catch, an added optional
-    // parameter — and the analyzer was silent on all of them, which is
-    // genuinely good. The eighth found a real defect in it: a callee shadowed
-    // by a synchronous parameter, reported as a floating promise because
-    // resolution is by name.
+    // It read 1.0 originally because every case was one the analyzer got right.
+    // Probing found a real defect — a callee shadowed by a synchronous
+    // parameter, reported as a floating promise because resolution was by name
+    // — and precision correctly fell to 10/11.
     //
-    // 10/11. Asserted exactly, so improving it is deliberate and so nobody
-    // reads a corpus-shaped 1.0 as a claim about production.
-    expect(report.precision).toBe(0.9091);
+    // The analyzer now resolves the callee through a lexical scope walk, and
+    // `shadowed-parameter-is-not-a-defect` asserts silence on exactly that
+    // code. A corpus-shaped 1.0 is still not a claim about production; it is a
+    // claim that every mistake this corpus knows about is fixed.
+    expect(report.precision).toBe(1);
   }, 60_000);
 
   it("reports recall per family, so a regression names where to look", async () => {

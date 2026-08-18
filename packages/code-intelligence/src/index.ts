@@ -8,6 +8,7 @@ export {
   SYMBOL_KINDS,
   containingSymbol,
   extractFile,
+  isLexicallyShadowed,
   isTestFor,
   looksGenerated,
   referencingFiles,

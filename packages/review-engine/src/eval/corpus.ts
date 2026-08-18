@@ -67,22 +67,34 @@ const asyncStore =
   "export async function save(value: number): Promise<void> {\n  return;\n}";
 
 export const ANALYZER_CORPUS: readonly AnalyzerCase[] = [
-  // ── false positive ─────────────────────────────────────────────────────
+  // ── the case that was a false positive, and is now the regression ──────
   //
-  // Found by probing the analyzer rather than imagined. Seven plausible
+  // Found by probing the analyzer rather than imagined. Eight plausible
   // lookalikes were tried — a promise awaited through a variable, a handled
   // `.catch()`, an explicit `void`, a returned promise, a `.then()` chain with
-  // a tail handler, a rethrowing catch, an added optional parameter — and the
-  // analyzer stayed silent on every one. It is conservative, which is the right
-  // default and is why this bucket has exactly one member.
+  // a tail handler, a rethrowing catch, an added optional parameter, a name
+  // collision — and the analyzer was silent on every one. It is conservative,
+  // which is the right default.
   //
-  // This one it gets wrong, and the mechanism is the classic failure of
-  // name-based resolution: `save` here is a **parameter** of synchronous type,
-  // shadowing the imported asynchronous `save`. The analyzer matches by name,
-  // finds the import, and reports a floating promise that cannot exist.
+  // This one it got wrong, through the classic failure of name-based
+  // resolution: `save` here is a **parameter** of synchronous type, shadowing
+  // the imported asynchronous `save`. The analyzer matched by name, found the
+  // import, and reported a floating promise that cannot exist.
+  //
+  // It served its purpose first — the verifier was given independent binding
+  // resolution and stopped it, which is the only natural evidence that
+  // verification filters anything — and only then was the analyzer fixed. In
+  // that order, deliberately: fixing the analyzer first would have deleted the
+  // evidence before it was collected.
   {
-    id: "fp-shadowed-by-parameter",
-    bucket: "false_positive",
+    id: "shadowed-parameter-is-not-a-defect",
+    // Reclassified from `false_positive` to `clean` when the analyzer was
+    // fixed. It stays in the corpus, in the bucket that asserts **silence**,
+    // because a fixture that disappears when the bug is fixed takes the
+    // regression cover with it. The verifier's ability to catch this candidate
+    // is preserved separately, as a historical replay challenge — see
+    // `verifier-corpus.ts`.
+    bucket: "clean",
     files: {
       "src/shadow.ts": [
         'import { save } from "./store.js";',
@@ -96,7 +108,7 @@ export const ANALYZER_CORPUS: readonly AnalyzerCase[] = [
     // Nothing is wanted here: the code is correct.
     expect: [],
     because:
-      "`save` is a synchronous parameter shadowing the imported async one; name-based resolution reports a floating promise that cannot exist, and this is the only input that can measure whether verification catches an analyzer mistake",
+      "`save` is a synchronous parameter shadowing the imported async one; the analyzer resolves the callee through a lexical scope walk and must now stay silent, and if it speaks again this case says so",
   },
 
   // ── positive ───────────────────────────────────────────────────────────

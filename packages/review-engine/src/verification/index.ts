@@ -43,12 +43,14 @@ export {
   verifyDeterministically,
 } from "./deterministic.js";
 export {
+  CLAIM_MATCHERS,
   COMPETENCE_FAILURES,
   REASONS_BY_CAPABILITY,
   UNSUPPORTED_REASONS,
   VERIFICATION_CAPABILITIES,
   assertReasonForCapability,
   assessCompetence,
+  type ClaimMatcher,
   type CompetenceAssessment,
   type CompetenceFailure,
   type VerificationCapability,

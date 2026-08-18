@@ -156,52 +156,104 @@ export function assertReasonForCapability(
 }
 
 /**
- * Claims that turn on semantics no repository contains.
+ * The capability registry.
  *
- * Checked **first**, because such a claim often also mentions a promise — the
- * provider case says "retrying `charge()`" and `charge` is asynchronous — and
- * matching the async family first would route it to a procedure that cannot
- * settle it. Order here is the fix, not an optimisation.
+ * Declarative on purpose. The first implementation was a chain —
+ * `if (external) … else if (async) …` — and it worked because there were two
+ * cases and the order happened to be right. That does not survive step 3: with
+ * async, exception flow, signature compatibility, transaction semantics and
+ * concurrency, one claim can syntactically resemble three capabilities, and the
+ * answer would depend on which `else if` a contributor happened to add first.
+ *
+ * So selection is: match every entry, then decide from how many matched.
+ *
+ * ```
+ * 0 matched   no_applicable_procedure   → inconclusive
+ * 1 matched   run that procedure
+ * n matched   an explicit dominance rule, or ambiguous_claim_target
+ * ```
+ *
+ * Registration order is therefore not load-bearing, and a property test
+ * asserts it: shuffling this array must not change any assessment.
+ *
+ * # Dominance, where semantics genuinely require it
+ *
+ * `external_semantics` dominates everything it overlaps with, and that is a
+ * claim about the world rather than a tie-break. The provider case says
+ * *"retrying `charge()` may double-charge because the provider is not
+ * idempotent"* — it mentions an asynchronous call, so the async matcher fires
+ * too, and it is genuinely a claim about payment semantics that no amount of
+ * TypeScript can settle. Dominance is declared as data, not encoded in
+ * position.
  */
-const EXTERNAL_SEMANTICS: readonly RegExp[] = [
-  /\bidempoten/i,
-  /\bexactly[- ]once\b/i,
-  /\bat[- ]least[- ]once\b/i,
-  /\bprovider\b/i,
-  /\bthird[- ]party\b/i,
-  /\bupstream service\b/i,
-  /\brate[- ]limit/i,
-];
+export interface ClaimMatcher {
+  /** The capability this routes to, or `undefined` when it only declines. */
+  readonly capability: VerificationCapability | undefined;
+  /** Reported when this matcher wins and has no capability. */
+  readonly declines: CompetenceFailure | undefined;
+  readonly patterns: readonly RegExp[];
+  /**
+   * Matchers this one overrides when both fire.
+   *
+   * Declared rather than positional, so adding a capability cannot silently
+   * change an existing routing decision by landing above or below it.
+   */
+  readonly dominates: readonly string[];
+  readonly id: string;
+}
 
-/**
- * Claims about whether an asynchronous value is consumed.
- *
- * Written against the vocabulary the analyzers actually emit — "the promise
- * returned by `f()` is discarded", "its rejection is never handled", "returns a
- * promise and is used directly as a condition" — rather than against a
- * hypothetical phrasing. A classifier tuned to language nobody produces routes
- * everything to `unsupported` and looks conservative while doing nothing.
- */
-const ASYNC_VALUE_USE: readonly RegExp[] = [
-  /\bpromise\b/i,
-  /\brejection\b/i,
-  /\bawait\b/i,
-  /\basynchronous\b/i,
-];
-
-/**
- * Claims about control flow, exception flow and interface compatibility.
- *
- * Recognized only to be *declined*. Naming them is what makes the gap
- * diagnosable: `unsupported_claim_family` on a swallowed-error claim is a
- * capability to build, and the funnel's stage attribution can say so.
- */
-const OTHER_FAMILIES: readonly RegExp[] = [
-  /\bcatch\b/i,
-  /\bdiscards the error\b/i,
-  /\bnever uses it\b/i,
-  /\bis called without\b/i,
-  /\brequired\b/i,
+export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
+  {
+    id: "external_semantics",
+    capability: undefined,
+    declines: "requires_external_semantics",
+    patterns: [
+      /\bidempoten/i,
+      /\bexactly[- ]once\b/i,
+      /\bat[- ]least[- ]once\b/i,
+      /\bprovider\b/i,
+      /\bthird[- ]party\b/i,
+      /\bupstream service\b/i,
+      /\brate[- ]limit/i,
+    ],
+    // A claim about provider semantics that also mentions a promise is still a
+    // claim about provider semantics.
+    dominates: ["async_value_use", "other_families"],
+  },
+  {
+    id: "async_value_use",
+    capability: "async_value_use",
+    declines: undefined,
+    // Written against the vocabulary the analyzers actually emit — "the promise
+    // returned by `f()` is discarded", "its rejection is never handled",
+    // "returns a promise and is used directly as a condition" — rather than a
+    // hypothetical phrasing. A classifier tuned to language nobody produces
+    // routes everything to `unsupported` and looks conservative while doing
+    // nothing.
+    patterns: [
+      /\bpromise\b/i,
+      /\brejection\b/i,
+      /\bawait\b/i,
+      /\basynchronous\b/i,
+    ],
+    dominates: [],
+  },
+  {
+    id: "other_families",
+    capability: undefined,
+    declines: "unsupported_claim_family",
+    // Recognized only to be declined. Naming them is what makes the gap
+    // diagnosable: `unsupported_claim_family` on a swallowed-error claim is a
+    // capability to build, and the funnel's stage attribution can say so.
+    patterns: [
+      /\bcatch\b/i,
+      /\bdiscards the error\b/i,
+      /\bnever uses it\b/i,
+      /\bis called without\b/i,
+      /\brequired\b/i,
+    ],
+    dominates: [],
+  },
 ];
 
 /**
@@ -214,25 +266,42 @@ const OTHER_FAMILIES: readonly RegExp[] = [
  */
 export function assessCompetence(
   input: VerificationInput,
+  /**
+   * The registry to consult. Injectable **only** so the order-independence
+   * property can genuinely reorder it — a test that shuffled a copy this
+   * function never reads would assert nothing, which is the exact vacuity this
+   * project keeps finding.
+   */
+  matchers: readonly ClaimMatcher[] = CLAIM_MATCHERS,
 ): CompetenceAssessment {
   const text = [input.claim.statement, ...input.claim.steps].join(" ");
 
-  if (EXTERNAL_SEMANTICS.some((pattern) => pattern.test(text))) {
-    return { kind: "unsupported", reason: "requires_external_semantics" };
+  const matched = matchers.filter((matcher) =>
+    matcher.patterns.some((pattern) => pattern.test(text)),
+  );
+
+  if (matched.length === 0) {
+    return { kind: "unsupported", reason: "unsupported_claim_family" };
   }
 
-  const asyncClaim = ASYNC_VALUE_USE.some((pattern) => pattern.test(text));
-  const otherClaim = OTHER_FAMILIES.some((pattern) => pattern.test(text));
+  // Drop anything a matched matcher dominates. Order-independent: the result
+  // is the same whichever order the registry is written in.
+  const dominated = new Set(matched.flatMap((matcher) => matcher.dominates));
+  const surviving = matched.filter((matcher) => !dominated.has(matcher.id));
 
-  // A claim naming two mechanism families is one this verifier cannot target.
-  // Guessing which half to adjudicate is how a confident answer gets produced
-  // about the half that was not checked.
-  if (asyncClaim && otherClaim) {
+  if (surviving.length > 1) {
+    // A claim naming two mechanism families with no declared dominance between
+    // them. Guessing which half to adjudicate is how a confident answer gets
+    // produced about the half that was not checked.
     return { kind: "unsupported", reason: "ambiguous_claim_target" };
   }
-  if (asyncClaim) {
-    return { kind: "supported", capability: "async_value_use" };
-  }
 
-  return { kind: "unsupported", reason: "unsupported_claim_family" };
+  const winner = surviving[0] ?? matched[0];
+  if (winner === undefined || winner.capability === undefined) {
+    return {
+      kind: "unsupported",
+      reason: winner?.declines ?? "unsupported_claim_family",
+    };
+  }
+  return { kind: "supported", capability: winner.capability };
 }

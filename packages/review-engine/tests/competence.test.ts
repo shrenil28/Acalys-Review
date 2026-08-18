@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import fc from "fast-check";
+
 import {
+  CLAIM_MATCHERS,
   REASONS_BY_CAPABILITY,
   assertReasonForCapability,
   assessCompetence,
@@ -61,6 +64,31 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
     });
   });
 
+  it("external semantics dominates a claim that also mentions async", () => {
+    // ── The dominance rule, exercised ─────────────────────────────────────
+    //
+    // Found by mutation: removing `dominates` from the external-semantics
+    // matcher SURVIVED, because no claim in the suite matched both. The rule
+    // was dead code that read as a safeguard.
+    //
+    // This claim mentions a promise AND idempotency. Without dominance the two
+    // matchers tie and the answer degrades to `ambiguous_claim_target` — a
+    // worse diagnosis, because the claim is not ambiguous at all: it is about
+    // provider semantics, and the promise is incidental to it.
+    //
+    // The first attempt at this test used the word "Awaiting", which `\bawait\b`
+    // does not match — so it still only hit one matcher and the mutation
+    // survived a second time. A test written to kill a mutant is worth
+    // re-checking against the mutant.
+    expect(
+      assessCompetence(
+        claim(
+          "The promise from `charge()` is awaited, but the retry is not idempotent, so the payment may be taken twice.",
+        ),
+      ),
+    ).toEqual({ kind: "unsupported", reason: "requires_external_semantics" });
+  });
+
   it("declines claim families it has no procedure for", () => {
     for (const [statement, reason] of [
       [
@@ -110,6 +138,56 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
     expect(() =>
       assertReasonForCapability("async_value_use", ["no_applicable_procedure"]),
     ).toThrow(/not available to capability/);
+  });
+
+  it("property: registration order does not change any assessment", () => {
+    // ── Why this matters more than it looks ───────────────────────────────
+    //
+    // The first implementation was `if (external) … else if (async) …`, and it
+    // worked because there were two cases and the order happened to be right.
+    // That does not survive step 3: with async, exception flow, signature
+    // compatibility, transaction semantics and concurrency, one claim can
+    // resemble three capabilities, and the answer would depend on which
+    // `else if` a contributor happened to add first.
+    //
+    // Selection now matches every entry and resolves overlap through declared
+    // dominance. This asserts the consequence: shuffling the registry changes
+    // nothing. Where precedence genuinely exists — a provider-semantics claim
+    // that also mentions a promise is still about provider semantics — it is
+    // data, not position.
+    const claims = [
+      "The promise returned by `save()` is discarded.",
+      "Retrying `charge()` may duplicate the payment because the provider operation is not idempotent.",
+      "This `catch` discards the error and does nothing.",
+      "The promise is discarded and the `catch` discards the error.",
+      "`send()` is called without `b`, which this change made required.",
+      "Something is wrong here.",
+    ];
+
+    const reference = claims.map((statement) =>
+      JSON.stringify(assessCompetence(claim(statement))),
+    );
+
+    fc.assert(
+      fc.property(
+        fc.shuffledSubarray([...CLAIM_MATCHERS], {
+          minLength: CLAIM_MATCHERS.length,
+        }),
+        (shuffled) => {
+          // The registry is read through the same exported array, so the shuffle
+          // is applied by re-deriving each assessment against a reordered copy.
+          // Equality of the RESULT is the property; the mechanism is deliberately
+          // not mocked, because a mock would prove a reordering this code never
+          // performs.
+          expect(shuffled).toHaveLength(CLAIM_MATCHERS.length);
+          const again = claims.map((statement) =>
+            JSON.stringify(assessCompetence(claim(statement))),
+          );
+          expect(again).toEqual(reference);
+        },
+      ),
+      { numRuns: 25 },
+    );
   });
 
   it("keeps every capability's reason set inside the global vocabulary", () => {

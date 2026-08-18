@@ -52,65 +52,55 @@ describe("The funnel baseline", () => {
     ).toEqual([]);
   });
 
-  it("verification now BUYS precision, without costing more recall", async () => {
-    // ── The demonstration step 2 exists to produce ────────────────────────
+  it("the analyzer no longer produces the false positive at all", async () => {
+    // ── Where the natural corpus stands after 2b ──────────────────────────
     //
-    // Before epistemic independence:
+    //     analyzer precision    10/11 → 1.0    lexical scope walk
+    //     published precision     5/5   → 1.0   unchanged
+    //     published recall        0.5   → 0.5   unchanged
     //
-    //     candidate precision   10/11
-    //     published precision    5/6     verification made it WORSE
-    //     published recall       0.5
+    // The order mattered. The verifier was given independent binding first and
+    // shown to stop the candidate — the only natural evidence that verification
+    // filters anything — and the analyzer was fixed only after that evidence
+    // was collected. Reversed, the fix would have deleted the measurement.
     //
-    // After:
-    //
-    //     candidate precision   10/11
-    //     published precision    5/5     the analyzer's false positive stopped
-    //     published recall       0.5     unchanged
-    //
-    // The verifier removed the analyzer's only false positive and cost nothing
-    // extra in recall. That is the first point at which it pays for itself on
-    // the natural corpus rather than on hand-written challenges.
+    // And the two components were fixed by DIFFERENT means: the analyzer walks
+    // lexical scopes in `@acalys/code-intelligence`, the verifier binds through
+    // the TypeScript checker. Fixing both with one shared resolver would have
+    // restored precision and quietly undone the independence that produced it.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
 
+    expect(report.candidatePrecision).toBe(1);
     expect(report.publishedPrecision).toBe(1);
-    expect(report.candidatePrecision).toBe(0.9091);
-    expect(report.publishedPrecision ?? 0).toBeGreaterThan(
-      report.candidatePrecision ?? 1,
-    );
     expect(report.falsePositivesPublished).toBe(0);
-    expect(report.falsePositivesCaught).toBe(1);
+
+    // No candidate at all for the shadowed case.
+    expect(
+      report.journeys.filter(
+        (journey) => journey.caseId === "shadowed-parameter-is-not-a-defect",
+      ),
+    ).toEqual([]);
   });
 
-  it("no longer shares the analyzer's blind spot", async () => {
-    // ── Structural independence was never the hard part ───────────────────
+  it("reports an absent denominator rather than a flattering zero", async () => {
+    // ── The consequence the metric split was built for ────────────────────
     //
-    // P1-H stopped the analyzer's context, confidence, reasoning and rule
-    // identity reaching the verifier, and there is no API through which any of
-    // it could. All of that held — and the verifier still confirmed
-    // `fp-shadowed-by-parameter`, because both sides settled the disputed fact
-    // the same way: find a declaration whose NAME matches.
+    // With the analyzer fixed, the natural corpus contains no false positives,
+    // so the live filter rate has no denominator. It is `undefined`, not `0`
+    // and not `1`:
     //
-    //     structural independence   inputs are not shared
-    //     epistemic independence    the METHOD of settling the fact is not
+    //     0 / 0 rendered as 0   "verification caught nothing"
+    //     0 / 0 rendered as 1   "verification caught everything"
     //
-    // Only the second buys anything. The verifier now asks the TypeScript
-    // checker which declaration the callee binds to; `save` binds to the
-    // synchronous parameter shadowing the async import, and the claim stops.
-    //
-    // It stops as `inconclusive` rather than `rejected`, which is the better
-    // answer: the verifier's own binding says synchronous while the analyzer's
-    // supplied evidence says asynchronous, and
-    // `conflicting_independent_evidence` is exactly what that reason is for.
-    // Something IS known, and what is known disagrees.
+    // Both are claims about a measurement that was never taken. The evidence
+    // that the verifier filters this candidate is not lost — it moved to the
+    // historical replay challenge, where it is measured against the verifier
+    // rather than against a pipeline that no longer produces the input.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
 
-    const shadowed = report.journeys.filter(
-      (journey) => journey.caseId === "fp-shadowed-by-parameter",
-    );
-    expect(shadowed.length, "the analyzer no longer produces this").toBe(1);
-    expect(shadowed[0]?.wanted).toBe(false);
-    expect(shadowed[0]?.promoted).toBe(false);
-    expect(shadowed[0]?.published).toBe(false);
+    expect(report.falsePositivesFiltered).toBe(0);
+    expect(report.falsePositiveFilterRate).toBeUndefined();
+    expect(report.falsePositiveRefutationRate).toBeUndefined();
   });
 
   it("distinguishes a measured zero from an absent denominator", async () => {
@@ -120,7 +110,9 @@ describe("The funnel baseline", () => {
     // argument for deleting the verifier, when it was an argument about the
     // corpus. Now the corpus has one, so the rate is defined and genuinely 0.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
-    expect(report.falsePositiveCatchRate).toBe(1);
+    // The live corpus has no false positives left, so both rates are
+    // undefined rather than confidently zero.
+    expect(report.falsePositiveFilterRate).toBeUndefined();
 
     const empty = await evaluateFunnel([]);
     // No candidates at all: every ratio is undefined rather than a confident 0
@@ -128,7 +120,8 @@ describe("The funnel baseline", () => {
     expect(empty.candidatePrecision).toBeUndefined();
     expect(empty.publishedPrecision).toBeUndefined();
     expect(empty.publishedRecall).toBeUndefined();
-    expect(empty.falsePositiveCatchRate).toBeUndefined();
+    expect(empty.falsePositiveFilterRate).toBeUndefined();
+    expect(empty.falsePositiveRefutationRate).toBeUndefined();
     expect(empty.tokensPerPublishedFinding).toBeUndefined();
   });
 
@@ -194,7 +187,9 @@ describe("The funnel baseline", () => {
     //     published precision 1.0  every published finding is real, against an
     //                              analyzer precision of 10/11 — verification
     //                              now buys precision instead of costing it.
-    //     false positives caught 1 measured against a real denominator.
+    //     FP rates undefined       no false positives left in the natural
+    //                              corpus. Not zero — there is no denominator,
+    //                              and the evidence moved to the replay corpus.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
 
     expect({
@@ -207,16 +202,16 @@ describe("The funnel baseline", () => {
       publishedRecall: report.publishedRecall,
       publishedPrecision: report.publishedPrecision,
     }).toEqual({
-      candidates: 11,
+      candidates: 10,
       verified: 5,
       rejected: 0,
-      inconclusive: 6,
+      inconclusive: 5,
       promoted: 5,
       published: 5,
       publishedRecall: 0.5,
-      // Every published finding is real. The analyzer's one false positive is
-      // stopped by a verifier that binds callees through the checker rather
-      // than by name.
+      // Every published finding is real, and so is every candidate: the
+      // analyzer's one false positive is gone at source. The verifier's
+      // ability to stop it is preserved as a historical replay challenge.
       publishedPrecision: 1,
     });
   });

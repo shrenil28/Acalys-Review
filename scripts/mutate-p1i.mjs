@@ -207,10 +207,10 @@ const MUTATIONS = [
   },
   {
     id: 24,
-    name: "external semantics checked after the async family, not before",
+    name: "external semantics no longer dominates the async family",
     file: "packages/review-engine/src/verification/competence.ts",
-    find: '  if (EXTERNAL_SEMANTICS.some((pattern) => pattern.test(text))) {\n    return { kind: "unsupported", reason: "requires_external_semantics" };\n  }',
-    replace: "",
+    find: '    dominates: ["async_value_use", "other_families"],',
+    replace: "    dominates: [],",
     suite: "packages/review-engine/tests/competence.test.ts",
   },
   {
@@ -223,11 +223,19 @@ const MUTATIONS = [
   },
   {
     id: 26,
+    // Retargeted after 2b. It was aimed at the funnel suite, and it SURVIVED
+    // once the analyzer stopped producing the shadowed candidate: the natural
+    // pipeline no longer exercises the verifier's defence against it at all.
+    //
+    // That is the exact reason the defect is preserved in three forms. The
+    // mechanism test and the historical replay are where this guarantee now
+    // lives, and the mutation has to be pointed at them or it measures a path
+    // that no longer runs.
     name: "a shadowing parameter is treated as asynchronous (name-based answer)",
     file: "packages/review-engine/src/verification/binding.ts",
     find: "    return ts.isFunctionTypeNode(type)\n      ? isPromiseAnnotation(type.type)\n      : undefined;",
     replace: "    return ts.isFunctionTypeNode(type) ? true : undefined;",
-    suite: "packages/review-engine/tests/funnel-baseline.test.ts",
+    suite: "packages/review-engine/tests/binding.test.ts",
   },
   {
     id: 27,
@@ -237,6 +245,30 @@ const MUTATIONS = [
     replace:
       '    return { kind: "resolved", producesPromise: false, via: "typescript_checker", declaredAt: undefined };',
     suite: "packages/review-engine/tests/verifier-capability.test.ts",
+  },
+  {
+    id: 28,
+    name: "analyzer ignores lexical shadowing again",
+    file: "packages/code-intelligence/src/symbols.ts",
+    find: "        if (declarations.some(declaresName)) {",
+    replace: "        if (false) {",
+    suite: "packages/review-engine/tests/binding.test.ts",
+  },
+  {
+    id: 29,
+    name: "any same-named declaration counts as a shadow",
+    file: "packages/code-intelligence/src/symbols.ts",
+    find: "      if (span.start <= line && line <= span.end) {",
+    replace: "      if (true) {",
+    suite: "packages/review-engine/tests/binding.test.ts",
+  },
+  {
+    id: 30,
+    name: "competence routing depends on registration order",
+    file: "packages/review-engine/src/verification/competence.ts",
+    find: "  const surviving = matched.filter((matcher) => !dominated.has(matcher.id));",
+    replace: "  const surviving = matched.slice(0, 1);",
+    suite: "packages/review-engine/tests/competence.test.ts",
   },
   {
     id: 17,
