@@ -8,7 +8,15 @@ P1-D     claims · leases · retries · concurrency   ✓
 P1-E.1   delivery → queued ReviewRun               ✓
 P1-E.2   deterministic lifecycle + crash recovery  ✓
 P1-E.3   real GitHub publication reconciliation    BLOCKED
+P1-F     code intelligence + context planner       ✓
+P1-F.2   planner eval — metrics + committed baseline  ✓
 ```
+
+P1-F.2 lands before the analyzer on purpose. Without planner metrics, a P1-G regression
+can be seen but not attributed: "the reviewer missed the bug" and "the reviewer was never
+shown the bug" produce the same red test and need opposite fixes. See
+[README.md](./README.md#planner-metrics--upstream-of-all-four-buckets-and-built-first) for
+the metric table and the two defects the numbers found.
 
 **Phase 0 remains frozen.** Every defect found so far has been an implementation
 or runtime problem — transaction boundaries, unstable execution identity, test

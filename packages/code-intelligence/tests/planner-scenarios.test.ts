@@ -92,7 +92,15 @@ describe("Scenario: the bug is in the callee, not the changed caller", () => {
       (item) => item.reason === "containing_symbol",
     );
     expect(containing?.symbol?.name).toBe("checkout");
-    expect(containing?.suppliedContent).toContain("parseAmount(raw) * 100");
+    // The body may be carried by the whole changed file rather than repeated
+    // under the symbol item — the assembler collapses text it already supplied.
+    // What matters is that the reviewer can see the code and knows which
+    // declaration is under review, so assert both, not the storage layout.
+    expect(
+      context.items.some((item) =>
+        item.suppliedContent.includes("parseAmount(raw) * 100"),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -326,7 +334,16 @@ describe("Scenario: the same change shifted by 100 lines", () => {
     const nearSymbol = near.items.find((i) => i.reason === "containing_symbol");
     const farSymbol = far.items.find((i) => i.reason === "containing_symbol");
     expect(farSymbol?.symbol?.name).toBe(nearSymbol?.symbol?.name);
-    expect(farSymbol?.suppliedContent).toBe(nearSymbol?.suppliedContent);
+    expect(farSymbol?.representation).toBe(nearSymbol?.representation);
+
+    // Position may change the line numbers; it must not change whether the
+    // declaration reaches the reviewer.
+    const declares = (context: typeof near) =>
+      context.items.some((item) =>
+        item.suppliedContent.includes("return value * 2;"),
+      );
+    expect(declares(far)).toBe(declares(near));
+    expect(declares(near)).toBe(true);
   });
 });
 
@@ -454,5 +471,131 @@ describe("Symbol extraction", () => {
     );
     expect(tricky.symbols.map((s) => s.name)).not.toContain("ghost");
     expect(tricky.symbols.map((s) => s.name)).not.toContain("phantom");
+  });
+});
+
+describe("Text supplied once, whatever the scoring order", () => {
+  /**
+   * Found by the eval, not by reading the code.
+   *
+   * The changed file is offered whole and its enclosing declaration is offered
+   * again, so the same bytes were being paid for twice. On a squeezed budget
+   * the corpus spent its entire allowance on two copies of one file and evicted
+   * the test that stated the intent — a duplicate is not wasted tokens, it is
+   * missing context.
+   */
+  const body = [
+    "export function subject(value: number): number {",
+    ...Array.from(
+      { length: 12 },
+      (_unused, index) => `  const v${String(index)} = ${String(index)};`,
+    ),
+    "  return value * 2;",
+    "}",
+  ].join("\n");
+
+  const near = { "src/a.ts": body };
+  // Padding pushes the whole-file candidate's size penalty past the symbol's,
+  // so the symbol is admitted FIRST. Same defect, opposite order.
+  const far = {
+    "src/a.ts": `${"// filler\n".repeat(2_000)}${body}`,
+  };
+
+  const plan = (
+    files: Record<string, string>,
+    line: number,
+    budget = GENEROUS,
+  ) =>
+    planContext(
+      repository(files, [{ path: "src/a.ts", changedLines: [line] }]),
+      budget,
+    );
+
+  const suppliedTwice = (context: ReturnType<typeof planContext>) =>
+    context.items.filter((item) =>
+      item.suppliedContent.includes("return value * 2;"),
+    ).length;
+
+  it("supplies the declaration body exactly once when the file comes first", () => {
+    expect(suppliedTwice(plan(near, 2))).toBe(1);
+  });
+
+  it("supplies it exactly once when the symbol outscores the file", () => {
+    const context = plan(far, 2_002);
+    // Confirms the ordering this case exists to cover; without it the test
+    // would silently re-test the previous one.
+    expect(context.items[0]?.reason).toBe("containing_symbol");
+    expect(suppliedTwice(context)).toBe(1);
+  });
+
+  it("replaces the duplicate with a pointer that names its location", () => {
+    const context = plan(near, 2);
+    const pointer = context.items.find(
+      (item) => item.representation === "metadata",
+    );
+
+    expect(pointer?.reason).toBe("containing_symbol");
+    expect(pointer?.symbol?.name).toBe("subject");
+    expect(pointer?.suppliedContent).toContain("src/a.ts:1-15");
+    // A pointer that could be mistaken for a declaration is worse than the
+    // duplication it replaced.
+    expect(pointer?.suppliedContent).not.toContain("return value * 2;");
+  });
+
+  it("frees the collapsed budget for context that would otherwise be evicted", () => {
+    const withTest = {
+      ...near,
+      "src/a.test.ts": [
+        'import { subject } from "./a.js";',
+        "it('works', () => subject(1));",
+      ].join("\n"),
+    };
+
+    const budget = 100;
+    const context = planContext(
+      repository(withTest, [{ path: "src/a.ts", changedLines: [2] }]),
+      budget,
+    );
+
+    // The premise, asserted rather than assumed: paying for the body twice
+    // would not fit in this budget, so the test file's presence is the saving
+    // and not a coincidence of sizing.
+    const file = context.items.find((item) => item.kind === "source_file");
+    expect(file).toBeDefined();
+    expect((file?.estimatedTokens ?? 0) * 2).toBeGreaterThan(budget);
+
+    expect(paths(context)).toContain("src/a.test.ts");
+    expect(context.budget.consumed).toBeLessThanOrEqual(budget);
+  });
+
+  it("never points at text that was itself truncated", () => {
+    // Collapsing against an excerpt would point the reviewer at a declaration
+    // the excerpt may have cut away.
+    const context = plan(far, 202, 300);
+    const covering = context.items.find((item) => item.kind === "source_file");
+    if (covering?.representation === "excerpt") {
+      expect(
+        context.items.every(
+          (item) => item.representation !== "metadata" || item === covering,
+        ),
+      ).toBe(true);
+    }
+    expect(context.budget.consumed).toBeLessThanOrEqual(300);
+  });
+
+  it("never collapses an instruction into a pointer", () => {
+    // An instruction reduced to "see above" is a rule the reviewer cannot read.
+    const context = planContext(
+      repository(near, [{ path: "src/a.ts", changedLines: [2] }], {
+        instructions: [{ path: "AGENTS.md", content: body }],
+      }),
+      GENEROUS,
+    );
+
+    const instruction = context.items.find(
+      (item) => item.kind === "instruction",
+    );
+    expect(instruction?.representation).toBe("full");
+    expect(instruction?.suppliedContent).toBe(body);
   });
 });

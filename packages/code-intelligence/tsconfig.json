@@ -13,5 +13,5 @@
       "@acalys/contracts/internal": ["../contracts/src/internal/index.ts"]
     }
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "scripts"]
 }

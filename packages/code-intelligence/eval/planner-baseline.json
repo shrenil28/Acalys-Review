@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "scenarios": {
+    "callee-holds-the-bug": {
+      "irrelevantContextRatio": 0,
+      "tokenUtilization": 0.0008,
+      "truncationRate": 0,
+      "suppliedItems": 3,
+      "suppliedTokens": 84
+    },
+    "contract-lives-in-an-interface": {
+      "irrelevantContextRatio": 0,
+      "tokenUtilization": 0.0008,
+      "truncationRate": 0,
+      "suppliedItems": 3,
+      "suppliedTokens": 81
+    },
+    "generated-file-must-not-evict": {
+      "irrelevantContextRatio": 0,
+      "tokenUtilization": 0.0004,
+      "truncationRate": 0,
+      "suppliedItems": 3,
+      "suppliedTokens": 41
+    },
+    "injected-instruction-stays-data": {
+      "irrelevantContextRatio": 0,
+      "tokenUtilization": 0.0004,
+      "truncationRate": 0,
+      "suppliedItems": 3,
+      "suppliedTokens": 42
+    },
+    "instructions-are-mandatory": {
+      "irrelevantContextRatio": 0,
+      "tokenUtilization": 0.0005,
+      "truncationRate": 0,
+      "suppliedItems": 4,
+      "suppliedTokens": 47
+    },
+    "stability-baseline": {
+      "irrelevantContextRatio": 0,
+      "tokenUtilization": 0.0003,
+      "truncationRate": 0,
+      "suppliedItems": 2,
+      "suppliedTokens": 28
+    },
+    "stability-shifted": {
+      "irrelevantContextRatio": 0,
+      "tokenUtilization": 0.0035,
+      "truncationRate": 0,
+      "suppliedItems": 2,
+      "suppliedTokens": 351
+    },
+    "test-encodes-the-intent": {
+      "irrelevantContextRatio": 0,
+      "tokenUtilization": 0.0007,
+      "truncationRate": 0,
+      "suppliedItems": 3,
+      "suppliedTokens": 73
+    }
+  },
+  "stability": {
+    "stability-baseline~stability-shifted": 1
+  }
+}

@@ -448,6 +448,85 @@ export function scoreCandidates(
  *   "never considered" are different facts, and only the first explains a
  *   missed finding.
  */
+/**
+ * The text of a pointer item.
+ *
+ * Names the location rather than restating the body, and says explicitly that
+ * the body is elsewhere in the same context — a reader that cannot tell a
+ * pointer from a declaration has been given a truncated file without being
+ * told.
+ */
+function pointerTo(candidate: ScoredCandidate): string {
+  const span =
+    candidate.startLine === undefined || candidate.endLine === undefined
+      ? candidate.path
+      : `${candidate.path}:${String(candidate.startLine)}-${String(candidate.endLine)}`;
+  const name = candidate.symbol?.qualifiedName ?? candidate.path;
+  // Terse on purpose: the pointer is paid for on every collapse, and prose
+  // explaining the mechanism to the reader would often cost more than the few
+  // lines it replaced.
+  return `[${span}] ${name} — body shown above`;
+}
+
+/**
+ * Collapses already-admitted items whose text a newly-admitted file repeats.
+ *
+ * De-duplication has to work in **both** orders, because scoring decides the
+ * order and the size penalty routinely puts a small symbol ahead of the large
+ * file that contains it. Handling only "file first, symbol second" would make
+ * the saving depend on file length, which is precisely the case where it
+ * matters most.
+ *
+ * Mutates in place and returns the tokens freed, which the caller subtracts —
+ * so the budget released by a collapse is available to everything that follows.
+ */
+function collapseCovered(
+  items: AssembledItem[],
+  path: string,
+  content: string,
+): number {
+  let freed = 0;
+
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    // Compared against the item's ORIGINAL content, not the text it was
+    // supplied with. Pointing an excerpt at a later full copy is safe only if
+    // the whole declaration is in that copy; comparing supplied text would
+    // accept a pointer whose body had been truncated away.
+    //
+    // The two are indistinguishable today — excerpting spends every remaining
+    // token, so nothing is ever admitted after a truncation (asserted in
+    // `assembler.test.ts`). Swapping this for `suppliedContent` therefore kills
+    // no test. The stricter comparison is kept anyway: it is correct without
+    // depending on that budget property, which a future change to excerpting
+    // could remove without anyone connecting the two.
+    if (
+      item === undefined ||
+      item.path !== path ||
+      item.kind === "instruction" ||
+      item.content === content ||
+      item.content === "" ||
+      !content.includes(item.content)
+    ) {
+      continue;
+    }
+
+    const pointer = pointerTo(item);
+    const saving =
+      estimateTokens(item.suppliedContent) - estimateTokens(pointer);
+    if (saving <= 0) continue;
+
+    items[index] = {
+      ...item,
+      representation: "metadata",
+      suppliedContent: pointer,
+    };
+    freed += saving;
+  }
+
+  return freed;
+}
+
 export function assembleContext(
   scored: readonly ScoredCandidate[],
   budgetTokens: number,
@@ -455,6 +534,7 @@ export function assembleContext(
 ): AssembledContext {
   const items: AssembledItem[] = [];
   const omissions: Omission[] = [];
+  const suppliedInFull = new Map<string, string>();
   let consumed = 0;
   let ordinal = 0;
 
@@ -474,6 +554,36 @@ export function assembleContext(
 
     const remaining = budgetTokens - consumed;
 
+    // Text already supplied in full is pointed at, never repeated.
+    const covering = suppliedInFull.get(candidate.path);
+    if (
+      covering !== undefined &&
+      candidate.kind !== "instruction" &&
+      candidate.content !== "" &&
+      covering.includes(candidate.content)
+    ) {
+      const pointer = pointerTo(candidate);
+      const pointerTokens = estimateTokens(pointer);
+      // Cheap is not free, and a pointer is not automatically cheaper than what
+      // it replaces — a three-line function costs less than the sentence
+      // describing where to find it. Collapse only when it actually saves, and
+      // never past the budget; otherwise fall through and let the normal path
+      // decide.
+      if (
+        pointerTokens < candidate.estimatedTokens &&
+        pointerTokens <= remaining
+      ) {
+        items.push({
+          ...candidate,
+          representation: "metadata",
+          ordinal: ordinal++,
+          suppliedContent: pointer,
+        });
+        consumed += pointerTokens;
+        continue;
+      }
+    }
+
     if (candidate.estimatedTokens <= remaining) {
       items.push({
         ...candidate,
@@ -482,6 +592,10 @@ export function assembleContext(
         suppliedContent: candidate.content,
       });
       consumed += candidate.estimatedTokens;
+      if (candidate.kind === "source_file") {
+        suppliedInFull.set(candidate.path, candidate.content);
+        consumed -= collapseCovered(items, candidate.path, candidate.content);
+      }
       continue;
     }
 

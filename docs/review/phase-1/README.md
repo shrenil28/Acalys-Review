@@ -155,6 +155,57 @@ meaningful over both.
 **Cost per review** is measured everywhere and is easy to omit. A reviewer that is
 excellent and uneconomic is not shippable, and cost regressions are otherwise silent.
 
+### Planner metrics — upstream of all four buckets, and built first
+
+Every metric above measures the _reviewer_. None of them can distinguish the two failures
+that need opposite fixes:
+
+```
+the model saw the required context and failed to reason about it
+the model never saw the required context
+```
+
+So the planner is measured separately, on a corpus where the required context is known by
+construction ([`packages/code-intelligence/src/eval/`](../../../packages/code-intelligence/src/eval/)).
+Each requirement carries a `because`, so a failure states its own cause.
+
+| Metric                             | Judged as                    | Detects                                                                   |
+| ---------------------------------- | ---------------------------- | ------------------------------------------------------------------------- |
+| `requiredContextRecall`            | **invariant**, must be 1.0   | a reviewer asked to find a defect in code it could not see                |
+| `forbiddenAdmitted`                | **invariant**, must be empty | a generated file evicting hand-written context by arriving first          |
+| `instructionCoverage`              | **invariant**, must be 1.0   | conventions dropped, so the review answers a different question           |
+| `relevantSymbolCoverage`           | **invariant**, must be 1.0   | degradation to whole-file inclusion that still scores 1.0 on path recall  |
+| context stability                  | **invariant**, ≥ 0.9         | position changing what a reviewer is shown                                |
+| `irrelevantContextRatio`           | trend vs baseline            | a planner turning greedy — visible as cost long before quality            |
+| `tokenUtilization`                 | trend vs baseline            | low utilisation _with_ incomplete recall: failed to find, not out of room |
+| `truncationRate`                   | trend vs baseline            | excerpts, the quietest way to mislead — half a function looks whole       |
+| `suppliedTokens` / `suppliedItems` | trend vs baseline            | prompt cost moving without the selection changing                         |
+
+Invariants are absolute rather than ratcheted against the baseline, because ratcheting lets
+a regression become the new normal. Trends are compared to
+[`eval/planner-baseline.json`](../../../packages/code-intelligence/eval/planner-baseline.json)
+with a tolerance, and the baseline is regenerated deliberately
+(`npm run eval:baseline -w @acalys/code-intelligence`) so a planner change lands as a
+reviewable diff — "this edit dropped `irrelevantContextRatio` from 0.61 to 0.24" is a claim
+a reviewer can accept or reject; "the eval still passes" is not.
+
+**This paid for itself before the analyzer exists.** Two defects were found by the numbers
+rather than by reading the code:
+
+1. **The same text was supplied twice.** A changed file is offered whole and its enclosing
+   declaration is offered again. On a squeezed budget the corpus spent its entire allowance
+   on two copies of one file and evicted the test that stated the intent — a duplicate is
+   not wasted tokens, it is missing context. The duplicate is now a pointer: near-zero
+   tokens, `symbol` metadata intact, `representation: "metadata"` so nothing downstream
+   mistakes it for a body. De-duplication works in both scoring orders, because the size
+   penalty routinely ranks a small symbol above the large file containing it.
+2. **"The containing symbol" was resolving to a local variable.** `containingSymbol`
+   returns the innermost match, and every local `const` counted as a symbol — so a changed
+   `const total = a + b;` inside a 200-line function resolved to the assignment itself, and
+   the reviewer was offered four tokens as "the containing symbol" instead of the function.
+   The comment in `kindOf` had claimed this restriction since it was written; the code
+   never implemented it.
+
 ### Incremental: a confusion matrix, not a stability percentage
 
 A single stability number can look respectable while the reviewer is doing semantically

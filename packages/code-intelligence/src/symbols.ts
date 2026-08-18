@@ -94,8 +94,8 @@ function kindOf(node: ts.Node): SymbolKind | undefined {
   if (ts.isTypeAliasDeclaration(node)) return "type";
   if (ts.isEnumDeclaration(node)) return "enum";
   if (ts.isVariableDeclaration(node)) {
-    // Only top-level and arrow-function variables are symbols worth naming; a
-    // loop counter is not something a reviewer asks to see.
+    // A function-valued variable is a declaration a reviewer reasons about at
+    // any scope — a callback body is a real unit of review.
     const initializer = node.initializer;
     if (
       initializer !== undefined &&
@@ -103,7 +103,24 @@ function kindOf(node: ts.Node): SymbolKind | undefined {
     ) {
       return "function";
     }
-    return "variable";
+
+    // A plain variable is only a symbol at module scope. Local ones are not
+    // something a reviewer asks to see, and treating them as symbols actively
+    // hurts: `containingSymbol` returns the *innermost* match, so a changed
+    // `const total = a + b;` inside a 200-line function resolved to the
+    // assignment itself. The planner then offered that one line as "the
+    // containing symbol" and the reviewer never saw the function.
+    //
+    // Found by the eval, which noticed a containing-symbol item costing four
+    // tokens. The old comment here claimed this restriction; the code did not
+    // implement it.
+    const statement = node.parent?.parent;
+    const moduleScoped =
+      statement !== undefined &&
+      statement.parent !== undefined &&
+      ts.isSourceFile(statement.parent);
+
+    return moduleScoped ? "variable" : undefined;
   }
   return undefined;
 }
