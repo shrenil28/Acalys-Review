@@ -53,6 +53,17 @@ export const VERIFICATION_REASONS = [
   "claim_contradicted_by_context",
   "claimed_mechanism_not_present",
   "guarded_on_all_paths",
+  // Declared, and NOT produced by the P1-H verifier. Ownership is explicit
+  // rather than implied: change attribution is decided at the
+  // candidate-generation boundary, where base/head data exists, and a
+  // pre-existing defect is suppressed *before* verification. Measured as
+  // `change-attribution suppression`, never as a verifier rejection —
+  // conflating them would report a working counterfactual filter as the
+  // verifier disproving claims.
+  //
+  // Reserved here so that if the verifier is later given its own base/head
+  // planner and derives attribution independently, the vocabulary already
+  // holds the reason.
   "not_caused_by_change",
   "insufficient_evidence",
   "context_incomplete",
