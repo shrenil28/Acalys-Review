@@ -32,6 +32,7 @@
 
 import ts from "typescript";
 
+import { assertReasonForCapability, assessCompetence } from "./competence.js";
 import {
   assertReasonsSupport,
   type VerificationAttempt,
@@ -312,6 +313,11 @@ export function verifyDeterministically(
     // Checked on the way out, so a confirming reason can never appear under a
     // rejection however the branches below are edited later.
     assertReasonsSupport(decision, reasons);
+    // And that the reason belongs to the procedure that produced it. Every
+    // branch past the competence gate belongs to `async_value_use`, so a reason
+    // from another family arriving here means a future edit routed a claim to a
+    // procedure that cannot settle it — the P1-J.2 defect, returning.
+    assertReasonForCapability("async_value_use", reasons);
     return {
       status: "completed",
       decision,
@@ -320,6 +326,28 @@ export function verifyDeterministically(
       severity: input.proposedSeverity,
     };
   };
+
+  // ── The competence boundary ───────────────────────────────────────────
+  //
+  // Before asking whether the claim is true, ask whether there is a procedure
+  // that can settle this kind of claim. Everything below adjudicates
+  // asynchronous value use and nothing else; letting an unrelated proposition
+  // reach it is how `await charge(100)` came to refute a claim about payment
+  // idempotency.
+  //
+  // Note this runs before the context checks: a claim no procedure can settle
+  // is unsettleable whether or not the planner supplied the file, and reporting
+  // it as a context gap would send someone to fix a planner that is working.
+  const competence = assessCompetence(input);
+  if (competence.kind === "unsupported") {
+    return {
+      status: "completed",
+      decision: "inconclusive",
+      reasons: ["no_applicable_procedure"],
+      confidence: 0.1,
+      severity: input.proposedSeverity,
+    };
+  }
 
   if (context.incomplete || context.items.length === 0) {
     // The planner could not supply something it wanted. Not the analyzer's

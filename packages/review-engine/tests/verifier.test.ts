@@ -227,6 +227,24 @@ describe("Every reason code is reachable", () => {
     };
 
     record(verify({ "src/caller.ts": CALLER, "src/store.ts": ASYNC_STORE }));
+    // A claim no procedure adjudicates. Added when the competence boundary
+    // landed: the verifier now abstains on a claim family it has no way to
+    // settle, and that abstention has its own reason precisely so it is not
+    // mistaken for a planner gap.
+    record(
+      verify(
+        { "src/caller.ts": CALLER, "src/store.ts": ASYNC_STORE },
+        {
+          claim: {
+            statement:
+              "Retrying `charge()` may duplicate the payment because the provider operation is not idempotent.",
+            steps: [],
+            trigger: "a retry occurs",
+            consequence: "the payment is taken twice",
+          },
+        },
+      ),
+    );
     record(
       verify(
         { "src/caller.ts": CALLER, "src/store.ts": SYNC_STORE },

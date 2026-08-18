@@ -1,0 +1,122 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  REASONS_BY_CAPABILITY,
+  assertReasonForCapability,
+  assessCompetence,
+} from "../src/index.js";
+import type { VerificationInput } from "../src/index.js";
+
+const claim = (
+  statement: string,
+  steps: readonly string[] = [],
+): VerificationInput => ({
+  candidateId: "c1",
+  claim: {
+    statement,
+    steps: [...steps],
+    trigger: "the changed line executes",
+    consequence: "the described failure occurs",
+  },
+  location: { path: "src/a.ts", startLine: 1, endLine: 1 },
+  evidence: [],
+  remediation: "fix it",
+  revisionId: "r1",
+  repositoryId: "repo",
+  proposedSeverity: "medium",
+});
+
+describe("The verifier decides what it can adjudicate before adjudicating", () => {
+  it("recognizes the claim vocabulary the analyzers actually emit", () => {
+    // Written against real analyzer output rather than a hypothetical phrasing.
+    // A classifier tuned to language nobody produces routes everything to
+    // `unsupported` and looks conservative while doing nothing.
+    for (const statement of [
+      "The promise returned by `save()` is discarded.",
+      "`save()` is chained with `.then` but its rejection is never handled.",
+      "`isReady()` returns a promise and is used directly as a condition.",
+    ]) {
+      expect(assessCompetence(claim(statement)), statement).toEqual({
+        kind: "supported",
+        capability: "async_value_use",
+      });
+    }
+  });
+
+  it("declines a claim about semantics no repository contains", () => {
+    // ── The case the gate was built for ───────────────────────────────────
+    //
+    // This claim also mentions an asynchronous call, and the line it points at
+    // is a perfectly ordinary `await`. Matching the async family first would
+    // route it to a procedure that answers a different question confidently.
+    // External semantics are therefore checked FIRST — the order is the fix.
+    const assessment = assessCompetence(
+      claim(
+        "Retrying `charge()` may duplicate the payment because the provider operation is not idempotent.",
+      ),
+    );
+    expect(assessment).toEqual({
+      kind: "unsupported",
+      reason: "requires_external_semantics",
+    });
+  });
+
+  it("declines claim families it has no procedure for", () => {
+    for (const [statement, reason] of [
+      [
+        "This `catch` discards the error and does nothing.",
+        "unsupported_claim_family",
+      ],
+      [
+        "`send()` is called without `b`, which this change made required.",
+        "unsupported_claim_family",
+      ],
+    ] as const) {
+      expect(assessCompetence(claim(statement)), statement).toEqual({
+        kind: "unsupported",
+        reason,
+      });
+    }
+  });
+
+  it("declines a claim naming two mechanisms at once", () => {
+    // Guessing which half to adjudicate is how a confident answer gets produced
+    // about the half that was not checked.
+    expect(
+      assessCompetence(
+        claim("The promise is discarded and the `catch` discards the error."),
+      ),
+    ).toEqual({ kind: "unsupported", reason: "ambiguous_claim_target" });
+  });
+
+  it("is conservative by default", () => {
+    // The inversion that is the actual fix. Previously an unrecognized claim
+    // was adjudicated anyway and refuted when it could not be followed, so it
+    // was maximally dangerous. Now it is merely unanswered.
+    expect(assessCompetence(claim("Something is wrong here."))).toEqual({
+      kind: "unsupported",
+      reason: "unsupported_claim_family",
+    });
+  });
+
+  it("refuses a reason its capability cannot produce", () => {
+    // The next dimension of the table-driven discipline. A guard refutes "this
+    // promise is unhandled" and refutes nothing about "this operation is not
+    // idempotent", so the pairing has to be structural rather than remembered.
+    expect(() =>
+      assertReasonForCapability("async_value_use", ["guarded_on_all_paths"]),
+    ).not.toThrow();
+
+    expect(() =>
+      assertReasonForCapability("async_value_use", ["no_applicable_procedure"]),
+    ).toThrow(/not available to capability/);
+  });
+
+  it("keeps every capability's reason set inside the global vocabulary", () => {
+    // A capability cannot invent a reason the decision table has never seen,
+    // because `assertReasonsSupport` would not know what decision it justifies.
+    for (const [capability, reasons] of Object.entries(REASONS_BY_CAPABILITY)) {
+      expect(reasons.length, capability).toBeGreaterThan(0);
+    }
+  });
+});

@@ -67,6 +67,15 @@ export const VERIFICATION_REASONS = [
   "not_caused_by_change",
   "insufficient_evidence",
   "context_incomplete",
+  // No procedure applies to this kind of claim.
+  //
+  // Distinct from both of the above, and the distinction is the P1-J.3
+  // correction. `insufficient_evidence` and `context_incomplete` both say *we
+  // looked and could not settle it*; this says *we never had a way to look*.
+  // Collapsing them hides the difference between a planner to improve and a
+  // capability to build — and, worse, lets a verifier that adjudicated the
+  // wrong proposition report it as an evidence problem.
+  "no_applicable_procedure",
   // Independent context and the supplied evidence disagree. Distinct from
   // insufficiency: something *is* known, and what is known conflicts. Folding
   // it into `insufficient_evidence` would hide the most interesting signal a
@@ -97,6 +106,7 @@ export const REASON_SUPPORTS: Readonly<
 
   insufficient_evidence: "inconclusive",
   context_incomplete: "inconclusive",
+  no_applicable_procedure: "inconclusive",
   conflicting_independent_evidence: "inconclusive",
 };
 
