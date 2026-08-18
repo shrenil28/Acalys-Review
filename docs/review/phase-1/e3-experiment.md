@@ -61,8 +61,9 @@ stays valid through submit — it does not need re-resolving.
 marker intact — `id 3800595068`, `pull_request_review_id 4956696317`, path
 `.acalys-e3-probe.md`.
 
-**One provider normalization, and it matters.** The comment was created with
-`line: 1, side: "RIGHT"`. The review-scoped listing returns neither:
+**One observed response shape, and what it does — and does not — license.**
+The comment was created with `line: 1, side: "RIGHT"`. The review-scoped listing
+returned neither:
 
 ```
 sent       { path, line: 1, side: "RIGHT" }
@@ -70,10 +71,30 @@ returned   { path, position: 1, original_position: 1, commit_id, original_commit
            line / side / start_line: absent
 ```
 
-Content verification during reconciliation therefore **cannot** compare
-`line`/`side` round-tripped through `/reviews/{id}/comments`. The digest must be
-computed over fields the provider actually echoes on that endpoint, or read from
-`/pulls/{n}/comments` instead.
+This is an observation about **one endpoint on one day**, and it must not be
+promoted into a provider invariant. GitHub's current review-comment
+documentation says the opposite direction of travel: `position` is being phased
+out for creation, `line` + `side` are recommended, and responses may carry both
+the position-based and line-based fields. A probe that happened to exercise the
+position-shaped response is not evidence that `position` is canonical.
+
+So the correction is **not** "compute the digest over `position`". It is that
+Acalys keeps two anchors and never conflates them:
+
+```
+requested semantic anchor   ← ours, canonical, stable
+    path · line · startLine · side · startSide · revision
+
+provider-observed anchor    ← theirs, informational, may be absent or reshaped
+    provider comment id · position? · line? · side?
+    original_position? · original_line? · commit_id
+```
+
+Reconciliation reads whichever fields the provider actually returned; it never
+lets them redefine where the finding is. Making `position` canonical would also
+break in the case it is most needed — a comment that goes outdated after a later
+push, where the diff offset stops meaning anything while `path` + `line` +
+revision still do.
 
 **Final state: exactly one review carries the marker**, `state: "COMMENTED"`.
 No duplicate was produced.
@@ -84,7 +105,8 @@ No duplicate was produced.
 node_id                       stable global id, distinct from the numeric id
 commit_id                     the revision the review is anchored to
 original_commit_id            per comment — survives force-push
-position / original_position  the legacy diff-offset anchor
+position / original_position  a diff-offset anchor, returned by this endpoint;
+                              informational, never Acalys's source of truth
 author_association            NONE for an App
 ```
 
@@ -162,8 +184,10 @@ logical publication resulted.
 
 Two qualifications, neither of which downgrades the outcome:
 
-1. **The comment anchor is normalized** (`line`/`side` → `position`). Content
-   verification must be written against what the provider echoes.
+1. **The comment anchor came back reshaped on this endpoint.** Read what the
+   provider returns; keep our own semantic anchor canonical. Do not encode
+   `line`/`side` → `position` as a permanent provider rule — the documented
+   direction is the reverse.
 2. **The provider's 422 protects only the pending window.** It is a useful
    backstop, not a substitute for reconciliation.
 
@@ -180,8 +204,10 @@ Two qualifications, neither of which downgrades the outcome:
 
 ### Assumptions disproved or refined
 
-- **"The inline comment anchor round-trips."** It does not, on the review-scoped
-  endpoint. Refined: verify content against echoed fields.
+- **"The inline comment anchor round-trips."** Not on the review-scoped
+  endpoint, in this run. Refined into a modelling rule rather than a provider
+  law: the requested anchor is canonical, the observed anchor is recorded
+  alongside it, and neither is derived from the other.
 - **"A duplicate create is the main risk."** Only after submission. Before that,
   the provider refuses.
 - **"`state` alone identifies a pending review."** `submitted_at: null` is the
@@ -229,7 +255,7 @@ Phase 0 remains frozen; E.3 was additive.
 ```
 
 Nothing observed requires a Phase 0 contract to change. `commit_id`, `node_id`
-and `position` are provider-reference details that belong in the internal
-publication ledger, which is a Phase 1 persistence concept. Keeping
+and the observed anchor are provider-reference details that belong in the
+internal publication ledger, which is a Phase 1 persistence concept. Keeping
 `PublicationEffect` internal is what allowed the protocol to absorb the two
 refinements above without touching a frozen contract.

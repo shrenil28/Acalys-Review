@@ -522,6 +522,51 @@ describeWithPostgres(
       expect(intent?.state).not.toBe("published");
     }, 60_000);
 
+    it("the same logical key with the same digest is idempotent reuse", async () => {
+      // The other half of the invariant, and the half that has to keep working:
+      // a replayed stage must converge on the existing row rather than insert a
+      // second one or raise. Without this test the digest check could be
+      // "tightened" into rejecting every replay and nothing would notice.
+      const { runId } = await seed();
+      const { stages, publications } = stores();
+      const [existing] = await publications.listForRun(runId);
+      if (existing === undefined) throw new Error("missing intent");
+
+      for (let replay = 0; replay < 3; replay += 1) {
+        // Rewound so the stage genuinely re-executes, and the outcome is
+        // asserted: `publishing → publishing` is not a legal move, so looping
+        // over it would be refused early and this test would pass without ever
+        // reaching the insert it exists to exercise.
+        await database.pool.query(
+          "UPDATE review_runs SET state = 'reconciling' WHERE id = $1",
+          [runId],
+        );
+
+        const outcome = await stages.runStage(
+          scope,
+          runId,
+          "reconciling",
+          "publishing",
+          () => ({
+            publications: [
+              {
+                kind: "review",
+                logicalKey: existing.logicalKey,
+                contentDigest: existing.contentDigest,
+                provider: "github",
+              },
+            ],
+          }),
+        );
+        expect(outcome.kind).toBe("advanced");
+      }
+
+      const after = await publications.listForRun(runId);
+      expect(after).toHaveLength(1);
+      expect(after[0]?.id).toBe(existing.id);
+      expect(after[0]?.contentDigest).toBe(existing.contentDigest);
+    }, 60_000);
+
     it("the same logical key with a changed digest is refused at write time", async () => {
       const { runId } = await seed();
       const { stages, publications } = stores();

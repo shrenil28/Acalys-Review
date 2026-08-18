@@ -1,16 +1,24 @@
 # Phase 1 status
 
 ```
-P1-A     GitHub normalization                      ✓
-P1-B     GitHub App authentication                 ✓
-P1-C     secure durable webhook ingestion          ✓
-P1-D     claims · leases · retries · concurrency   ✓
-P1-E.1   delivery → queued ReviewRun               ✓
-P1-E.2   deterministic lifecycle + crash recovery  ✓
-P1-E.3   real GitHub publication reconciliation    ✓
-P1-F     code intelligence + context planner       ✓
-P1-F.2   planner eval — metrics + committed baseline  ✓
+P1-A                  GitHub normalization                      ✓
+P1-B                  GitHub App authentication                 ✓
+P1-C                  secure durable webhook ingestion          ✓
+P1-D                  claims · leases · retries · concurrency   ✓
+P1-E.1                delivery → queued ReviewRun               ✓
+P1-E.2                deterministic lifecycle + crash recovery  ✓
+P1-E.3                provider publication / reconciliation     ✓ LIVE PROVEN
+P1-F                  code intelligence + context planner       ✓
+P1-F.2                planner eval + committed baseline         ✓
+P1-PUBLISH-SURFACES   design checkpoint                         recorded
+P1-G                  correctness analyzer                      next
 ```
+
+`P1-PUBLISH-SURFACES` is recorded rather than built: the "one summary comment,
+edited across pushes" requirement exposed a real semantic distinction — an
+immutable `PublicationEffect` is not a mutable `PublicationSurface` — and it is
+written down before anything depends on conflating them. Additive, like
+P1-CONTEXT. See [publication-surfaces.md](./publication-surfaces.md).
 
 P1-F.2 lands before the analyzer on purpose. Without planner metrics, a P1-G regression
 can be seen but not attributed: "the reviewer missed the bug" and "the reviewer was never

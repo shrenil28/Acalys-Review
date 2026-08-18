@@ -26,6 +26,23 @@
  * what protects the second, and the body marker is what makes reconciliation
  * possible.
  *
+ * # The 422 is evidence, not the mechanism
+ *
+ * That "one pending review per pull request" behaviour is **observed**, not
+ * documented as an idempotency contract — GitHub's published docs describe 422
+ * only as a general validation failure. So it is treated as an extra layer that
+ * happens to be there, never as the reason duplicates cannot happen. The
+ * guarantee rests entirely on things Acalys controls:
+ *
+ *     a locally unique publication identity, minted before the first request
+ *     a stable marker embedded in the published body
+ *     reconcile-before-create, unconditionally
+ *     confirmation read back from provider state
+ *
+ * If GitHub removed the 422 tomorrow, none of the four would change and the
+ * protocol would still converge. That is the test for whether a provider
+ * behaviour has been depended on or merely benefited from.
+ *
  * # Why 5xx on a write is not "retryable"
  *
  * A 502 from a proxy means the request may have reached GitHub and succeeded.

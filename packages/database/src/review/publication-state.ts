@@ -20,10 +20,29 @@
  * retry — and P1-E.3 measured what a blind retry does after a submitted review
  * exists: GitHub accepts it, and a duplicate review appears on someone's pull
  * request. (Before submission GitHub refuses with 422, which protects exactly
- * one of the two windows and is not something to rely on.)
+ * one of the two windows. That behaviour is observed, not documented as an
+ * idempotency contract — a backstop to benefit from, never a mechanism to
+ * depend on. Remove it and nothing in this file would need to change.)
  *
  * So `unknown` is a first-class state whose only exits go through a provider
  * lookup. That is enforced by the store, not by convention.
+ *
+ * # What `attempting` means, precisely
+ *
+ * Not "a worker is alive and executing this POST". A durable state machine must
+ * never contain a state whose recovery protocol depends on the original process
+ * still existing — that is the same mistake as a lease that outlives its holder
+ * with no way to tell.
+ *
+ * `attempting` means:
+ *
+ * > an external attempt may have begun, so provider state may need
+ * > reconciliation before anything else is attempted.
+ *
+ * Read that way, a row abandoned by a dead worker is not stuck: it is simply a
+ * row in the same epistemic position as `unknown`, and the store treats it
+ * identically — no re-attempt without a fresh lookup. The crash matrix found
+ * this; the table as first written had no way out of `attempting` at all.
  *
  * # Why `failed` is terminal and `planned` is the retry state
  *

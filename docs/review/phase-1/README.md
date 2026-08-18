@@ -388,8 +388,13 @@ when it has complaints trains people to read its silence as "not run yet".
 one-way announcement, and they need to be discoverable from the comment itself.
 
 Rendering is the last step of publishing, not a separate feature: the content
-digest in the ledger is computed over what gets rendered, so a change to the
-template is a change to publication identity and has to be treated as one.
+digest in the ledger is computed over what gets rendered. A template change
+therefore changes the **desired content digest** — not the publication identity,
+which is a distinction worth being precise about, because the two imply opposite
+behaviour. See [publication-surfaces.md](./publication-surfaces.md): a summary
+comment edited in place is a _surface_, and a changed digest under a stable key
+is its normal case, not the invariant violation it would be for a submitted
+review.
 
 ---
 
