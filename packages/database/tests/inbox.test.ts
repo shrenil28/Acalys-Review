@@ -38,7 +38,7 @@ describeWithPostgres("Postgres webhook inbox", () => {
   let database: TestDatabase;
 
   beforeAll(async () => {
-    database = await startPostgres();
+    database = await startPostgres("inbox");
   }, 120_000);
 
   afterAll(async () => {

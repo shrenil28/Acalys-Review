@@ -231,16 +231,41 @@ export class PostgresWebhookInbox implements WebhookInbox {
   }
 
   /**
-   * Claims ready jobs.
+   * Claims ready jobs on a **lease**.
    *
-   * `FOR UPDATE SKIP LOCKED` is what lets several workers poll one table
-   * without serializing on it: each takes rows the others have not locked
-   * rather than blocking behind them.
+   * `FOR UPDATE SKIP LOCKED` lets several workers poll one table without
+   * serializing: each takes rows the others have not locked rather than
+   * blocking behind them. That handles contention. It does not handle death.
+   *
+   * A worker that claims a job and then dies would, with a plain
+   * `locked_at IS NULL` predicate, hold it forever — the delivery sits in
+   * `processing` with nothing able to reclaim it, and GitHub will not
+   * redeliver. So the claim carries an expiry, and a job whose lease has
+   * lapsed is claimable again:
+   *
+   *     never claimed          available_at <= now
+   *     claimed, worker alive  lease_expires_at > now    → skipped
+   *     claimed, worker dead   lease_expires_at <= now   → reclaimed
+   *
+   * The lease must outlast the work. Too short and a healthy worker has its
+   * job stolen mid-execution, which is worse than a delay: two workers then
+   * run the same delivery concurrently, and only the idempotent writes
+   * downstream keep that from duplicating review history.
+   *
+   * `attempts` increments on every claim, including reclaims, so a job that
+   * repeatedly kills its worker is visible as a poison record rather than
+   * cycling silently.
    */
-  public async claimJobs(limit: number): Promise<readonly ScheduledJob[]> {
+  public async claimJobs(
+    limit: number,
+    leaseMillis = 300_000,
+  ): Promise<readonly ScheduledJob[]> {
     const client = await this.#pool.connect();
     try {
       await client.query("BEGIN");
+      const now = this.#now();
+      const leaseExpiry = new Date(now.getTime() + leaseMillis);
+
       const result = await client.query<{
         id: string;
         delivery_row_id: string;
@@ -249,16 +274,20 @@ export class PostgresWebhookInbox implements WebhookInbox {
         available_at: Date;
         attempts: number;
       }>(
-        `UPDATE webhook_jobs SET locked_at = $1, attempts = attempts + 1
+        `UPDATE webhook_jobs
+            SET locked_at = $1, lease_expires_at = $3, attempts = attempts + 1
           WHERE id IN (
             SELECT id FROM webhook_jobs
-             WHERE locked_at IS NULL AND available_at <= $1
+             WHERE available_at <= $1
+               AND dead_lettered_at IS NULL
+               AND attempts < max_attempts
+               AND (lease_expires_at IS NULL OR lease_expires_at <= $1)
              ORDER BY available_at
              LIMIT $2
              FOR UPDATE SKIP LOCKED
           )
           RETURNING id, delivery_row_id, kind, payload, available_at, attempts`,
-        [this.#now(), limit],
+        [now, limit, leaseExpiry],
       );
       await client.query("COMMIT");
 
@@ -273,6 +302,72 @@ export class PostgresWebhookInbox implements WebhookInbox {
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Releases a finished job.
+   *
+   * Deleting rather than flagging: a completed job has no further use, and the
+   * partial index that makes the claim query fast stays proportional to the
+   * backlog rather than to history.
+   */
+  public async completeJob(jobId: string): Promise<void> {
+    const client = await this.#pool.connect();
+    try {
+      await client.query("DELETE FROM webhook_jobs WHERE id = $1", [jobId]);
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Returns a job for a later attempt, or dead-letters it.
+   *
+   * The bounded failure path. A delivery can be perfectly authenticated,
+   * perfectly persisted, and still semantically unusable — an unsupported
+   * action, a repository the installation can no longer read, a payload that
+   * fails normalization. Without a ceiling, that row consumes a worker slot
+   * forever.
+   *
+   * `retryable` is the caller's classification, and the distinction matters:
+   * a provider timeout deserves another attempt, a payload that cannot be
+   * normalized will fail identically every time and should stop immediately
+   * rather than burning the full budget.
+   */
+  public async releaseJob(
+    jobId: string,
+    options: {
+      readonly retryable: boolean;
+      readonly errorCode: string;
+      readonly retryAfterMillis?: number | undefined;
+    },
+  ): Promise<{ readonly deadLettered: boolean }> {
+    const client = await this.#pool.connect();
+    try {
+      const now = this.#now();
+      const result = await client.query<{ dead_lettered_at: Date | null }>(
+        `UPDATE webhook_jobs
+            SET locked_at = NULL,
+                lease_expires_at = NULL,
+                last_error_code = $2,
+                available_at = $3,
+                dead_lettered_at = CASE
+                  WHEN $4 = false OR attempts >= max_attempts THEN $5
+                  ELSE dead_lettered_at END
+          WHERE id = $1
+          RETURNING dead_lettered_at`,
+        [
+          jobId,
+          options.errorCode,
+          new Date(now.getTime() + (options.retryAfterMillis ?? 0)),
+          options.retryable,
+          now,
+        ],
+      );
+      return { deadLettered: result.rows[0]?.dead_lettered_at != null };
     } finally {
       client.release();
     }

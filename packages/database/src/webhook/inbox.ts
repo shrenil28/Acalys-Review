@@ -182,8 +182,28 @@ export interface WebhookInbox {
     deliveryId: string,
   ): Promise<WebhookDelivery | undefined>;
 
-  /** Jobs ready to run. The worker's query; ordered oldest first. */
-  claimJobs(limit: number): Promise<readonly ScheduledJob[]>;
+  /**
+   * Jobs ready to run, claimed on a lease so a dead worker releases them.
+   *
+   * Ordered oldest first.
+   */
+  claimJobs(
+    limit: number,
+    leaseMillis?: number,
+  ): Promise<readonly ScheduledJob[]>;
+
+  /** Releases a finished job. */
+  completeJob(jobId: string): Promise<void>;
+
+  /** Returns a job for a later attempt, or dead-letters it. */
+  releaseJob(
+    jobId: string,
+    options: {
+      readonly retryable: boolean;
+      readonly errorCode: string;
+      readonly retryAfterMillis?: number | undefined;
+    },
+  ): Promise<{ readonly deadLettered: boolean }>;
 
   markDeliveryState(
     deliveryRowId: string,

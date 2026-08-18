@@ -27,3 +27,14 @@ export {
   type PgQueryResult,
   type PostgresWebhookInboxOptions,
 } from "./webhook/postgres-inbox.js";
+
+export {
+  ReviewIngestionStore,
+  type ReviewRequestInput,
+  type RevisionInput,
+  type StoredReviewRequest,
+  type StoredReviewRun,
+  type StoredRevision,
+  type TenantScope,
+  type TransitionOutcome,
+} from "./review/ingestion-store.js";

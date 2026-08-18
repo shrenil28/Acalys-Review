@@ -21,10 +21,8 @@ import pg from "pg";
 const run = promisify(execFile);
 
 const IMAGE = "postgres:16-alpine";
-const CONTAINER = "acalys-test-postgres";
 const PASSWORD = "acalys-test";
 const DATABASE = "acalys_test";
-const PORT = 55432;
 
 export function dockerAvailable(): boolean {
   try {
@@ -35,13 +33,16 @@ export function dockerAvailable(): boolean {
   }
 }
 
-async function waitForReady(deadlineMillis = 60_000): Promise<void> {
+async function waitForReady(
+  container: string,
+  deadlineMillis = 60_000,
+): Promise<void> {
   const started = Date.now();
   for (;;) {
     try {
       await run("docker", [
         "exec",
-        CONTAINER,
+        container,
         "pg_isready",
         "-U",
         "postgres",
@@ -64,7 +65,25 @@ export interface TestDatabase {
   stop(): Promise<void>;
 }
 
-export async function startPostgres(): Promise<TestDatabase> {
+/**
+ * Starts a container **per test file**.
+ *
+ * Vitest runs files in parallel, so a single shared container name means one
+ * file's `docker rm -f` destroys the other's database mid-run. That surfaced as
+ * 16 tests reporting *skipped* rather than failing — the quiet failure mode
+ * this project keeps finding, where a suite claims success while verifying
+ * nothing.
+ *
+ * The name and port are derived from the caller's label so the isolation is
+ * visible in `docker ps` during a hung run.
+ */
+export async function startPostgres(label = "default"): Promise<TestDatabase> {
+  const CONTAINER = `acalys-test-postgres-${label}`;
+  // Deterministic per label, so a crashed run's container is found and removed
+  // by the next one rather than leaking a random port.
+  const PORT =
+    55_400 +
+    ([...label].reduce((total, char) => total + char.charCodeAt(0), 0) % 90);
   // Removed first, so a container left by an interrupted run does not make the
   // next one fail with a stale schema.
   await run("docker", ["rm", "-f", CONTAINER]).catch(() => undefined);
@@ -87,7 +106,7 @@ export async function startPostgres(): Promise<TestDatabase> {
     "fsync=off",
   ]);
 
-  await waitForReady();
+  await waitForReady(CONTAINER);
 
   const pool = new pg.Pool({
     host: "127.0.0.1",
@@ -98,16 +117,28 @@ export async function startPostgres(): Promise<TestDatabase> {
     max: 20,
   });
 
-  const migration = readFileSync(
-    fileURLToPath(
-      new URL("../migrations/0001_webhook_inbox.sql", import.meta.url),
+  // Applied in order, as a real deployment would. 0002 alters tables 0001
+  // creates, so running them independently would not exercise the schema that
+  // actually ships.
+  const migrations = [
+    "0001_webhook_inbox.sql",
+    "0002_review_ingestion.sql",
+  ].map((name) =>
+    readFileSync(
+      fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)),
+      "utf8",
     ),
-    "utf8",
   );
 
   const apply = async (): Promise<void> => {
-    await pool.query("DROP TABLE IF EXISTS webhook_jobs, webhook_deliveries");
-    await pool.query(migration);
+    await pool.query(
+      `DROP TABLE IF EXISTS review_run_transitions, review_runs, review_requests,
+         pull_request_revisions, pull_requests, repositories, organizations,
+         webhook_jobs, webhook_deliveries CASCADE`,
+    );
+    for (const migration of migrations) {
+      await pool.query(migration);
+    }
   };
 
   await apply();

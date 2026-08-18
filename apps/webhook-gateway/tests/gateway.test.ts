@@ -84,6 +84,14 @@ class MemoryInbox implements WebhookInbox {
     return Promise.resolve([]);
   }
 
+  public completeJob(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  public releaseJob(): Promise<{ readonly deadLettered: boolean }> {
+    return Promise.resolve({ deadLettered: false });
+  }
+
   public markDeliveryState(
     deliveryRowId: string,
     state: WebhookDelivery["state"],
