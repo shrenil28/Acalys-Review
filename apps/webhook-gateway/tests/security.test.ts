@@ -16,6 +16,8 @@ import {
   MIN_SECRET_LENGTH,
   applyServerTimeouts,
   assertStrongWebhookSecret,
+  compileTrustedProxies,
+  createClientIdentity,
   createGatewayApp,
   createRateLimiter,
   startGateway,
@@ -395,4 +397,174 @@ describe("Graceful shutdown", () => {
     expect(shutdowns).toEqual(["first"]);
     expect(running.server.listening).toBe(false);
   }, 15_000);
+});
+
+describe("Eviction cannot be gamed into a rate-limit bypass", () => {
+  it("never discards an active bucket to make room", () => {
+    // A bounded map with FIFO eviction converts a memory attack into a worse
+    // one: flood fresh addresses, evict every legitimate bucket before its
+    // window expires, and the limiter stops limiting anyone.
+    // Frozen: the point is that flooding cannot displace an ACTIVE bucket, so
+    // no window may lapse during the test.
+    const clock = 0;
+    const limiter = createRateLimiter({
+      limit: 2,
+      windowMillis: 60_000,
+      maxKeys: 4,
+      now: () => clock,
+    });
+
+    // An established client uses one of its two tokens.
+    expect(limiter.tryConsume("github")).toBe(true);
+
+    // An attacker floods thousands of fresh addresses.
+    for (let index = 0; index < 5_000; index += 1) {
+      limiter.tryConsume(`2001:db8::${index.toString(16)}`);
+    }
+
+    // The established bucket survived and still has exactly one token left —
+    // it was neither evicted nor reset.
+    expect(limiter.tryConsume("github")).toBe(true);
+    expect(limiter.tryConsume("github")).toBe(false);
+    expect(limiter.size).toBeLessThanOrEqual(4);
+  });
+
+  it("confines untrackable keys to a shared overflow budget", () => {
+    // The flood is limited as a group rather than each address getting a fresh
+    // budget — which is what a bypass would look like.
+    const limiter = createRateLimiter({
+      limit: 3,
+      windowMillis: 60_000,
+      maxKeys: 1,
+    });
+
+    limiter.tryConsume("established");
+
+    const allowed = Array.from({ length: 50 }, (_unused, index) =>
+      limiter.tryConsume(`attacker-${String(index)}`),
+    ).filter(Boolean).length;
+
+    expect(allowed).toBeLessThanOrEqual(3);
+  });
+
+  it("reclaims expired buckets before overflowing", () => {
+    let clock = 0;
+    const limiter = createRateLimiter({
+      limit: 1,
+      windowMillis: 1_000,
+      maxKeys: 2,
+      now: () => clock,
+    });
+
+    limiter.tryConsume("a");
+    limiter.tryConsume("b");
+    expect(limiter.size).toBe(2);
+
+    // Both windows lapse; a new key should get its own bucket, not overflow.
+    clock = 2_000;
+    expect(limiter.tryConsume("c")).toBe(true);
+    expect(limiter.tryConsume("c")).toBe(false);
+  });
+
+  it("property: an established key's budget is independent of flood size", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 2_000 }), (floodSize) => {
+        const limiter = createRateLimiter({
+          limit: 2,
+          windowMillis: 60_000,
+          maxKeys: 8,
+        });
+
+        limiter.tryConsume("legitimate");
+        for (let index = 0; index < floodSize; index += 1) {
+          limiter.tryConsume(`flood-${String(index)}`);
+        }
+
+        // Exactly one token remains, whatever the flood.
+        expect(limiter.tryConsume("legitimate")).toBe(true);
+        expect(limiter.tryConsume("legitimate")).toBe(false);
+      }),
+      { numRuns: 60 },
+    );
+  });
+});
+
+describe("Client identity under a proxy topology", () => {
+  const req = (peer: string, forwardedFor?: string) =>
+    ({
+      socket: { remoteAddress: peer },
+      headers:
+        forwardedFor === undefined ? {} : { "x-forwarded-for": forwardedFor },
+    }) as unknown as Parameters<ReturnType<typeof createClientIdentity>>[0];
+
+  it("ignores X-Forwarded-For when no proxy is configured", () => {
+    // Direct exposure is the safe default: an untrusted caller cannot
+    // influence its own rate-limit key.
+    const identity = createClientIdentity();
+    expect(identity(req("203.0.113.7", "1.2.3.4"))).toBe("203.0.113.7");
+  });
+
+  it("ignores the header from an untrusted peer even when proxies are configured", () => {
+    const identity = createClientIdentity({ trustedProxies: ["10.0.0.0/8"] });
+    expect(identity(req("203.0.113.7", "1.2.3.4"))).toBe("203.0.113.7");
+  });
+
+  it("reads the client through a trusted proxy", () => {
+    // Without this, every request behind a load balancer shares one bucket and
+    // the tight unauthenticated budget fires on legitimate traffic.
+    const identity = createClientIdentity({ trustedProxies: ["10.0.0.0/8"] });
+    expect(identity(req("10.1.2.3", "203.0.113.7"))).toBe("203.0.113.7");
+  });
+
+  it("counts hops from the right, which an attacker cannot control", () => {
+    // Each real proxy appends. A caller can prepend anything on the left but
+    // cannot remove what our own infrastructure wrote, so reading from the
+    // left is the classic spoofable mistake.
+    const identity = createClientIdentity({
+      trustedProxies: ["10.0.0.0/8"],
+      proxyHops: 1,
+    });
+    expect(identity(req("10.1.2.3", "9.9.9.9, 203.0.113.7"))).toBe(
+      "203.0.113.7",
+    );
+
+    const twoHops = createClientIdentity({
+      trustedProxies: ["10.0.0.0/8"],
+      proxyHops: 2,
+    });
+    expect(twoHops(req("10.1.2.3", "203.0.113.7, 10.0.0.5"))).toBe(
+      "203.0.113.7",
+    );
+  });
+
+  it("cannot be spoofed by prepending entries", () => {
+    const identity = createClientIdentity({ trustedProxies: ["10.0.0.0/8"] });
+    const spoofed = identity(req("10.1.2.3", "1.1.1.1, 2.2.2.2, 203.0.113.7"));
+    expect(spoofed).toBe("203.0.113.7");
+  });
+
+  it("matches IPv6 CIDRs and dual-stack mapped peers", () => {
+    const v6 = createClientIdentity({ trustedProxies: ["2001:db8::/32"] });
+    expect(v6(req("2001:db8:1::5", "203.0.113.7"))).toBe("203.0.113.7");
+    expect(v6(req("2001:dba:1::5", "203.0.113.7"))).toBe("2001:dba:1::5");
+
+    // Node reports IPv4 peers as ::ffff:a.b.c.d on a dual-stack socket, so one
+    // trusted-proxy entry must work regardless of socket mode.
+    const v4 = createClientIdentity({ trustedProxies: ["10.0.0.0/8"] });
+    expect(v4(req("::ffff:10.1.2.3", "203.0.113.7"))).toBe("203.0.113.7");
+  });
+
+  it("degrades to the peer when a trusted proxy sends no chain", () => {
+    // A misconfiguration is not an invitation to guess. One shared bucket is
+    // degraded; a spoofable key is unsafe.
+    const identity = createClientIdentity({ trustedProxies: ["10.0.0.0/8"] });
+    expect(identity(req("10.1.2.3"))).toBe("10.1.2.3");
+  });
+
+  it("rejects malformed trusted-proxy entries rather than trusting everything", () => {
+    expect(
+      compileTrustedProxies(["not-an-ip", "10.0.0.0/99", ""]),
+    ).toHaveLength(0);
+    expect(compileTrustedProxies(["10.0.0.0/8"])).toHaveLength(1);
+  });
 });

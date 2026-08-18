@@ -225,7 +225,9 @@ describe("Raw bytes are the authentication boundary", () => {
   it("bounds the body before authenticating it", async () => {
     // Cheap to send, expensive to reject is what makes a public endpoint a DoS
     // target. The ceiling applies before the handler runs.
-    expect(MAX_BODY_BYTES).toBe(26_214_400);
+    // 25 MiB — at or just above GitHub's 25 MB cap whichever way they mean it,
+    // so no legitimate delivery is refused.
+    expect(MAX_BODY_BYTES).toBe(25 * 1024 * 1024);
 
     const { app, inbox } = harness();
     const huge = `{"x":"${"a".repeat(MAX_BODY_BYTES)}"}`;

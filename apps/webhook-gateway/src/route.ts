@@ -52,11 +52,15 @@ import {
 } from "./security.js";
 
 /**
- * Ceiling on an accepted body.
+ * Ceiling on an accepted body: 25 MiB.
  *
- * GitHub caps payloads at 25 MB. Anything larger is not a delivery, and reading
- * it costs memory before a single byte can be authenticated. Rejected by
- * `express.raw` before the handler runs.
+ * GitHub caps webhook payloads at 25 MB and simply does not deliver an event
+ * whose payload would exceed it. 25 MiB (26,214,400 bytes) is at or just above
+ * that whichever way GitHub means "MB", so no legitimate delivery is refused.
+ *
+ * Anything larger is not a delivery, and buffering it costs memory before a
+ * single byte can be authenticated. Rejected by `express.raw` before the
+ * handler runs.
  */
 export const MAX_BODY_BYTES = 26_214_400;
 
@@ -128,9 +132,9 @@ const SIGNATURE_STATUS: Readonly<Record<SignatureFailure, number>> = {
  *
  * Takes the already-extracted action rather than the body. An earlier version
  * parsed the body here *and* again for the stored `action` column — doubling
- * the most expensive operation on the request path, on a payload that may be
- * 26 MB. Authenticated or not, parsing it twice is twice the CPU and twice the
- * peak memory for one delivery.
+ * the most expensive operation on the request path. A payload may approach
+ * GitHub's 25 MB limit, and authenticated or not, parsing it twice is twice
+ * the CPU and twice the peak memory for one delivery.
  */
 function jobsFor(
   event: string,
@@ -202,7 +206,7 @@ export function createGithubWebhookRoute(
   router.post(
     "/",
     // Before the body is read: an over-budget caller must not get us to buffer
-    // 26 MB before being turned away.
+    // 25 MiB before being turned away.
     rateLimitMiddleware(limits),
     // Route-level, so the exact bytes survive whatever the application mounted
     // globally. `type: () => true` accepts any content type: GitHub sends

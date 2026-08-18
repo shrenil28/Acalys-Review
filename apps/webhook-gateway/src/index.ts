@@ -9,7 +9,13 @@ export {
   type GithubWebhookRouteOptions,
 } from "./route.js";
 export {
+  compileTrustedProxies,
+  createClientIdentity,
+  type ClientIdentityOptions,
+} from "./client-identity.js";
+export {
   DEFAULT_SERVER_TIMEOUTS,
+  OVERFLOW_KEY,
   InsecureConfigurationError,
   MIN_SECRET_LENGTH,
   applyServerTimeouts,
@@ -20,6 +26,7 @@ export {
   penalizeUnauthenticated,
   rateLimitMiddleware,
   securityHeaders,
+  type ClientKeyResolver,
   type RateLimiter,
   type RateLimiterOptions,
   type ServerTimeouts,

@@ -10,6 +10,11 @@
 
 import type { NextFunction, Request, RequestHandler, Response } from "express";
 
+import {
+  createClientIdentity,
+  type ClientIdentityOptions,
+} from "./client-identity.js";
+
 /**
  * Rejects a webhook secret weak enough to be guessed.
  *
@@ -56,10 +61,24 @@ export function assertStrongWebhookSecret(secret: string): void {
  * inserts an entry per request and the limiter becomes the outage it was added
  * to prevent.
  *
- * So the map is capped and evicts the oldest entry when full. Eviction under
- * flood means a determined attacker can get their own entry dropped and regain
- * budget; that is an accepted trade, because the alternative is unbounded
- * growth. The cap is high enough that legitimate traffic never evicts.
+ * So the map is capped. But a cap alone converts one attack into another: with
+ * naive FIFO eviction, an attacker flooding fresh addresses evicts every
+ * legitimate bucket before its window expires, and the limiter stops limiting
+ * anyone. Bounded memory, and a rate-limit **bypass**.
+ *
+ * The eviction policy therefore never discards an *active* bucket. When the map
+ * is full it first sweeps entries whose windows have already expired — free,
+ * and enough under normal load. If every tracked key is still active, new keys
+ * are not tracked individually at all: they share a single **overflow bucket**.
+ *
+ *     established key   keeps its own bucket, whatever the flood
+ *     new key, room     gets its own bucket
+ *     new key, no room  shares the overflow budget
+ *
+ * An attacker with a large address pool is confined to the overflow bucket and
+ * cannot displace anyone. The cost is that genuinely new clients share a budget
+ * while under flood — degraded service for them, rather than no limiting for
+ * everyone.
  */
 export interface RateLimiterOptions {
   /** Requests allowed per window. */
@@ -76,52 +95,83 @@ export interface RateLimiter {
   readonly size: number;
 }
 
+/** The shared key used once the map is full of active buckets. */
+export const OVERFLOW_KEY = "\u0000overflow";
+
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   const maxKeys = options.maxKeys ?? 100_000;
   const now = options.now ?? (() => Date.now());
-  // Insertion-ordered, so the first key is the oldest — which is what makes
-  // eviction O(1) without a separate LRU structure.
   const buckets = new Map<string, { tokens: number; resetAt: number }>();
+
+  const fresh = (timestamp: number) => ({
+    tokens: options.limit - 1,
+    resetAt: timestamp + options.windowMillis,
+  });
+
+  /** Drops expired buckets. Amortized: only runs when the map is full. */
+  const sweepExpired = (timestamp: number): void => {
+    for (const [key, bucket] of buckets) {
+      if (timestamp >= bucket.resetAt) buckets.delete(key);
+    }
+  };
+
+  const consume = (key: string, timestamp: number): boolean => {
+    const existing = buckets.get(key);
+    if (existing === undefined || timestamp >= existing.resetAt) {
+      buckets.set(key, fresh(timestamp));
+      return true;
+    }
+    if (existing.tokens <= 0) return false;
+    existing.tokens -= 1;
+    return true;
+  };
+
+  /**
+   * Tracked keys, excluding the overflow bucket.
+   *
+   * The overflow bucket is a single fixed entry, not a tracked key, so it is
+   * not counted against the cap. Total memory is therefore `maxKeys + 1`
+   * entries at most — bounded, and the `+1` is a constant rather than
+   * something an attacker can grow.
+   */
+  const trackedSize = (): number =>
+    buckets.size - (buckets.has(OVERFLOW_KEY) ? 1 : 0);
 
   return {
     tryConsume(key: string): boolean {
       const timestamp = now();
-      const existing = buckets.get(key);
 
-      if (existing === undefined || timestamp >= existing.resetAt) {
-        if (buckets.size >= maxKeys) {
-          const oldest = buckets.keys().next();
-          if (!oldest.done) buckets.delete(oldest.value);
-        }
-        buckets.set(key, {
-          tokens: options.limit - 1,
-          resetAt: timestamp + options.windowMillis,
-        });
-        return true;
+      // A key already tracked keeps its bucket unconditionally — this is the
+      // clause that makes an established client immune to flooding.
+      if (buckets.has(key)) return consume(key, timestamp);
+
+      if (trackedSize() >= maxKeys) {
+        sweepExpired(timestamp);
       }
 
-      if (existing.tokens <= 0) return false;
-      existing.tokens -= 1;
-      return true;
+      if (trackedSize() >= maxKeys) {
+        // Still full of *active* buckets. Share rather than evict: discarding
+        // an active bucket to make room is the bypass this avoids.
+        return consume(OVERFLOW_KEY, timestamp);
+      }
+
+      return consume(key, timestamp);
     },
     get size(): number {
-      return buckets.size;
+      return trackedSize();
     },
   };
 }
 
 /**
- * The client address to rate-limit on.
+ * How a request's client address is resolved.
  *
- * `X-Forwarded-For` is **not** consulted. It is a caller-supplied header, so
- * trusting it lets anyone bypass the limiter by varying it, and the map fills
- * with fabricated keys. Behind a load balancer this must be handled by setting
- * Express's `trust proxy` to the *known* proxy count, which makes `req.ip`
- * authoritative — a deployment decision, not something to guess here.
+ * See `client-identity.ts`. The default ignores `X-Forwarded-For` entirely,
+ * which is correct for direct exposure and *degraded but safe* behind an
+ * unconfigured proxy — every request shares one bucket rather than every
+ * request being spoofable.
  */
-function clientKey(request: Request): string {
-  return request.ip ?? request.socket.remoteAddress ?? "unknown";
-}
+export type ClientKeyResolver = (request: Request) => string;
 
 export interface WebhookRateLimitOptions {
   /**
@@ -140,12 +190,23 @@ export interface WebhookRateLimitOptions {
    * deliveries, and GitHub does not automatically redeliver them.
    */
   readonly overall: RateLimiter;
+  /**
+   * Resolves the client address.
+   *
+   * Behind a load balancer this MUST be configured with the trusted proxy
+   * ranges, or every request lands in one bucket and the tight unauthenticated
+   * budget fires on legitimate traffic.
+   */
+  readonly clientKey?: ClientKeyResolver | undefined;
 }
 
-export function createDefaultWebhookRateLimits(): WebhookRateLimitOptions {
+export function createDefaultWebhookRateLimits(
+  identity: ClientIdentityOptions = {},
+): WebhookRateLimitOptions {
   return {
     unauthenticated: createRateLimiter({ limit: 20, windowMillis: 60_000 }),
     overall: createRateLimiter({ limit: 3_000, windowMillis: 60_000 }),
+    clientKey: createClientIdentity(identity),
   };
 }
 
@@ -154,7 +215,8 @@ export function rateLimitMiddleware(
   limits: WebhookRateLimitOptions,
 ): RequestHandler {
   return (request, response, next) => {
-    if (!limits.overall.tryConsume(clientKey(request))) {
+    const key = (limits.clientKey ?? defaultClientKey)(request);
+    if (!limits.overall.tryConsume(key)) {
       // 429 with no detail. A limiter that explains its window tells an
       // attacker exactly how to pace themselves under it.
       response.status(429).json({ error: "too_many_requests" });
@@ -169,8 +231,14 @@ export function penalizeUnauthenticated(
   limits: WebhookRateLimitOptions,
   request: Request,
 ): boolean {
-  return limits.unauthenticated.tryConsume(clientKey(request));
+  return limits.unauthenticated.tryConsume(
+    (limits.clientKey ?? defaultClientKey)(request),
+  );
 }
+
+/** Socket peer only. Never reads a caller-supplied header. */
+const defaultClientKey: ClientKeyResolver = (request) =>
+  request.socket.remoteAddress ?? "unknown";
 
 /**
  * Response headers.
