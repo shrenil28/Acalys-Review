@@ -191,13 +191,60 @@ export function buildClusters(
       paths.includes(entry.path),
     );
 
-    // The neighbourhood: the cluster's own files plus everything they depend
-    // on that the planner supplied.
+    // The neighbourhood, in both directions.
+    //
+    // Outgoing edges — what the changed files depend on — give the contracts
+    // the change has to satisfy. Incoming edges give the callers the change can
+    // break, and those are the *more* important half: the most valuable
+    // cross-file finding is a caller the author never opened.
+    //
+    // Following only outgoing edges is a defect this file shipped with, and the
+    // corpus caught it: the api_contract case supplied the caller, the planner
+    // ranked it, and the cluster dropped it before any analyzer could look.
     const neighbourhood = new Set(paths);
     for (const path of paths) {
       for (const dependency of dependencies.get(path) ?? []) {
         neighbourhood.add(dependency);
       }
+    }
+
+    const changedNames = new Set(
+      context
+        .filter(
+          (item) =>
+            item.reason === "containing_symbol" && paths.includes(item.path),
+        )
+        .map((item) => item.symbol?.name)
+        .filter((name): name is string => name !== undefined),
+    );
+
+    for (const item of context) {
+      if (neighbourhood.has(item.path) || item.representation !== "full")
+        continue;
+
+      // A supplied file that imports one of the changed files is a consumer of
+      // this cluster's surface, whatever the planner labelled it.
+      const importsSubject = extractFile(
+        item.path,
+        item.suppliedContent,
+      ).imports.some((edge) => {
+        const target = resolveImport(item.path, edge.specifier, suppliedPaths);
+        return target !== undefined && paths.includes(target);
+      });
+
+      // Or it was supplied *because of* this cluster: the planner attaches
+      // callers and tests by reason, and those reasons exist precisely to say
+      // "this is here for the change".
+      const attachedForChange =
+        (item.reason === "caller" ||
+          item.reason === "associated_test" ||
+          item.reason === "prior_finding") &&
+        (changedNames.size === 0 ||
+          [...changedNames].some((name) =>
+            item.suppliedContent.includes(name),
+          ));
+
+      if (importsSubject || attachedForChange) neighbourhood.add(item.path);
     }
 
     // Instructions belong to every cluster: they change what counts as a

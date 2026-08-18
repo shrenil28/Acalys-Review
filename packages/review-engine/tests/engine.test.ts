@@ -199,6 +199,7 @@ describe("A finding must explain itself", () => {
       trigger: "any rejection",
       consequence: "an unhandled rejection",
     },
+    remediation: "Add `await`, or `void` if discarding it is deliberate.",
     counterfactual: { existsWithoutChange: false, because: "the line is new" },
     proposedSeverity: "medium",
     location: { path: "src/a.ts", startLine: 3, endLine: 3 },
@@ -227,6 +228,7 @@ describe("A finding must explain itself", () => {
     ["no_trigger", { causal: { ...complete.causal, trigger: "  " } }],
     ["no_consequence", { causal: { ...complete.causal, consequence: "" } }],
     ["no_evidence", { evidence: [] }],
+    ["no_remediation", { remediation: "   " }],
     [
       "pre_existing",
       {

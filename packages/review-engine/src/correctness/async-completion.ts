@@ -182,47 +182,55 @@ function calleeName(call: ts.CallExpression): string | undefined {
 }
 
 /**
- * Whether the promise this call produces is dealt with by its surroundings.
+ * The root call of a member chain, and the methods applied to it.
  *
- * Each clause is a real statement of intent by the author, and flagging any of
- * them is how a reviewer earns a mute. `void` most of all: it exists precisely
- * to say "I know, and I mean it".
+ * `save().then(fn).finally(g)` is a statement whose expression is a call to
+ * `finally`, not to `save`. Reading only the outermost callee is how a floating
+ * promise escapes detection by being chained — and worse, how it escapes
+ * *quietly*, since the outer name (`then`, `catch`) is never a declared async
+ * function and so the rule simply finds nothing.
+ *
+ * An earlier version of this file had a `isHandled` walk that inspected the
+ * call's parents. Every one of its branches was unreachable: R1 only ever calls
+ * it with a call that *is* an expression statement's expression, so the walk
+ * terminated on its first iteration, every time. The clean cases passed for
+ * accidental reasons, and a mutation that deleted a branch killed no test.
+ * Unwrapping the chain is what that function was reaching for.
  */
-function isHandled(call: ts.CallExpression): boolean {
-  let node: ts.Node = call;
-  let parent = node.parent;
+function unwrapChain(expression: ts.Expression): {
+  readonly root: ts.CallExpression | undefined;
+  readonly methods: readonly string[];
+} {
+  const methods: string[] = [];
+  let current: ts.Expression = expression;
 
-  while (parent !== undefined) {
-    if (ts.isAwaitExpression(parent) || ts.isYieldExpression(parent))
-      return true;
-    if (ts.isVoidExpression(parent)) return true;
-    if (ts.isReturnStatement(parent)) return true;
-    if (ts.isArrowFunction(parent) && parent.body === node) return true;
-    if (ts.isVariableDeclaration(parent) || ts.isPropertyAssignment(parent)) {
-      return true;
-    }
-    if (ts.isBinaryExpression(parent) && parent.right === node) return true;
+  for (;;) {
+    if (!ts.isCallExpression(current)) break;
+    const callee = current.expression;
     if (
-      ts.isCallExpression(parent) &&
-      parent.arguments.includes(node as ts.Expression)
+      ts.isPropertyAccessExpression(callee) &&
+      ts.isIdentifier(callee.name) &&
+      ts.isCallExpression(callee.expression)
     ) {
-      // Passed to something — `Promise.all([...])`, `expect(...)`.
-      return true;
+      methods.push(callee.name.text);
+      current = callee.expression;
+      continue;
     }
-    if (ts.isPropertyAccessExpression(parent) && ts.isIdentifier(parent.name)) {
-      // `.catch(...)` handles it; `.then(...)` may or may not, and the walk
-      // continues so a trailing `.catch` further up still counts.
-      if (parent.name.text === "catch" || parent.name.text === "finally") {
-        return true;
-      }
-    }
-    if (ts.isExpressionStatement(parent)) return false;
-
-    node = parent;
-    parent = parent.parent;
+    return { root: current, methods };
   }
 
-  return false;
+  return { root: undefined, methods };
+}
+
+/**
+ * Whether a chain deals with rejection.
+ *
+ * `.catch` and `.finally` are real handling. `.then` is not: a `.then` without
+ * a trailing `.catch` leaves the rejection path exactly as unhandled as no
+ * chain at all, while looking to a reader like the promise was dealt with.
+ */
+function chainHandlesRejection(methods: readonly string[]): boolean {
+  return methods.includes("catch") || methods.includes("finally");
 }
 
 function locate(
@@ -316,6 +324,7 @@ export function analyzeAsyncCompletion(
         readonly trigger: string;
         readonly consequence: string;
       },
+      remediation: string,
       severity: "critical" | "high" | "medium" | "low" | "info",
       evidence: readonly AnalyzerEvidence[],
       identity: string,
@@ -340,6 +349,7 @@ export function analyzeAsyncCompletion(
         family,
         claim,
         causal: { anchor: location, ...causal },
+        remediation,
         counterfactual: {
           // The site is on a line this change touched, so the author wrote it.
           // Pre-existing instances elsewhere in the same file are filtered out
@@ -389,6 +399,7 @@ export function analyzeAsyncCompletion(
                 consequence:
                   "the guard silently does nothing, and code that depends on it being a real check runs unconditionally",
               },
+              `Await the call — \`if (await ${name}()) { … }\` — and make the enclosing function \`async\`. If the intent was to test that the call was made rather than its result, say so explicitly rather than relying on truthiness.`,
               "high",
               [
                 evidence,
@@ -442,6 +453,7 @@ export function analyzeAsyncCompletion(
               consequence:
                 "the loop completes before the work does, ordering is not guaranteed, and a rejection becomes an unhandled rejection",
             },
+            "Use `for (const item of items) { await … }` when the iterations must happen in order, or `await Promise.all(items.map(async (item) => …))` when they may run together.",
             "high",
             [
               {
@@ -457,28 +469,40 @@ export function analyzeAsyncCompletion(
         }
       }
 
-      // R1: the plain floating call.
-      if (
-        ts.isExpressionStatement(node) &&
-        ts.isCallExpression(node.expression)
-      ) {
-        const call = node.expression;
-        const name = calleeName(call);
+      // R1: a promise-producing statement whose settlement nobody observes.
+      if (ts.isExpressionStatement(node)) {
+        // `void save()` and `await save()` are not calls at the statement's
+        // root, so they never reach here — the shape check is the suppression,
+        // and it is exact rather than heuristic.
+        const { root, methods } = ts.isCallExpression(node.expression)
+          ? unwrapChain(node.expression)
+          : { root: undefined, methods: [] as readonly string[] };
+
+        const name = root === undefined ? undefined : calleeName(root);
         const declared =
           name === undefined ? undefined : declarations.get(name);
 
-        if (name !== undefined && declared !== undefined && !isHandled(call)) {
+        if (
+          name !== undefined &&
+          declared !== undefined &&
+          !chainHandlesRejection(methods)
+        ) {
           const evidence = asyncEvidence(declared, name);
           if (evidence !== undefined) {
+            const chained = methods.length > 0;
             emit(
               node,
               RULES.floating,
               "error_handling",
-              `The promise returned by \`${name}()\` is discarded.`,
+              chained
+                ? `\`${name}()\` is chained with \`.${methods.join(".")}\` but its rejection is never handled.`
+                : `The promise returned by \`${name}()\` is discarded.`,
               {
                 steps: [
                   `\`${name}\` is asynchronous, so this call returns a Promise`,
-                  "the statement discards it, so nothing observes settlement",
+                  chained
+                    ? `the chain applies \`.${methods.join(".")}\`, none of which handles rejection`
+                    : "the statement discards it, so nothing observes settlement",
                   "a rejection therefore has no handler, and any ordering later code relies on is not enforced",
                 ],
                 trigger:
@@ -486,14 +510,18 @@ export function analyzeAsyncCompletion(
                 consequence:
                   "an unhandled rejection, and work that may not have completed when the next statement runs",
               },
+              chained
+                ? `Add \`.catch(…)\` to the chain, or \`await\` it inside a \`try\`/\`catch\`.`
+                : `Add \`await\` if the result is needed before the next statement, \`.catch(…)\` if the failure should be handled here, or \`void\` if discarding it is deliberate.`,
               "medium",
               [
                 evidence,
                 {
                   type: "source",
                   strength: "deterministic",
-                  observation:
-                    "the call is a statement on its own, with no `await`, `void`, `return` or `.catch`",
+                  observation: chained
+                    ? `the chain \`.${methods.join(".")}\` contains no \`.catch\` or \`.finally\``
+                    : "the call is a statement on its own, with no `await`, `void`, `return` or `.catch`",
                   location: locate(source, item.path, node),
                 },
               ],

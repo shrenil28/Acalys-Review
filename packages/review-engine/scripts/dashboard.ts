@@ -1,0 +1,36 @@
+/**
+ * Prints the P1-G dashboard.
+ *
+ *     npm run eval:dashboard -w @acalys/review-engine
+ *
+ * A script rather than only a test, because these numbers are for reading and
+ * arguing with. A metric that can only be seen by making a test fail is a
+ * metric nobody looks at until something is already wrong.
+ */
+
+import { ANALYZER_CORPUS, evaluateCorpus } from "../src/eval/index.js";
+
+async function main(): Promise<void> {
+  const report = await evaluateCorpus(ANALYZER_CORPUS);
+  const line = (label: string, value: string | number): void => {
+    process.stdout.write(`  ${label.padEnd(32)} ${String(value)}\n`);
+  };
+
+  process.stdout.write("\nP1-G analyzer dashboard\n\n");
+  line("cases", report.cases.length);
+  line("recall", report.recall);
+  line("precision", report.precision);
+  line("false positives on clean cases", report.falsePositivesOnCleanCases);
+  line("findings per case", report.findingsPerCase);
+  line("suppression rate", report.suppressionRate);
+  line("tokens per case", report.tokensPerCase);
+  line("tokens per finding", report.tokensPerFinding);
+
+  process.stdout.write("\n  recall by family\n");
+  for (const [family, recall] of Object.entries(report.recallByFamily)) {
+    line(`    ${family}`, String(recall));
+  }
+  process.stdout.write("\n");
+}
+
+await main();

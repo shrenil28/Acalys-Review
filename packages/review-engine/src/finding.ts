@@ -99,6 +99,15 @@ export interface CandidateFinding {
   readonly family: CorrectnessFamily;
   readonly claim: string;
   readonly causal: CausalChain;
+  /**
+   * What to do about it, concretely.
+   *
+   * Required, not optional. The Triage and Findings screens both render a
+   * remediation, and a finding that cannot say what to change leaves the reader
+   * exactly where they started — having been told something is wrong and given
+   * no way to act. "Consider reviewing this" is not a remediation.
+   */
+  readonly remediation: string;
   readonly counterfactual: Counterfactual;
   readonly proposedSeverity: FindingSeverity;
   /** Derived from evidence. Never asserted by the rule that noticed. */
@@ -114,6 +123,7 @@ export const SUPPRESSION_REASONS = [
   "no_trigger",
   "no_consequence",
   "no_evidence",
+  "no_remediation",
   "pre_existing",
   "below_confidence_floor",
   "not_a_correctness_claim",
@@ -142,6 +152,7 @@ export interface Proposal {
   readonly family: CorrectnessFamily;
   readonly claim: string;
   readonly causal: CausalChain;
+  readonly remediation: string;
   readonly counterfactual: Counterfactual;
   readonly proposedSeverity: FindingSeverity;
   readonly location: FindingLocation;
@@ -191,6 +202,12 @@ export function propose(proposal: Proposal): ProposalOutcome {
   if (proposal.evidence.length === 0) {
     return suppress("no_evidence", "a claim with no support is an opinion");
   }
+  if (proposal.remediation.trim() === "") {
+    return suppress(
+      "no_remediation",
+      "the rule could not say what to change; a reader told only that something is wrong is left where they started",
+    );
+  }
   if (proposal.counterfactual.existsWithoutChange) {
     // Real, possibly worth fixing, and not this review's business. Surfacing it
     // trains authors that Acalys comments on code they did not write.
@@ -213,6 +230,7 @@ export function propose(proposal: Proposal): ProposalOutcome {
       family: proposal.family,
       claim: proposal.claim,
       causal: proposal.causal,
+      remediation: proposal.remediation,
       counterfactual: proposal.counterfactual,
       proposedSeverity: proposal.proposedSeverity,
       confidenceScore,
@@ -244,4 +262,53 @@ export interface AnalysisResult {
  */
 export function wasDegraded(result: AnalysisResult): boolean {
   return result.degradations.length > 0;
+}
+
+/**
+ * The shape a finding takes on the way to a reader.
+ *
+ * Written against what `apps/web` actually renders — `DeepScanFinding` on the
+ * AI Deep Scan screen and the nested findings on PR Findings — so that the
+ * analyzer produces what the product shows rather than something a projection
+ * has to invent. Designing the finding against a real consumer is what stops it
+ * being imagined.
+ *
+ * Deliberately **not** the API DTO. This is the analyzer stating what it can
+ * supply; `packages/contracts/src/api/v1` decides what is published, and the
+ * Phase 0 leakage test keeps internals such as `clusterId`, `ruleId` and
+ * `confidenceScore` out of that.
+ */
+export interface FindingView {
+  readonly summary: string;
+  /** The causal chain as prose, in the order it happens. */
+  readonly detail: string;
+  readonly remediation: string;
+  readonly file: string;
+  readonly line: number;
+  readonly severity: FindingSeverity;
+  readonly category: FindingCategory;
+}
+
+export function toFindingView(finding: CandidateFinding): FindingView {
+  const steps = finding.causal.steps
+    .map((step, index) => `${String(index + 1)}. ${step}`)
+    .join("\n");
+
+  return {
+    summary: finding.claim,
+    // Trigger first, because a reader's first question is "does this affect
+    // me?", and the answer is the trigger rather than the mechanism.
+    detail: [
+      `Happens when: ${finding.causal.trigger}`,
+      "",
+      steps,
+      "",
+      `Consequence: ${finding.causal.consequence}`,
+    ].join("\n"),
+    remediation: finding.remediation,
+    file: finding.location.path,
+    line: finding.location.startLine,
+    severity: finding.proposedSeverity,
+    category: finding.category,
+  };
 }

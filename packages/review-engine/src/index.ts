@@ -38,6 +38,7 @@ export {
   CORRECTNESS_FAMILIES,
   SUPPRESSION_REASONS,
   propose,
+  toFindingView,
   wasDegraded,
   type AnalysisResult,
   type CandidateFinding,
@@ -46,6 +47,7 @@ export {
   type Counterfactual,
   type Proposal,
   type ProposalOutcome,
+  type FindingView,
   type Suppression,
   type SuppressionReason,
 } from "./finding.js";
@@ -67,3 +69,30 @@ export {
   collectAsyncDeclarations,
   type AsyncAnalyzerInput,
 } from "./correctness/async-completion.js";
+export {
+  SWALLOWED_ERROR_ANALYZER_ID,
+  SWALLOWED_ERROR_VERSION,
+  analyzeSwallowedErrors,
+  swallowedErrorAnalyzer,
+} from "./correctness/swallowed-error.js";
+export {
+  SIGNATURE_ANALYZER_ID,
+  SIGNATURE_ANALYZER_VERSION,
+  analyzeSignatureCompatibility,
+  signatureCompatibilityAnalyzer,
+} from "./correctness/signature-compatibility.js";
+export {
+  DEFAULT_LIMITS,
+  DEGRADATION_REASONS,
+  createMemoryCache,
+  fingerprintCluster,
+  runAnalysis,
+  type AnalysisCache,
+  type ClusterAnalyzer,
+  type ClusterAnalysisInput,
+  type Degradation,
+  type DegradationReason,
+  type ExecutionLimits,
+  type ExecutionOptions,
+  type ExecutionReport,
+} from "./execution.js";
