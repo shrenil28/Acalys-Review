@@ -21,6 +21,10 @@ export default tseslint.config(
       "**/generated/**",
       "**/*.tsbuildinfo",
       "apps/web/**",
+      // Repository-level CI helpers. Plain Node scripts outside any package's
+      // TypeScript project, so the type-aware rules have no program to resolve
+      // them against; they are exercised by being run in CI rather than typed.
+      "scripts/*.mjs",
     ],
   },
 

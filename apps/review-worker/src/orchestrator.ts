@@ -55,11 +55,13 @@ export type AdvanceOutcome =
   /**
    * The work described a revision the run no longer points at.
    *
-   * Separate from `refused` because the recovery differs: a refusal means
-   * someone else advanced the run and this worker should stop, while stale work
-   * means the run is still ours and the analysis must be **redone** against the
-   * current revision. Committing it would publish comments about code that is
-   * no longer there.
+   * Separate from `refused` because the recoveries are opposites:
+   *
+   * ```
+   * refused  →  stop. Someone else advanced the run; retrying is wrong.
+   * stale    →  recompute. The run is still ours, but the analysis describes a
+   *             revision it no longer points at; re-committing is wrong.
+   * ```
    */
   | {
       readonly kind: "stale";

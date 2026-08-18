@@ -113,10 +113,16 @@ export type StageOutcome =
   /**
    * The work was done against a revision the run no longer points at.
    *
-   * Distinct from `refused`: the run may still be in exactly the expected
-   * state, and retrying the transition would succeed while writing findings
-   * that describe code nobody is looking at any more. The work must be redone,
-   * not re-committed.
+   * Distinct from `refused`, and the recoveries are opposites:
+   *
+   * ```
+   * refused  →  someone else advanced the run. Stop. Retrying is wrong: the
+   *             run is no longer this worker's to move.
+   * stale    →  the run is still ours and still in the expected state, but the
+   *             work describes a revision it no longer points at. Recompute
+   *             against the current revision. Re-committing is wrong: it would
+   *             publish comments about code that is no longer there.
+   * ```
    */
   | {
       readonly kind: "stale";

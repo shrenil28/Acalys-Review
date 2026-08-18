@@ -27,3 +27,6 @@ probe-transcript-*.json
 .eslintcache
 .vitest/
 .turbo/
+
+# Test report consumed by the no-skipped-tests gate
+.vitest-report.json

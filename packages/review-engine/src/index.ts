@@ -109,3 +109,4 @@ export const ALL_ANALYZER_IDS = [
   "acalys.correctness.swallowed-error",
   "acalys.correctness.signature-compatibility",
 ] as const;
+export * from "./verification/index.js";

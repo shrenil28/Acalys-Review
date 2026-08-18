@@ -21,7 +21,8 @@
     "depcruise": "depcruise apps packages --config .dependency-cruiser.cjs",
     "schemas:generate": "npm run schemas:generate --workspace @acalys/contracts",
     "schemas:check": "npm run schemas:check --workspace @acalys/contracts",
-    "verify": "npm run typecheck && npm run lint && npm run depcruise && npm run schemas:check && npm run test"
+    "verify": "npm run typecheck && npm run lint && npm run depcruise && npm run schemas:check && npm run test",
+    "test:ci": "vitest run --reporter=json --outputFile=.vitest-report.json && node scripts/assert-no-skipped-tests.mjs .vitest-report.json"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
