@@ -19,7 +19,30 @@
 
 import type { CorrectnessFamily } from "../finding.js";
 
-export type Bucket = "positive" | "clean" | "incremental" | "adversarial";
+export type Bucket =
+  | "positive"
+  | "clean"
+  | "incremental"
+  | "adversarial"
+  /**
+   * Code the analyzer gets **wrong** — it produces a candidate, and the
+   * candidate is false.
+   *
+   * Distinct from `clean`, and the distinction is the whole reason this bucket
+   * exists. A `clean` case asserts the analyzer stays silent, so it exercises
+   * nothing downstream: verification is never asked about it. A
+   * `false_positive` case asserts the analyzer *speaks* and is wrong, which is
+   * the only input that can answer whether verification earns its cost.
+   *
+   * Without this bucket the funnel reports `falsePositivesCaught = 0` — not
+   * because verification is useless, but because it was never given a false
+   * positive to catch. That reads as an argument for deleting the verifier, and
+   * it is an argument about the corpus.
+   *
+   * These are hard to write on purpose: they must be plausible. A reviewer that
+   * only survives obviously-stupid false positives has not been tested.
+   */
+  | "false_positive";
 
 export interface AnalyzerCase {
   readonly id: string;
@@ -44,6 +67,38 @@ const asyncStore =
   "export async function save(value: number): Promise<void> {\n  return;\n}";
 
 export const ANALYZER_CORPUS: readonly AnalyzerCase[] = [
+  // ── false positive ─────────────────────────────────────────────────────
+  //
+  // Found by probing the analyzer rather than imagined. Seven plausible
+  // lookalikes were tried — a promise awaited through a variable, a handled
+  // `.catch()`, an explicit `void`, a returned promise, a `.then()` chain with
+  // a tail handler, a rethrowing catch, an added optional parameter — and the
+  // analyzer stayed silent on every one. It is conservative, which is the right
+  // default and is why this bucket has exactly one member.
+  //
+  // This one it gets wrong, and the mechanism is the classic failure of
+  // name-based resolution: `save` here is a **parameter** of synchronous type,
+  // shadowing the imported asynchronous `save`. The analyzer matches by name,
+  // finds the import, and reports a floating promise that cannot exist.
+  {
+    id: "fp-shadowed-by-parameter",
+    bucket: "false_positive",
+    files: {
+      "src/shadow.ts": [
+        'import { save } from "./store.js";',
+        "export function run(save: (value: number) => void): void {",
+        "  save(1);",
+        "}",
+      ].join("\n"),
+      "src/store.ts": asyncStore,
+    },
+    changed: [{ path: "src/shadow.ts", changedLines: [3] }],
+    // Nothing is wanted here: the code is correct.
+    expect: [],
+    because:
+      "`save` is a synchronous parameter shadowing the imported async one; name-based resolution reports a floating promise that cannot exist, and this is the only input that can measure whether verification catches an analyzer mistake",
+  },
+
   // ── positive ───────────────────────────────────────────────────────────
   {
     id: "floating-promise-cross-file",

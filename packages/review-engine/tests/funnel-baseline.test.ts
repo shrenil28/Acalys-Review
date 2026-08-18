@@ -52,15 +52,106 @@ describe("The funnel baseline", () => {
     ).toEqual([]);
   });
 
-  it("never makes precision worse than the analyzer alone", async () => {
-    // Verification may cost recall — that is the trade it exists to make. It
-    // must never cost precision, because a verifier that admits a candidate the
-    // analyzer would not have produced is not filtering anything.
+  it("verification currently COSTS precision — the P1-J.3 target", async () => {
+    // ── The finding the false-positive bucket exists to produce ───────────
+    //
+    // The aspiration is that verification may cost recall — that is the trade
+    // it exists to make — but never precision. Right now it costs both:
+    //
+    //     candidate precision   10/11   the analyzer's own accuracy
+    //     published precision    5/6    after verification
+    //
+    // It lost five true defects to `inconclusive` and caught **zero** of the
+    // analyzer's false positives. Asserted in its true, wrong direction rather
+    // than aspirationally, because a test that asserts the goal fails from the
+    // day it is written and gets deleted, while one that asserts reality has to
+    // be edited deliberately when reality changes.
+    //
+    // When P1-J.3 inverts this, this test flips and its comment goes with it.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
-    expect(report.publishedPrecision).toBeGreaterThanOrEqual(
-      report.candidatePrecision,
+
+    expect(report.candidatePrecision).toBeDefined();
+    expect(report.publishedPrecision).toBeDefined();
+    expect(report.publishedPrecision ?? 1).toBeLessThan(
+      report.candidatePrecision ?? 0,
     );
-    expect(report.falsePositivesPublished).toBe(0);
+  });
+
+  it("the verifier shares the analyzer's blind spot", async () => {
+    // ── Structural independence is not epistemic independence ─────────────
+    //
+    // P1-H goes to real lengths to stop the verifier seeing the analyzer's
+    // context, confidence, reasoning or rule identity, and there is no API
+    // through which any of it could arrive. All of that holds.
+    //
+    // And the verifier still confirms `fp-shadowed-by-parameter`, because
+    // `declaredAsync` resolves callees **by name** — exactly as the analyzer
+    // does. `save` is a synchronous parameter shadowing an imported async
+    // function; both components look up the name, both find the import, and the
+    // second one agreeing with the first is not corroboration. It is the same
+    // mistake made twice.
+    //
+    // The lesson for the model-backed verifier: independence of *inputs* buys
+    // nothing if the *method* is shared. A second opinion from a copy of the
+    // same reasoning is not a second opinion.
+    const report = await evaluateFunnel(ANALYZER_CORPUS);
+
+    const shadowed = report.journeys.filter(
+      (journey) => journey.caseId === "fp-shadowed-by-parameter",
+    );
+    expect(shadowed.length, "the analyzer no longer produces this").toBe(1);
+    expect(shadowed[0]?.wanted).toBe(false);
+    expect(
+      shadowed[0]?.published,
+      "if this is now false, the verifier learned to resolve scope — update the comment above",
+    ).toBe(true);
+    expect(report.falsePositivesPublished).toBe(1);
+  });
+
+  it("distinguishes a measured zero from an absent denominator", async () => {
+    // `0 / 0` is not `0`. The first funnel report showed
+    // `falsePositivesCaught = 0` against a corpus with no false positives, and
+    // rendered as a zero it reads as "verification caught nothing" — an
+    // argument for deleting the verifier, when it was an argument about the
+    // corpus. Now the corpus has one, so the rate is defined and genuinely 0.
+    const report = await evaluateFunnel(ANALYZER_CORPUS);
+    expect(report.falsePositiveCatchRate).toBe(0);
+
+    const empty = await evaluateFunnel([]);
+    // No candidates at all: every ratio is undefined rather than a confident 0
+    // or a flattering 1.
+    expect(empty.candidatePrecision).toBeUndefined();
+    expect(empty.publishedPrecision).toBeUndefined();
+    expect(empty.publishedRecall).toBeUndefined();
+    expect(empty.falsePositiveCatchRate).toBeUndefined();
+    expect(empty.tokensPerPublishedFinding).toBeUndefined();
+  });
+
+  it("attributes every lost defect to exactly one stage", async () => {
+    // `publishedRecall = 0.5` is equally consistent with a planner that fetched
+    // nothing, an analyzer that saw nothing, a verifier that refused, a verifier
+    // that could not tell, an outage, and a policy that withheld. Six fixes,
+    // three owners. The decomposition is what makes the number actionable.
+    const report = await evaluateFunnel(ANALYZER_CORPUS);
+
+    const attributed = Object.values(report.losses).reduce(
+      (total, value) => total + value,
+      0,
+    );
+    // Every loss accounted for. An attribution that does not add up is one that
+    // is hiding the losses it cannot explain.
+    expect(attributed).toBe(report.planted - report.truePositivesPublished);
+
+    // And today they are all one stage, which is the whole diagnosis: the
+    // analyzer and planner lost nothing, policy withheld nothing, nothing was
+    // refuted, and nothing was unavailable. The verifier could not tell.
+    expect(report.losses).toEqual({
+      not_proposed: 0,
+      verifier_refuted: 0,
+      verifier_abstained: 5,
+      verification_unavailable: 0,
+      policy_withheld: 0,
+    });
   });
 
   it("exercises the whole funnel, not a prefix of it", async () => {
@@ -95,10 +186,13 @@ describe("The funnel baseline", () => {
     //     published recall 0.5     the verifier's reach, not the analyzer's
     //                              accuracy. Five defects sit at
     //                              `inconclusive`.
-    //     false positives caught 0 the corpus contains NO analyzer false
-    //                              positives, so it cannot yet answer whether
-    //                              verification earns its cost. Fixing that is
-    //                              corpus work, not verifier work.
+    //     published precision      LOWER than the analyzer's own. Verification
+    //                              currently costs precision as well as recall,
+    //                              which is the case against it that P1-J.3 has
+    //                              to answer.
+    //     false positives caught 0 and now genuinely measured, against one real
+    //                              analyzer false positive rather than against
+    //                              an empty denominator.
     const report = await evaluateFunnel(ANALYZER_CORPUS);
 
     expect({
@@ -111,14 +205,17 @@ describe("The funnel baseline", () => {
       publishedRecall: report.publishedRecall,
       publishedPrecision: report.publishedPrecision,
     }).toEqual({
-      candidates: 10,
-      verified: 5,
+      candidates: 11,
+      verified: 6,
       rejected: 0,
       inconclusive: 5,
-      promoted: 5,
-      published: 5,
+      promoted: 6,
+      published: 6,
       publishedRecall: 0.5,
-      publishedPrecision: 1,
+      // 5 of 6 published findings are real. The sixth is
+      // `fp-shadowed-by-parameter`, verified by a verifier that resolves names
+      // the same way the analyzer does.
+      publishedPrecision: 0.8333,
     });
   });
 });

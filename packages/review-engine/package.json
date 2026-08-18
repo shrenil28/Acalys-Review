@@ -22,7 +22,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist",
     "eval:dashboard": "tsx scripts/dashboard.ts",
-    "eval:funnel": "tsx scripts/funnel-dashboard.ts"
+    "eval:funnel": "tsx scripts/funnel-dashboard.ts",
+    "eval:verifier": "tsx scripts/verifier-dashboard.ts"
   },
   "dependencies": {
     "@acalys/code-intelligence": "*",

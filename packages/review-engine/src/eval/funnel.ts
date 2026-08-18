@@ -120,18 +120,80 @@ export interface FunnelReport {
    * contribution. A single end-to-end number would hide whether the analyzer or
    * the verifier produced it.
    */
-  readonly candidatePrecision: number;
-  readonly publishedPrecision: number;
+  readonly candidatePrecision: Ratio;
+  readonly publishedPrecision: Ratio;
   /** Of the defects planted, how many a developer actually sees. */
-  readonly publishedRecall: number;
+  readonly publishedRecall: Ratio;
+
+  /**
+   * Where every unpublished expected defect died.
+   *
+   * Sums to `planted - truePositivesPublished`, which is asserted rather than
+   * assumed: an attribution that does not account for every loss is one that
+   * hides the losses it cannot explain.
+   */
+  readonly losses: LossAttribution;
+  readonly planted: number;
+
+  /**
+   * Of the false positives the analyzer produced, how many verification
+   * stopped. `undefined` when the corpus contains none to stop.
+   */
+  readonly falsePositiveCatchRate: Ratio;
 
   /** Context tokens across analysis and verification, per published finding. */
-  readonly tokensPerPublishedFinding: number;
+  readonly tokensPerPublishedFinding: Ratio;
   readonly analysisTokens: number;
   readonly verificationTokens: number;
 }
 
+/**
+ * A ratio that admits it has no denominator.
+ *
+ * `0 / 0` is not `0`. The distinction is not pedantry here: the first funnel
+ * report showed `falsePositivesCaught = 0` against a corpus containing **no
+ * false positives at all**, and rendered as `0` it reads as "verification
+ * caught nothing" — an argument for deleting the verifier. It actually meant
+ * "verification was never asked", which is an argument about the corpus.
+ *
+ * Every ratio in this report is therefore `number | undefined`, and a consumer
+ * has to decide what to print for `undefined` rather than being handed a zero
+ * that looks like a measurement.
+ */
+export type Ratio = number | undefined;
+
 const round = (value: number): number => Number(value.toFixed(4));
+
+const ratio = (numerator: number, denominator: number): Ratio =>
+  denominator === 0 ? undefined : round(numerator / denominator);
+
+/**
+ * Where an expected defect died.
+ *
+ * A single `publishedRecall = 0.5` is not actionable: it is equally consistent
+ * with a planner that fetched nothing, an analyzer that saw nothing, a verifier
+ * that refused, a verifier that could not tell, an outage, and a policy that
+ * withheld. Those have six different fixes and three different owners.
+ *
+ * Every loss is attributed to exactly one stage, at the first point the defect
+ * stopped moving.
+ */
+export const LOSS_STAGES = [
+  /** No candidate was produced. Analyzer or planner. */
+  "not_proposed",
+  /** Verification affirmatively refuted it. The expensive kind of wrong. */
+  "verifier_refuted",
+  /** Verification could not settle it. Verifier reach, not analyzer accuracy. */
+  "verifier_abstained",
+  /** Verification could not run. Operational, never quality. */
+  "verification_unavailable",
+  /** Verified and promoted, and policy chose not to interrupt anyone. */
+  "policy_withheld",
+] as const;
+
+export type LossStage = (typeof LOSS_STAGES)[number];
+
+export type LossAttribution = Readonly<Record<LossStage, number>>;
 
 /**
  * Runs one case through the funnel.
@@ -278,6 +340,57 @@ export async function evaluateFunnel(
     0,
   );
 
+  // ── Loss attribution ──────────────────────────────────────────────────
+  //
+  // Walked per expected family rather than per candidate, because a defect the
+  // analyzer never proposed has no candidate to attribute. Each expected family
+  // is charged to the first stage at which it stopped.
+  const losses: Record<LossStage, number> = {
+    not_proposed: 0,
+    verifier_refuted: 0,
+    verifier_abstained: 0,
+    verification_unavailable: 0,
+    policy_withheld: 0,
+  };
+
+  for (const testCase of cases) {
+    for (const family of testCase.expect) {
+      const forFamily = journeys.filter(
+        (journey) =>
+          journey.caseId === testCase.id && journey.family === family,
+      );
+
+      if (forFamily.some((journey) => journey.published)) continue;
+      if (forFamily.length === 0) {
+        losses.not_proposed += 1;
+        continue;
+      }
+
+      // A family may produce several candidates; charge the loss to the one
+      // that got furthest, so a single bad duplicate does not mask the fact
+      // that another candidate almost made it.
+      const rank = (journey: CandidateJourney): number =>
+        journey.promoted
+          ? 4
+          : journey.attempt.status === "unavailable"
+            ? 1
+            : journey.attempt.decision === "inconclusive"
+              ? 3
+              : 2;
+      const furthest = [...forFamily].sort((a, b) => rank(b) - rank(a))[0];
+      if (furthest === undefined) continue;
+
+      if (furthest.promoted) losses.policy_withheld += 1;
+      else if (furthest.attempt.status === "unavailable")
+        losses.verification_unavailable += 1;
+      else if (furthest.attempt.decision === "inconclusive")
+        losses.verifier_abstained += 1;
+      else losses.verifier_refuted += 1;
+    }
+  }
+
+  const spuriousCandidates = count((journey) => !journey.wanted);
+
   return {
     cases: cases.length,
     journeys,
@@ -295,16 +408,20 @@ export async function evaluateFunnel(
     truePositivesLost: count((journey) => journey.wanted && !journey.promoted),
     falsePositivesPublished,
     truePositivesPublished,
-    candidatePrecision:
-      candidates === 0 ? 1 : round(wantedCandidates / candidates),
-    publishedPrecision:
-      published === 0 ? 1 : round(truePositivesPublished / published),
-    publishedRecall:
-      plantedTotal === 0 ? 1 : round(truePositivesPublished / plantedTotal),
-    tokensPerPublishedFinding:
-      published === 0
-        ? 0
-        : round((analysisTokens + verificationTokens) / published),
+    candidatePrecision: ratio(wantedCandidates, candidates),
+    publishedPrecision: ratio(truePositivesPublished, published),
+    publishedRecall: ratio(truePositivesPublished, plantedTotal),
+    losses,
+    planted: plantedTotal,
+    // `undefined`, not zero, when the analyzer produced nothing false to catch.
+    falsePositiveCatchRate: ratio(
+      count((journey) => !journey.wanted && !journey.promoted),
+      spuriousCandidates,
+    ),
+    tokensPerPublishedFinding: ratio(
+      analysisTokens + verificationTokens,
+      published,
+    ),
     analysisTokens,
     verificationTokens,
   };

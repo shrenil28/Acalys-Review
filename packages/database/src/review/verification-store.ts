@@ -207,9 +207,15 @@ function resultDigest(result: {
   return JSON.stringify({
     status: result.status,
     decision: result.decision,
-    // Order-sensitive: reasons are a sequence the verifier produced, and two
-    // orderings are two different explanations of the same conclusion.
-    reasons: result.reasons,
+    // Sorted, because reasons are a SET, not a sequence.
+    //
+    // `assertReasonsSupport` checks that every reason supports the decision and
+    // attaches no meaning to their order, so two enumerations of one conclusion
+    // are the same conclusion. Comparing them positionally would report a
+    // redelivery as two conflicting executions purely because a future verifier
+    // built its array in a different order — an invariant violation raised by
+    // iteration order, which is the least useful kind.
+    reasons: [...result.reasons].sort(),
     failure: result.failure,
     severity: result.severity,
     // NUMERIC(4,3) round-trips exactly at three decimal places, so this
