@@ -116,6 +116,7 @@ function harness(): Harness {
       secret: SECRET,
       sourceEndpointId: ENDPOINT,
       inbox,
+      allowWeakSecretForTesting: true,
       observer: {
         onOutcome: (event) => outcomes.push(event.outcome),
       },

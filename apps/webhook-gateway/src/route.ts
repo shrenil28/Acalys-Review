@@ -43,6 +43,14 @@ import {
   type SignatureFailure,
 } from "@acalys/provider-github";
 
+import {
+  assertStrongWebhookSecret,
+  createDefaultWebhookRateLimits,
+  penalizeUnauthenticated,
+  rateLimitMiddleware,
+  type WebhookRateLimitOptions,
+} from "./security.js";
+
 /**
  * Ceiling on an accepted body.
  *
@@ -87,6 +95,15 @@ export interface GithubWebhookRouteOptions {
   readonly inbox: WebhookInbox;
   readonly now?: (() => Date) | undefined;
   readonly observer?: GatewayObserver | undefined;
+  readonly rateLimits?: WebhookRateLimitOptions | undefined;
+  /**
+   * Skips the startup secret-strength check.
+   *
+   * Exists for tests that use a short fixture secret. Named so that switching
+   * it on in production configuration is an obvious act rather than an
+   * innocuous-looking flag.
+   */
+  readonly allowWeakSecretForTesting?: boolean | undefined;
 }
 
 /**
@@ -106,14 +123,20 @@ const SIGNATURE_STATUS: Readonly<Record<SignatureFailure, number>> = {
   empty_secret: 500,
 };
 
-/** Work a delivery schedules, if any. */
-function jobsFor(event: string, body: Buffer): readonly JobRequest[] {
+/**
+ * Work a delivery schedules, if any.
+ *
+ * Takes the already-extracted action rather than the body. An earlier version
+ * parsed the body here *and* again for the stored `action` column — doubling
+ * the most expensive operation on the request path, on a payload that may be
+ * 26 MB. Authenticated or not, parsing it twice is twice the CPU and twice the
+ * peak memory for one delivery.
+ */
+function jobsFor(
+  event: string,
+  action: string | undefined,
+): readonly JobRequest[] {
   if (event === "pull_request") {
-    // The action is read only to decide whether to schedule. Parsing here is
-    // safe: the body is authenticated by this point, and the parse result is
-    // deliberately *not* passed on — the worker re-reads the retained bytes,
-    // so there is one parsing path rather than two that can disagree.
-    const action = readAction(body);
     if (action === undefined || !isHandledAction(action)) return [];
     return [{ kind: JOB_PULL_REQUEST, payload: { action } }];
   }
@@ -123,7 +146,18 @@ function jobsFor(event: string, body: Buffer): readonly JobRequest[] {
   return [];
 }
 
-/** The `action` field, or undefined if the body is not a JSON object. */
+/**
+ * The `action` field, or undefined if the body is not a JSON object.
+ *
+ * Called **once** per delivery. The parsed object is deliberately not passed
+ * any further: the worker re-reads the retained bytes, so there is a single
+ * parsing path rather than two that can disagree about what arrived.
+ *
+ * Only `action` is read, and only when it is a string — so a payload carrying
+ * `__proto__` cannot reach anything that merges it. The bytes are stored
+ * verbatim; whoever parses them later is responsible for their own guard,
+ * which is why the contracts layer rejects that key outright (§63).
+ */
 function readAction(body: Buffer): string | undefined {
   try {
     const parsed: unknown = JSON.parse(body.toString("utf8"));
@@ -157,9 +191,19 @@ export function createGithubWebhookRoute(
   const router = express.Router();
   const now = options.now ?? (() => new Date());
   const report = options.observer?.onOutcome ?? (() => undefined);
+  const limits = options.rateLimits ?? createDefaultWebhookRateLimits();
+
+  // At construction, so a weak secret fails the deploy rather than serving a
+  // forgeable endpoint.
+  if (options.allowWeakSecretForTesting !== true) {
+    assertStrongWebhookSecret(options.secret);
+  }
 
   router.post(
     "/",
+    // Before the body is read: an over-budget caller must not get us to buffer
+    // 26 MB before being turned away.
+    rateLimitMiddleware(limits),
     // Route-level, so the exact bytes survive whatever the application mounted
     // globally. `type: () => true` accepts any content type: GitHub sends
     // `application/json`, but a content-type check here would reject a delivery
@@ -194,6 +238,12 @@ export function createGithubWebhookRoute(
       headers.signature,
     );
     if (!verification.ok) {
+      // Failed authentication draws on the tighter budget. The cost asymmetry
+      // lives here: rejection is cheap for us and free for the sender, so an
+      // unbounded flood of forged signatures is the realistic denial of
+      // service.
+      const withinBudget = penalizeUnauthenticated(limits, request);
+
       // The reason goes to the observer, never to the response.
       report({
         outcome: "signature_rejected",
@@ -201,16 +251,24 @@ export function createGithubWebhookRoute(
         event: headers.event,
         reason: verification.reason,
       });
+
+      if (!withinBudget) {
+        response.status(429).json({ error: "too_many_requests" });
+        return;
+      }
       response
         .status(SIGNATURE_STATUS[verification.reason])
         .json({ error: "unauthorized" });
       return;
     }
 
-    // Authenticated from here. Semantic work may begin.
+    // Authenticated from here. Semantic work may begin — and the body is
+    // parsed exactly once, for both the scheduling decision and the stored
+    // column.
     const receivedAt = now();
+    const action = readAction(body);
     const jobs = SUPPORTED_EVENTS.has(headers.event)
-      ? jobsFor(headers.event, body)
+      ? jobsFor(headers.event, action)
       : [];
 
     let outcome: IngestOutcome;
@@ -221,7 +279,7 @@ export function createGithubWebhookRoute(
           sourceEndpointId: options.sourceEndpointId,
           deliveryId: headers.deliveryId,
           event: headers.event,
-          action: readAction(body) ?? null,
+          action: action ?? null,
           bodyDigest: digestBody(body),
           payload: body,
           receivedAt,
