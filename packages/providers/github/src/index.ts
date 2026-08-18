@@ -56,3 +56,22 @@ export {
 } from "./normalize/pull-request.js";
 
 export * from "./auth/index.js";
+
+export {
+  carriesPublication,
+  extractPublicationKeys,
+  findingMarker,
+  publicationMarker,
+} from "./publish/markers.js";
+export {
+  GithubProviderError,
+  GithubReviewPublisher,
+  classifyFailure,
+  classifyTransportError,
+  type GithubRequest,
+  type InlineComment,
+  type ProviderFailure,
+  type ProviderFailureClass,
+  type RemoteReview,
+  type ReviewContent,
+} from "./publish/review-publisher.js";

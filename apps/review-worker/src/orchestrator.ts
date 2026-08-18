@@ -76,6 +76,17 @@ export interface RunContext {
   readonly runId: string;
   readonly revisionId: string;
   readonly headSha: string;
+  /**
+   * Which provider will carry the publication, and which pull request it
+   * belongs to.
+   *
+   * Both are on the context rather than looked up when needed, because the
+   * publication ledger is written in the transition into `publishing` — the one
+   * moment where a lookup that fails would leave a durable obligation with no
+   * record of what it obliges.
+   */
+  readonly provider: "github" | "gitlab";
+  readonly pullRequestId: string;
 }
 
 /**
@@ -190,7 +201,17 @@ export async function advance(
         "reconciling",
         "publishing",
         () => ({
-          publications: planPublications(context.runId, outputs.findings),
+          publications: planPublications(
+            {
+              organizationId: context.scope.organizationId,
+              repositoryId: context.scope.repositoryId,
+              provider: context.provider,
+              pullRequestId: context.pullRequestId,
+              revisionId: context.revisionId,
+              runId: context.runId,
+            },
+            outputs.findings,
+          ),
         }),
         ["candidates", "verifications"],
       );

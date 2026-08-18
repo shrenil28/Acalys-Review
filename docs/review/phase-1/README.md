@@ -347,6 +347,52 @@ contract means it found something.
 
 ---
 
+## What the published review has to look like
+
+The protocol decides whether a review appears exactly once. This decides whether
+anyone wants it there. Both are Phase 1, and the second is worthless without the
+first — which is why the E.3 probe published a deliberately bare body while it
+was measuring recovery mechanics.
+
+The target is the shape CodeRabbit publishes, because it is the shape reviewers
+on this repository already read without being taught:
+
+```
+┌─ one comment per run, edited in place across pushes ──────────────┐
+│  ▸ status line — "No actionable comments" is a real result and    │
+│    should read like one, not like silence                         │
+│  ▸ ▸ Recent review info      (collapsed)                          │
+│  ▸ ▸ Walkthrough             (collapsed) — what changed, in prose │
+│  ▸ ▸ Pre-merge checks | ✅ 5 (collapsed) — pass/fail, countable   │
+│  ▸ ▸ Finishing touches       (collapsed)                          │
+│  ▸ footer: how to talk to it                                      │
+└───────────────────────────────────────────────────────────────────┘
+      +  inline comments on the diff, one per finding
+```
+
+Four properties matter more than the visual details:
+
+**One comment, edited — not one per push.** A reviewer following a pull request
+through five pushes should see one summary that is currently true, not five that
+disagree. That is a reconciliation requirement, and it is why the summary
+publication carries a run-scoped logical key with a stable identity: editing in
+place requires knowing which comment is ours.
+
+**Collapsed by default.** A review that fills the page is one that gets scrolled
+past. Everything except the verdict starts folded.
+
+**"Nothing to report" is a first-class outcome.** A reviewer that only speaks
+when it has complaints trains people to read its silence as "not run yet".
+
+**The footer is the interface.** Commands are how a reviewer stops being a
+one-way announcement, and they need to be discoverable from the comment itself.
+
+Rendering is the last step of publishing, not a separate feature: the content
+digest in the ledger is computed over what gets rendered, so a change to the
+template is a change to publication identity and has to be treated as one.
+
+---
+
 ## Explicitly not in Phase 1
 
 GitLab, Azure DevOps, Bitbucket · CLI and IDE surfaces · Slack/Discord agents · security

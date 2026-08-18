@@ -215,8 +215,48 @@ export function verify(
  * The logical key is minted here, **before** anything is attempted, which is
  * what makes an ambiguous provider outcome reconcilable at all.
  */
+export interface PublicationScope {
+  readonly organizationId: string;
+  readonly repositoryId: string;
+  readonly provider: "github" | "gitlab";
+  readonly pullRequestId: string;
+  readonly revisionId: string;
+  readonly runId: string;
+}
+
+/**
+ * The logical key: every scope that makes two effects different, spelled out.
+ *
+ * Not `review:${runId}`. A run id is a UUID and would in fact be unique, which
+ * is exactly what makes the short form dangerous — it is correct by accident,
+ * and a future key that drops a scope looks identical to one that never had it.
+ * Written out, a dropped scope is visible in the data.
+ *
+ * Deliberately NOT derived from the head SHA, the finding's line, the provider
+ * review id, or the webhook delivery id. The first two are content, the third
+ * does not exist until after the effect it is supposed to identify, and the
+ * fourth is transport.
+ */
+function logicalKey(
+  scope: PublicationScope,
+  kind: string,
+  discriminator: string,
+): string {
+  return [
+    "acalys",
+    scope.provider,
+    scope.organizationId,
+    scope.repositoryId,
+    scope.pullRequestId,
+    scope.revisionId,
+    scope.runId,
+    kind,
+    discriminator,
+  ].join(":");
+}
+
 export function planPublications(
-  runId: string,
+  scope: PublicationScope,
   findings: readonly {
     readonly fingerprintValue: string;
     readonly severity: string;
@@ -226,18 +266,24 @@ export function planPublications(
 
   const review: PublicationIntentRow = {
     kind: "review",
-    // Run-scoped: one provider review per run, and the key is stable across
-    // retries because it contains nothing generated at attempt time.
-    logicalKey: `review:${runId}`,
+    // One provider review per run, and the key is stable across retries because
+    // it contains nothing generated at attempt time.
+    logicalKey: logicalKey(scope, "review", "run"),
     contentDigest: sha256(summaryBody),
+    provider: scope.provider,
+    pullRequestId: scope.pullRequestId,
+    revisionId: scope.revisionId,
   };
 
   const comments = findings.map((finding) => ({
     kind: "inline_comment" as const,
     // Finding-scoped, keyed on the fingerprint so the same finding on a later
     // revision reconciles to the same comment rather than a duplicate.
-    logicalKey: `comment:${runId}:${finding.fingerprintValue}`,
+    logicalKey: logicalKey(scope, "inline_comment", finding.fingerprintValue),
     contentDigest: sha256(`${finding.fingerprintValue}|${finding.severity}`),
+    provider: scope.provider,
+    pullRequestId: scope.pullRequestId,
+    revisionId: scope.revisionId,
   }));
 
   return [review, ...comments];

@@ -205,6 +205,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "0001_webhook_inbox.sql",
     "0002_review_ingestion.sql",
     "0003_review_stages.sql",
+    "0004_publication_ledger.sql",
   ].map((name) =>
     readFileSync(
       fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)),

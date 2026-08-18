@@ -48,3 +48,19 @@ export {
   type StageWork,
   type VerificationRow,
 } from "./review/stage-store.js";
+export {
+  PublicationContentConflict,
+  PublicationStore,
+  findLifecycleViolations,
+  type AttemptFailure,
+  type LedgerOutcome,
+  type ProviderObservation,
+  type PublicationIntent,
+} from "./review/publication-store.js";
+export {
+  PUBLICATION_STATES,
+  canTransitionPublication,
+  isTerminalPublicationState,
+  legalPublicationTransitions,
+  type PublicationState,
+} from "./review/publication-state.js";

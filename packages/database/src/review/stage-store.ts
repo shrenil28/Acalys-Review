@@ -39,6 +39,7 @@ import { canTransition, type ReviewRunState } from "@acalys/contracts/domain";
 
 import type { PgClient, PgPool } from "../webhook/postgres-inbox.js";
 import type { TenantScope } from "./ingestion-store.js";
+import { PublicationContentConflict } from "./publication-store.js";
 
 export interface CandidateFindingRow {
   readonly producerId: string;
@@ -69,6 +70,18 @@ export interface PublicationIntentRow {
   readonly kind: "review" | "inline_comment" | "summary" | "check";
   readonly logicalKey: string;
   readonly contentDigest: string;
+  /** Which adapter reconciles this row. Denormalized: see migration 0004. */
+  readonly provider: "github" | "gitlab";
+  readonly pullRequestId?: string | undefined;
+  /**
+   * The revision published against.
+   *
+   * P1-E.3 found every GitHub review carries a `commit_id`. Without the
+   * revision here, two runs against different pushes of one pull request are
+   * indistinguishable in the ledger, and "already published?" degrades to
+   * "was anything ever published here?".
+   */
+  readonly revisionId?: string | undefined;
 }
 
 /**
@@ -288,26 +301,47 @@ export class ReviewStageStore {
       }
 
       for (const publication of work.publications ?? []) {
-        // `DO UPDATE` on the digest, so a content change under a stable key is
-        // *visible* rather than silently ignored — the caller compares and
-        // decides whether that is an invariant violation.
-        await client.query(
+        // `DO UPDATE` so the row is returned on conflict, and the digest that
+        // comes back is the STORED one. Comparing it here is the enforcement of
+        // the ledger's central invariant: a stable logical key carrying changed
+        // content is not a retry, it is a claim that the same external effect
+        // means two different things — and the effect may already be visible
+        // externally carrying the other one.
+        //
+        // The previous version of this statement did the `DO UPDATE` and threw
+        // the result away, so the comment claimed a check that no code
+        // performed.
+        const upserted = await client.query<{ content_digest: string }>(
           `INSERT INTO publication_intents (
-             id, organization_id, review_run_id, kind, logical_key,
-             content_digest, state, created_at, updated_at
-           ) VALUES ($1,$2,$3,$4,$5,$6,'planned',$7,$7)
+             id, organization_id, review_run_id, provider, pull_request_id,
+             revision_id, kind, logical_key, content_digest, state,
+             created_at, updated_at
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'planned',$10,$10)
            ON CONFLICT (review_run_id, logical_key)
-             DO UPDATE SET updated_at = publication_intents.updated_at`,
+             DO UPDATE SET updated_at = publication_intents.updated_at
+           RETURNING content_digest`,
           [
             randomUUID(),
             scope.organizationId,
             runId,
+            publication.provider,
+            publication.pullRequestId ?? null,
+            publication.revisionId ?? null,
             publication.kind,
             publication.logicalKey,
             publication.contentDigest,
             now,
           ],
         );
+
+        const stored = upserted.rows[0]?.content_digest;
+        if (stored !== undefined && stored !== publication.contentDigest) {
+          throw new PublicationContentConflict(
+            publication.logicalKey,
+            stored,
+            publication.contentDigest,
+          );
+        }
       }
 
       // Between the output and the transition: the window that decides whether

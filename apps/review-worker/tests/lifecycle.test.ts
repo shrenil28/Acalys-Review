@@ -132,7 +132,14 @@ describeWithPostgres(
         createdAt: at,
       });
 
-      return { scope, runId: run.id, revisionId: revision.id, headSha };
+      return {
+        scope,
+        runId: run.id,
+        revisionId: revision.id,
+        headSha,
+        provider: "github" as const,
+        pullRequestId: PR,
+      };
     }
 
     /**
@@ -144,7 +151,7 @@ describeWithPostgres(
      * correct reason and hide the incorrect ones. The content digest is left
      * intact, because that is what must be identical.
      */
-    async function logicalHistory(runId: string) {
+    async function logicalHistory(runId: string, revisionId = "") {
       const outputs = await stages().readOutputs(runId);
       const run = await ingestion().getRun(runId);
       return {
@@ -157,7 +164,15 @@ describeWithPostgres(
         ),
         publications: outputs.publications.map(
           (p) =>
-            `${p.logicalKey.replaceAll(runId, "<run>")}:${p.state}:${p.contentDigest}`,
+            `${p.logicalKey
+              .replaceAll(runId, "<run>")
+              // The revision is part of the key too, and is per-seed. Masking
+              // only the run id would make every comparison fail for the one
+              // reason that is correct, hiding the reasons that are not.
+              .replaceAll(
+                revisionId === "" ? "\u0000" : revisionId,
+                "<revision>",
+              )}:${p.state}:${p.contentDigest}`,
         ),
       };
     }
@@ -169,7 +184,7 @@ describeWithPostgres(
 
       expect(outcome).toEqual({ kind: "settled", state: "publishing" });
 
-      const history = await logicalHistory(context.runId);
+      const history = await logicalHistory(context.runId, context.revisionId);
       expect(history.state).toBe("publishing");
       expect(history.candidates.length).toBeGreaterThan(0);
       expect(history.verifications).toHaveLength(history.candidates.length);
@@ -192,7 +207,7 @@ describeWithPostgres(
         // The reference: an uninterrupted run.
         const clean = await seedRun(HEAD, "k-clean");
         await advanceToSettled(clean, options());
-        const expected = await logicalHistory(clean.runId);
+        const expected = await logicalHistory(clean.runId, clean.revisionId);
 
         for (const stopAt of STATES) {
           await database.reset();
@@ -211,7 +226,10 @@ describeWithPostgres(
           // A different worker picks it up with no handoff and no recovery mode.
           await advanceToSettled(context, options());
 
-          const actual = await logicalHistory(context.runId);
+          const actual = await logicalHistory(
+            context.runId,
+            context.revisionId,
+          );
           expect(actual, `resumed from ${stopAt}`).toEqual(expected);
         }
       }, 120_000);
@@ -402,7 +420,7 @@ describeWithPostgres(
       it("property: any crash schedule yields the same logical history", async () => {
         const clean = await seedRun(HEAD, "k-ref");
         await advanceToSettled(clean, options());
-        const expected = await logicalHistory(clean.runId);
+        const expected = await logicalHistory(clean.runId, clean.revisionId);
 
         await fc.assert(
           fc.asyncProperty(
@@ -425,7 +443,9 @@ describeWithPostgres(
               }
               await advanceToSettled(context, options());
 
-              expect(await logicalHistory(context.runId)).toEqual(expected);
+              expect(
+                await logicalHistory(context.runId, context.revisionId),
+              ).toEqual(expected);
             },
           ),
           { numRuns: 8 },
@@ -494,7 +514,7 @@ describeWithPostgres(
         "UPDATE review_runs SET state = 'completed' WHERE id = $1",
         [context.runId],
       );
-      const before = await logicalHistory(context.runId);
+      const before = await logicalHistory(context.runId, context.revisionId);
 
       // Every further attempt is a no-op.
       for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -502,7 +522,9 @@ describeWithPostgres(
         expect(outcome.kind).toBe("settled");
       }
 
-      expect(await logicalHistory(context.runId)).toEqual(before);
+      expect(await logicalHistory(context.runId, context.revisionId)).toEqual(
+        before,
+      );
     }, 60_000);
 
     // ── 5 ──────────────────────────────────────────────────────────────────
@@ -642,17 +664,38 @@ describeWithPostgres(
       await advanceToSettled(context, options());
 
       const outputs = await stages().readOutputs(context.runId);
+      const publicationScope = {
+        organizationId: context.scope.organizationId,
+        repositoryId: context.scope.repositoryId,
+        provider: "github" as const,
+        pullRequestId: context.pullRequestId,
+        revisionId: context.revisionId,
+        runId: context.runId,
+      };
+
       const review = outputs.publications.find((p) =>
-        p.logicalKey.startsWith("review:"),
+        p.logicalKey.includes(":review:"),
       );
 
-      expect(review?.logicalKey).toBe(`review:${context.runId}`);
       expect(review?.contentDigest).toMatch(/^[0-9a-f]{64}$/);
       expect(review?.state).toBe("planned");
 
+      // Every scope that makes two effects different appears in the key, so a
+      // future key that drops one is visible in the data rather than merely
+      // still-unique-by-accident.
+      for (const part of [
+        context.scope.organizationId,
+        context.scope.repositoryId,
+        context.pullRequestId,
+        context.revisionId,
+        context.runId,
+      ]) {
+        expect(review?.logicalKey).toContain(part);
+      }
+
       // Stable across recomputation — minted before any attempt, so an ambiguous
       // provider outcome stays reconcilable.
-      const replanned = planPublications(context.runId, outputs.findings);
+      const replanned = planPublications(publicationScope, outputs.findings);
       expect(replanned[0]?.logicalKey).toBe(review?.logicalKey);
       expect(replanned[0]?.contentDigest).toBe(review?.contentDigest);
     }, 60_000);

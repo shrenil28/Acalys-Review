@@ -7,7 +7,7 @@ P1-C     secure durable webhook ingestion          ✓
 P1-D     claims · leases · retries · concurrency   ✓
 P1-E.1   delivery → queued ReviewRun               ✓
 P1-E.2   deterministic lifecycle + crash recovery  ✓
-P1-E.3   real GitHub publication reconciliation    experiment ✓ / publisher pending
+P1-E.3   real GitHub publication reconciliation    ✓
 P1-F     code intelligence + context planner       ✓
 P1-F.2   planner eval — metrics + committed baseline  ✓
 ```
@@ -42,9 +42,12 @@ blind retry is harmless in the first window and produces a visible duplicate in
 the second — which is why reconcile-before-create is correctness rather than
 tidiness, and why the body marker has to exist at all.
 
-What remains for E.3 is the publisher itself: the `PublicationEffect` ledger,
-the crash/race matrix, and the `completed ⇒ all effects provider-confirmed`
-entailment, now that the experiment has defined what confirmed means.
+The publisher was then built on that evidence: the ledger completed by what
+GitHub actually returns, reconcile-before-create, `unknown` as a first-class
+state, an eleven-case crash matrix against real Postgres, and the
+`completed ⇒ all intents provider-confirmed` entailment that E.2 had to defer.
+Ten mutations planted, ten killed. See
+[e3-publication.md](./e3-publication.md).
 
 ---
 
