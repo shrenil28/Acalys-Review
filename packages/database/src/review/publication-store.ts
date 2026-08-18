@@ -459,5 +459,52 @@ export async function findLifecycleViolations(
     );
   }
 
+  // A publication authored by anything other than the policy path. The CHECK
+  // makes it unreachable through SQL, which is the point: this query proves the
+  // constraint is present and would catch a migration that dropped it.
+  const unauthorized = await pool.query<{ logical_key: string }>(
+    "SELECT logical_key FROM publication_intents WHERE authored_by <> 'policy'",
+  );
+  for (const row of unauthorized.rows) {
+    violations.push(
+      `publication ${row.logical_key} was authored outside the policy path`,
+    );
+  }
+
+  // A run past verification with a candidate nothing ever examined.
+  //
+  // `inconclusive` counts as examined; `unavailable` does not. A run that
+  // reached reconciling with an unavailable attempt would be publishing the
+  // subset that happened to verify, which makes an outage look like a clean
+  // review.
+  const unexamined = await pool.query<{ id: string; candidate: string }>(
+    `SELECT r.id, c.id AS candidate
+       FROM review_runs r
+       JOIN candidate_findings c ON c.review_run_id = r.id
+      WHERE r.state IN ('reconciling', 'publishing', 'completed')
+        AND NOT EXISTS (
+          SELECT 1 FROM verification_attempts v
+           WHERE v.candidate_finding_id = c.id AND v.status = 'completed'
+        )`,
+  );
+  for (const row of unexamined.rows) {
+    violations.push(
+      `run ${row.id} passed verification with candidate ${row.candidate} unexamined`,
+    );
+  }
+
+  // A promoted finding with no verification behind it.
+  const unverified = await pool.query<{ id: string }>(
+    `SELECT f.id FROM review_findings f
+       LEFT JOIN verification_attempts v ON v.id = f.verification_attempt_id
+      WHERE f.verification_attempt_id IS NULL
+         OR v.decision IS DISTINCT FROM 'verified'`,
+  );
+  for (const row of unverified.rows) {
+    violations.push(
+      `review finding ${row.id} was promoted without a verification`,
+    );
+  }
+
   return violations;
 }

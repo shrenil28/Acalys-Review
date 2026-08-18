@@ -606,6 +606,85 @@ describeWithPostgres(
       expect(await findLifecycleViolations(database.pool)).toEqual([]);
     }, 60_000);
 
+    // ── the trust boundary, enforced by the database ─────────────────────────
+    it("refuses a publication authored by anything but the policy path", async () => {
+      // The shortest path from "an analyzer had an opinion" to "a developer was
+      // interrupted" must not be one INSERT.
+      const { runId } = await seed();
+      const [intent] = await stores().publications.listForRun(runId);
+      if (intent === undefined) throw new Error("missing intent");
+
+      for (const author of ["analyzer", "verifier"]) {
+        await expect(
+          database.pool.query(
+            "UPDATE publication_intents SET authored_by = $2 WHERE id = $1",
+            [intent.id, author],
+          ),
+        ).rejects.toThrow(/authored_by/);
+      }
+    }, 60_000);
+
+    it("refuses a completed verification that does not say why", async () => {
+      const { runId } = await seed();
+      const candidate = await database.pool.query<{ id: string }>(
+        `INSERT INTO candidate_findings (id, organization_id, repository_id, review_run_id,
+         producer_id, producer_version, input_digest, title, claim, explanation,
+         category, proposed_severity, path, start_line, end_line, fingerprint_value,
+         created_at)
+       VALUES (gen_random_uuid(),$1,$2,$3,'a','1',$4,'t','c','e','correctness','medium',
+         'src/a.ts',1,1,$5,$6)
+       RETURNING id`,
+        [ORG, REPO, runId, "d".repeat(64), "f".repeat(64), now],
+      );
+
+      const insert = (columns: string, values: unknown[]) =>
+        database.pool.query(
+          `INSERT INTO verification_attempts (id, organization_id, review_run_id,
+           candidate_finding_id, verifier_id, verifier_version, context_digest,
+           cache_key, created_at, ${columns})
+         VALUES (gen_random_uuid(),$1,$2,$3,'v','1',$4,$5,$6,${values
+           .map((_unused, index) => `$${String(index + 7)}`)
+           .join(",")})`,
+          [
+            ORG,
+            runId,
+            candidate.rows[0]?.id,
+            "c".repeat(64),
+            "k".repeat(64),
+            now,
+            ...values,
+          ],
+        );
+
+      // "Verified, reason unknown" is a row nobody can audit.
+      await expect(
+        insert("status, decision, severity", [
+          "completed",
+          "verified",
+          "medium",
+        ]),
+      ).rejects.toThrow(/verification_completed_is_reasoned/);
+
+      // An unavailable attempt has examined nothing, so it must not carry a
+      // decision a reader could mistake for a judgement.
+      await expect(
+        insert("status, failure, decision", [
+          "unavailable",
+          "model_timeout",
+          "rejected",
+        ]),
+      ).rejects.toThrow(/verification_unavailable_has_no_decision/);
+
+      // The legitimate shapes are accepted, so the constraints are not simply
+      // refusing everything.
+      await insert("status, decision, severity, reasons", [
+        "completed",
+        "verified",
+        "medium",
+        ["independent_context_confirms"],
+      ]);
+    }, 60_000);
+
     it("published without provider evidence is rejected by the database itself", async () => {
       const { intentId } = await seed();
 

@@ -241,6 +241,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "0003_review_stages.sql",
     "0004_publication_ledger.sql",
     "0005_analysis_coverage.sql",
+    "0006_verification_attempts.sql",
   ].map((name) =>
     readFileSync(
       fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)),
@@ -250,7 +251,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
 
   const apply = async (): Promise<void> => {
     await pool.query(
-      `DROP TABLE IF EXISTS publication_intents, review_findings, verifications,
+      `DROP TABLE IF EXISTS publication_intents, verification_attempts, review_findings, verifications,
          candidate_findings, review_run_transitions, review_runs, review_requests,
          pull_request_revisions, pull_requests, repositories, organizations,
          webhook_jobs, webhook_deliveries CASCADE`,
