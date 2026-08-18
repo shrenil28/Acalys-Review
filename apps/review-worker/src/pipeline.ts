@@ -91,19 +91,58 @@ export interface PipelineOptions {
 }
 
 /**
- * The idempotency key for a delivery.
+ * The idempotency key for a delivery: **review target + revision.**
  *
- * Derived from **provider identity plus the head commit**, never from the
- * delivery id. That is the whole point: two different deliveries describing the
- * same push — a redelivery, a `synchronize` that duplicates an `opened`, a
- * manual replay — must resolve to one request. Keying on the delivery id would
- * make every redelivery a new review.
+ * The full logical identity is four parts, and every one is load-bearing:
  *
- * The head SHA is what makes it stable: it is the provider's own immutable name
- * for the code under review, so any delivery about that code produces this key.
+ *     organizationId   the scope column — supplied by the store, not here
+ *     provider         github | gitlab | …
+ *     pull request     the provider's immutable id for the target
+ *     head SHA         the provider's immutable name for the code
+ *
+ * `UNIQUE (idempotency_scope, idempotency_key)` therefore means
+ * `(tenant) × (provider, target, revision)`.
+ *
+ * # Why each part must stay
+ *
+ * **Head SHA alone is not identity.** One commit can legitimately be the head
+ * of several targets — a stacked pull request, a branch opened twice, a commit
+ * cherry-picked into a second PR:
+ *
+ *     PR #10 @ SHA X     ─┐  must remain
+ *     PR #27 @ SHA X     ─┘  two distinct reviews
+ *
+ * Dropping the pull request id would merge them and silently review only one.
+ * That is the "optimization" this comment exists to prevent, and
+ * `end-to-end.test.ts` asserts against it.
+ *
+ * **The tenant scope is separate and equally required.** A global key space
+ * would let one organization's request suppress another's — a cross-tenant leak
+ * wearing the costume of a deduplication optimization.
+ *
+ * # What it deliberately does NOT include
+ *
+ * The delivery id, the action, and the trigger. Two different deliveries about
+ * one push — an `opened` followed by a `synchronize` for the same head, a
+ * GitHub redelivery, an operator replaying through a second endpoint — describe
+ * the same target at the same revision and must resolve to one request.
+ *
+ * # Reruns are not deduplication
+ *
+ * An explicit rerun does not bypass this key; it reuses the request and adds a
+ * `ReviewRun` at `attempt + 1`. That is the P1-D separation holding:
+ *
+ *     ReviewRequest (one, keyed here)
+ *       ├── ReviewRun attempt 1
+ *       └── ReviewRun attempt 2   ← the rerun
  */
 export function idempotencyKeyFor(event: GithubPullRequestEvent): string {
-  return `github:${String(event.pull_request.id)}:${event.pull_request.head.sha}`;
+  // Written as named parts so the composition is visible at the call site and
+  // a future edit cannot quietly drop one.
+  const provider = "github";
+  const target = String(event.pull_request.id);
+  const revision = event.pull_request.head.sha;
+  return `${provider}:${target}:${revision}`;
 }
 
 /**

@@ -385,14 +385,79 @@ describeWithPostgres("A signed delivery becomes a ReviewRun", () => {
     }, 60_000);
   });
 
-  it("derives the idempotency key from head SHA, not the delivery id", () => {
-    // The property that makes two different deliveries about one push converge.
-    const event = {
-      pull_request: { id: 2145998877, head: { sha: "b".repeat(40) } },
-    } as never;
-    expect(idempotencyKeyFor(event)).toBe(
-      `github:2145998877:${"b".repeat(40)}`,
-    );
+  describe("idempotency identity is review target + revision", () => {
+    it("composes provider, target and revision — not head SHA alone", () => {
+      const event = {
+        pull_request: { id: 2145998877, head: { sha: "b".repeat(40) } },
+      } as never;
+      expect(idempotencyKeyFor(event)).toBe(
+        `github:2145998877:${"b".repeat(40)}`,
+      );
+    });
+
+    it("keeps two pull requests at the SAME head SHA distinct", () => {
+      // One commit can legitimately head several targets — a stacked PR, a
+      // branch opened twice, a cherry-pick. Keying on head SHA alone would
+      // merge them and silently review only one. This is the guard against
+      // that "optimization".
+      const sha = "c".repeat(40);
+      const first = { pull_request: { id: 10, head: { sha } } } as never;
+      const second = { pull_request: { id: 27, head: { sha } } } as never;
+
+      expect(idempotencyKeyFor(first)).not.toBe(idempotencyKeyFor(second));
+    });
+
+    it("produces two reviews for two PRs sharing a head, end to end", async () => {
+      // The same assertion at the database level, so a change to the unique
+      // constraint is caught even if the key function is left alone.
+      await deliver();
+      await drain();
+
+      await deliver((payload) => {
+        const pull = (payload as { pull_request: Record<string, unknown> })
+          .pull_request;
+        // A different pull request, identical head commit.
+        pull["id"] = 999888777;
+        pull["number"] = 413;
+      }, "e2e-second-pr");
+      await drain();
+
+      const after = await counts();
+      expect(after["pull_requests"]).toBe(2);
+      expect(after["review_requests"]).toBe(2);
+      expect(after["review_runs"]).toBe(2);
+    }, 60_000);
+
+    it("a rerun reuses the request and adds an attempt", async () => {
+      // Reruns are not deduplication. The P1-D separation holding: one
+      // ReviewRequest, two ReviewRuns.
+      await deliver();
+      await drain();
+
+      const request = await database.pool.query<{ id: string }>(
+        "SELECT id FROM review_requests",
+      );
+      const revision = await database.pool.query<{ id: string }>(
+        "SELECT id FROM pull_request_revisions",
+      );
+
+      const rerun = await store().upsertReviewRun(
+        { organizationId: ORG, repositoryId: REPO },
+        {
+          requestId: request.rows[0]?.id ?? "",
+          revisionId: revision.rows[0]?.id ?? "",
+          attempt: 2,
+          executionMode: "review",
+          executionStrategy: "single",
+          createdAt: new Date(),
+        },
+      );
+
+      expect(rerun.attempt).toBe(2);
+      const after = await counts();
+      expect(after["review_requests"]).toBe(1);
+      expect(after["review_runs"]).toBe(2);
+    }, 60_000);
   });
 
   it("ignores a non-pull_request delivery rather than failing it", async () => {

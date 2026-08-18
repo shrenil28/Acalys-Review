@@ -80,26 +80,60 @@ export async function assertSuiteIsActuallyRunning(
   }
 }
 
+/**
+ * Waits for a database that will actually accept a connection.
+ *
+ * `pg_isready` over the container's unix socket is **not** sufficient, and the
+ * reason is a real race rather than flakiness: the official Postgres image runs
+ * `initdb` against a *temporary* server first, and that server answers
+ * `pg_isready` on the socket. A client that connects then gets
+ * "Connection terminated unexpectedly" when the temp server shuts down and the
+ * real one starts.
+ *
+ * So readiness is probed over **TCP**, which the temporary server does not
+ * listen on, and then confirmed with a real query — the only check that proves
+ * the thing under test is reachable.
+ */
 async function waitForReady(
   container: string,
-  deadlineMillis = 60_000,
+  port: number,
+  deadlineMillis = 90_000,
 ): Promise<void> {
   const started = Date.now();
   for (;;) {
     try {
+      // -h forces TCP. The init-time temporary server is socket-only, so this
+      // cannot succeed against it.
       await run("docker", [
         "exec",
         container,
         "pg_isready",
+        "-h",
+        "127.0.0.1",
         "-U",
         "postgres",
         "-d",
         DATABASE,
       ]);
+
+      // And confirm from outside the container, which is where the tests run.
+      const probe = new pg.Client({
+        host: "127.0.0.1",
+        port,
+        user: "postgres",
+        password: PASSWORD,
+        database: DATABASE,
+        connectionTimeoutMillis: 3_000,
+      });
+      await probe.connect();
+      await probe.query("SELECT 1");
+      await probe.end();
       return;
     } catch {
       if (Date.now() - started > deadlineMillis) {
-        throw new Error("Postgres did not become ready in time");
+        throw new Error(
+          `Postgres container ${container} did not become reachable on port ${String(port)}`,
+        );
       }
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
@@ -153,7 +187,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "fsync=off",
   ]);
 
-  await waitForReady(CONTAINER);
+  await waitForReady(CONTAINER, PORT);
 
   const pool = new pg.Pool({
     host: "127.0.0.1",
