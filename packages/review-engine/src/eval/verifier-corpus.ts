@@ -254,7 +254,23 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
   },
   {
     id: "signature-callers-migrated",
-    gold: "should_reject",
+    // ── A gold label corrected, and why that is not fitting-to-implementation
+    //
+    // This claim is *"the new parameter breaks existing callers of send()"* —
+    // a claim about a population, against an **exported** declaration. Refuting
+    // it requires proving the population was enumerated, and enumerating
+    // references inside a repository does not prove that consumers outside it
+    // do not exist.
+    //
+    // The original `should_reject` encoded the answer a naive implementation
+    // gives: find the callers, see them migrated, refute. That is the commonest
+    // static-analysis overclaim there is, and grading it as correct would have
+    // rewarded building it.
+    //
+    // The label changed because the SPECIFICATION was wrong, not because the
+    // implementation was inconvenient. The distinction is testable: the
+    // stale-call-site pair below is refutable and its gold did not move.
+    gold: "should_abstain",
     files: {
       "src/api.ts":
         "export function send(a: number, b: string): void {\n  return;\n}",
@@ -365,6 +381,147 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
     because:
       "the callee is itself the result of a call, so the checker binds no symbol at all — and an unbindable callee must abstain rather than be assumed synchronous",
   },
+  // ── signature compatibility: paired ────────────────────────────────────
+  //
+  // Each pair is a real break beside code that is almost identical and correct.
+  // A capability taught against only the positive halves would count arguments
+  // and score well here while being wrong about optionals, defaults and types —
+  // which is to say wrong about most real signature changes.
+  {
+    id: "signature-stale-caller",
+    gold: "should_verify",
+    files: {
+      "src/api.ts":
+        "export function send(id: string, urgent: boolean): void {\n  return;\n}",
+      "src/caller.ts": [
+        'import { send } from "./api.js";',
+        "export function run(id: string): void {",
+        "  send(id);",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`send()` is called without `urgent`, which this change made required",
+      "src/caller.ts",
+      3,
+    ),
+    because:
+      "a specific named call site that the compiler rejects against the new contract — the one signature proposition a bounded consumer scope can settle",
+    pairedWith: "signature-migrated-caller",
+  },
+  {
+    id: "signature-migrated-caller",
+    gold: "should_reject",
+    files: {
+      "src/api.ts":
+        "export function send(id: string, urgent: boolean): void {\n  return;\n}",
+      "src/caller.ts": [
+        'import { send } from "./api.js";',
+        "export function run(id: string): void {",
+        "  send(id, false);",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`send()` is called without `urgent`, which this change made required",
+      "src/caller.ts",
+      3,
+    ),
+    because:
+      "the same claim against a call that already passes the new argument; the pair proves the verifier reads the call rather than the declaration's shape",
+    pairedWith: "signature-stale-caller",
+  },
+  {
+    id: "signature-optional-parameter",
+    gold: "should_reject",
+    files: {
+      "src/api.ts":
+        "export function send(id: string, urgent?: boolean): void {\n  return;\n}",
+      "src/caller.ts": [
+        'import { send } from "./api.js";',
+        "export function run(id: string): void {",
+        "  send(id);",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`send()` is called without `urgent`, which this change made required",
+      "src/caller.ts",
+      3,
+    ),
+    because:
+      "the parameter is optional, so the old call is still valid — this is the case that kills arity counting, and it looks identical to the stale one",
+  },
+  {
+    id: "signature-default-parameter",
+    gold: "should_reject",
+    files: {
+      "src/api.ts":
+        "export function send(id: string, urgent = false): void {\n  return;\n}",
+      "src/caller.ts": [
+        'import { send } from "./api.js";',
+        "export function run(id: string): void {",
+        "  send(id);",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`send()` is called without `urgent`, which this change made required",
+      "src/caller.ts",
+      3,
+    ),
+    because:
+      "a default makes the parameter omittable; arity is unchanged from the caller's side and the old call remains correct",
+  },
+  {
+    id: "signature-type-changed-same-arity",
+    gold: "should_verify",
+    files: {
+      "src/api.ts": [
+        "export interface RetryPolicy {",
+        "  attempts: number;",
+        "}",
+        "export function retry(policy: RetryPolicy): void {",
+        "  return;",
+        "}",
+      ].join("\n"),
+      "src/caller.ts": [
+        'import { retry } from "./api.js";',
+        "export function run(): void {",
+        "  retry(3);",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`retry()` is called with an incompatible argument after the signature change",
+      "src/caller.ts",
+      3,
+    ),
+    because:
+      "same argument count, incompatible type — proves the capability is asking the compiler rather than counting",
+  },
+  {
+    id: "signature-shadowed-callee",
+    gold: "should_reject",
+    files: {
+      "src/api.ts":
+        "export function send(id: string, urgent: boolean): void {\n  return;\n}",
+      "src/caller.ts": [
+        'import { send } from "./api.js";',
+        "export function outer(send: (id: string) => void, id: string): void {",
+        "  send(id);",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`send()` is called without `urgent`, which this change made required",
+      "src/caller.ts",
+      3,
+    ),
+    because:
+      "the epistemic lesson, carried into the new capability: the callee is a parameter shadowing the import, and exact binding — not the name — decides which contract applies",
+  },
+
   // ── historical regression ──────────────────────────────────────────────
   {
     id: "historical-shadowed-parameter",

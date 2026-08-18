@@ -54,7 +54,11 @@ describe("Verifier capability, on injected challenges", () => {
     const abstentions = report.outcomes.filter(
       (outcome) => outcome.gold === "should_abstain",
     );
-    expect(abstentions).toHaveLength(4);
+    // Five, since `signature-callers-migrated` was reclassified. Its claim is
+    // about a POPULATION of callers against an exported declaration, and
+    // refuting that needs a closed world the verifier cannot establish —
+    // "findReferences returned four" is not "four consumers exist".
+    expect(abstentions).toHaveLength(5);
     expect(abstentions.every((outcome) => outcome.correct)).toBe(true);
   });
 
@@ -70,8 +74,12 @@ describe("Verifier capability, on injected challenges", () => {
     // mechanism work, and the cost of leaving them is exactly the recall this
     // line reports.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
-    expect(report.pairsTotal).toBe(3);
-    expect(report.pairsDiscriminated).toBe(1);
+    // Four pairs now: async, condition, catch, and the new signature pair.
+    // Two discriminate — async and signature. The condition and catch pairs
+    // abstain on both halves, which is safe and useless, and each remains a
+    // named target.
+    expect(report.pairsTotal).toBe(4);
+    expect(report.pairsDiscriminated).toBe(2);
   });
 
   it("still filters the candidate the analyzer used to produce", () => {
@@ -116,37 +124,39 @@ describe("Verifier capability, on injected challenges", () => {
     // once would leave attribution worse, not better.
     expect(report.matrix).toEqual({
       should_verify: {
-        verified: 1,
+        // 1 → 3: the stale caller and the changed-parameter-type case now
+        // verify. The two remaining inconclusive are condition and catch.
+        verified: 3,
         rejected: 0,
         inconclusive: 2,
         unavailable: 0,
       },
       should_reject: {
         verified: 0,
-        rejected: 3,
-        // Three, since the historical replay joined. It comes back
-        // `inconclusive` rather than `rejected`: the verifier's own binding
-        // says the callee is synchronous while the analyzer's supplied
-        // evidence says asynchronous, and it treats that as a conflict rather
-        // than trusting its own independent derivation over evidence handed to
-        // it.
+        // 3 → 7: the migrated caller, the optional parameter, the default
+        // parameter and the shadowed callee. The optional and default cases are
+        // the ones that would pass an arity check and be wrong.
+        rejected: 7,
+        // Two: the condition lookalike, and the historical replay. The replay
+        // comes back `inconclusive` rather than `rejected` because the
+        // verifier's own binding says the callee is synchronous while the
+        // analyzer's supplied evidence says asynchronous, and it treats that as
+        // a conflict rather than trusting its own derivation over evidence
+        // handed to it.
         //
-        // Recorded as a MISS, not relabelled. `should_reject` is the right
-        // gold — the repository does settle this — and a verifier that
-        // weighted its own binding above supplied evidence would refute it.
-        // Changing the label to fit the implementation is how a corpus stops
-        // measuring anything.
-        inconclusive: 3,
+        // Recorded as a MISS, not relabelled. Carried forward through the
+        // signature work untouched: it is verifier-capability debt, and fixing
+        // it changes evidence-combination semantics, which deserves its own
+        // checkpoint.
+        inconclusive: 2,
         unavailable: 0,
       },
       should_abstain: {
         verified: 0,
         rejected: 0,
-        // Four, since `dynamic-callee-unbindable` joined: a callee reached
-        // through a computed property binds to no declaration, and the rule
-        // that such a callee is never assumed synchronous had been asserted in
-        // prose and tested nowhere — a mutation that assumed it SURVIVED.
-        inconclusive: 4,
+        // Five: the two unknowables, the absent location, the unbindable
+        // callee, and the reclassified population claim.
+        inconclusive: 5,
         unavailable: 0,
       },
     });
@@ -156,7 +166,7 @@ describe("Verifier capability, on injected challenges", () => {
     // Fail-closed: an empty matrix satisfies every zero above.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
     expect(report.outcomes).toHaveLength(VERIFIER_CHALLENGES.length);
-    expect(report.outcomes.length).toBeGreaterThanOrEqual(12);
+    expect(report.outcomes.length).toBeGreaterThanOrEqual(18);
     expect(report.provenance).toBe("injected");
     for (const gold of ["should_verify", "should_reject", "should_abstain"]) {
       expect(

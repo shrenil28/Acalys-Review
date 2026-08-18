@@ -9,6 +9,18 @@
  * Skips rather than fails when Docker is unavailable, so the suite stays
  * runnable on a machine without it — with `describeWithPostgres` reporting the
  * skip loudly rather than silently passing.
+ *
+ * # Every removal in this file passes `-v`
+ *
+ * The Postgres image declares its data directory as a VOLUME, so each container
+ * creates an anonymous one. `docker rm -f` without `-v` deletes the container
+ * and orphans the volume. The container reaping added earlier was half a fix:
+ * containers stopped accumulating while volumes kept growing, reached 872 and
+ * 62GB, filled the disk, and stopped new containers becoming reachable.
+ *
+ * Cleanup that depends on a process exiting gracefully cannot be the whole
+ * story — SIGKILL, a crashed machine and a dead daemon all skip it — so a
+ * dangling-volume sweep runs at startup as well, alongside the container reap.
  */
 
 import { execFileSync, execFile } from "node:child_process";
@@ -213,7 +225,22 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
   const CONTAINER = `acalys-test-postgres-${label}`;
   // Removed first, so a container left by an interrupted run does not make the
   // next one fail with a stale schema.
-  await run("docker", ["rm", "-f", CONTAINER]).catch(() => undefined);
+  // `-v`, on every removal in this file.
+  //
+  // The Postgres image declares `/var/lib/postgresql/data` as a VOLUME, so each
+  // container creates an anonymous volume. `docker rm -f` deletes the container
+  // and leaves the volume, and nothing ever refers to it again.
+  //
+  // The container reaping added earlier was therefore only half a fix: it
+  // stopped containers accumulating while every run kept adding ~70MB of
+  // orphaned volume. It reached **872 volumes and 62GB**, the disk filled, and
+  // Postgres containers stopped becoming reachable — which surfaced as nine
+  // integration suites failing to start, not as a disk error.
+  //
+  // The suites failed rather than skipping, which is the fail-closed rule
+  // working. But an infrastructure leak that presents as a product test failure
+  // costs an investigation every time, so the leak is closed at the source.
+  await run("docker", ["rm", "-f", "-v", CONTAINER]).catch(() => undefined);
   await run("docker", [
     "run",
     "-d",
@@ -267,9 +294,18 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
   await run("docker", [
     "rm",
     "-f",
+    "-v",
     "--",
     ...(await staleContainers(label)),
   ]).catch(() => undefined);
+
+  // And anonymous volumes no container references any more.
+  //
+  // Scoped to dangling volumes, which is safe: a volume in use by any container
+  // — including another suite's, running right now — is not dangling and is not
+  // touched. This is the sweep that recovers from runs killed before the
+  // handlers below could fire, which is the case the handlers cannot cover.
+  await run("docker", ["volume", "prune", "-f"]).catch(() => undefined);
 
   // Removed on an abrupt exit too, not only on a clean `stop()`.
   //
@@ -280,7 +316,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
   // harness quietly consumes a third of a laptop.
   const reap = (): void => {
     try {
-      execFileSync("docker", ["rm", "-f", CONTAINER], {
+      execFileSync("docker", ["rm", "-f", "-v", CONTAINER], {
         stdio: "ignore",
         timeout: 10_000,
       });
@@ -344,7 +380,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     reset: apply,
     async stop() {
       await pool.end();
-      await run("docker", ["rm", "-f", CONTAINER]).catch(() => undefined);
+      await run("docker", ["rm", "-f", "-v", CONTAINER]).catch(() => undefined);
     },
   };
 }

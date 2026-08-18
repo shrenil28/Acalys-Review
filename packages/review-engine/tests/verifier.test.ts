@@ -292,6 +292,52 @@ describe("Every reason code is reachable", () => {
       ),
     );
 
+    // The signature capability's three reasons, each from a real
+    // adjudication rather than a declaration.
+    const signature = (
+      files: Record<string, string>,
+      statement: string,
+      line: number,
+    ): VerificationAttempt =>
+      verify(files, {
+        claim: {
+          statement,
+          steps: [],
+          trigger: "the call executes",
+          consequence: "the contract is violated",
+        },
+        location: { path: "src/caller.ts", startLine: line, endLine: line },
+      });
+
+    const API_NEW =
+      "export function send(id: string, urgent: boolean): void {\n  return;\n}";
+    const CALLER_STALE =
+      'import { send } from "./api.js";\nexport function run(id: string): void {\n  send(id);\n}';
+    const CALLER_OK =
+      'import { send } from "./api.js";\nexport function run(id: string): void {\n  send(id, false);\n}';
+
+    record(
+      signature(
+        { "src/api.ts": API_NEW, "src/caller.ts": CALLER_STALE },
+        "`send()` is called without `urgent`, which this change made required",
+        3,
+      ),
+    );
+    record(
+      signature(
+        { "src/api.ts": API_NEW, "src/caller.ts": CALLER_OK },
+        "`send()` is called without `urgent`, which this change made required",
+        3,
+      ),
+    );
+    record(
+      signature(
+        { "src/api.ts": API_NEW, "src/caller.ts": CALLER_OK },
+        "the new parameter breaks existing callers of send()",
+        3,
+      ),
+    );
+
     // `not_caused_by_change` is declared and this verifier cannot yet produce
     // it: the counterfactual is decided in the analyzer, and re-deciding it
     // here would need change data the verifier is not given. Named explicitly

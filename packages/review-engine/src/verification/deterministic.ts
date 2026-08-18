@@ -33,6 +33,7 @@
 import ts from "typescript";
 
 import { resolveCallProduct } from "./binding.js";
+import { verifySignatureCompatibility } from "./signature.js";
 import { assertReasonForCapability, assessCompetence } from "./competence.js";
 import {
   assertReasonsSupport,
@@ -278,6 +279,28 @@ export function verifyDeterministically(
   // is unsettleable whether or not the planner supplied the file, and reporting
   // it as a context gap would send someone to fix a planner that is working.
   const competence = assessCompetence(input);
+
+  if (
+    competence.kind === "supported" &&
+    competence.capability === "signature_compatibility"
+  ) {
+    // A separate procedure, not another branch of the async one. Each
+    // capability owns its evidence, its reasons and its abstention rule; the
+    // alternative is one growing `observeSite` switch whose blast radius
+    // includes every mechanism every time one is added.
+    const outcome = verifySignatureCompatibility(input, context);
+    if (outcome !== undefined) {
+      if (outcome.attempt.status === "completed") {
+        assertReasonsSupport(outcome.attempt.decision, outcome.attempt.reasons);
+        assertReasonForCapability(
+          "signature_compatibility",
+          outcome.attempt.reasons,
+        );
+      }
+      return outcome.attempt;
+    }
+  }
+
   if (competence.kind === "unsupported") {
     return {
       status: "completed",

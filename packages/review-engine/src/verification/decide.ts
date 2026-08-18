@@ -76,6 +76,22 @@ export const VERIFICATION_REASONS = [
   // capability to build — and, worse, lets a verifier that adjudicated the
   // wrong proposition report it as an evidence problem.
   "no_applicable_procedure",
+
+  // ── signature compatibility ──────────────────────────────────────────
+  /** The compiler reports the call does not satisfy the changed contract. */
+  "contract_violated_at_call_site",
+  /** The compiler accepts the call against the changed contract. */
+  "call_site_satisfies_contract",
+  /**
+   * The claim is about consumers the verifier cannot enumerate.
+   *
+   * The load-bearing reason of this capability. "I found no stale callers" is
+   * not "none exist" — a `findReferences` over a context subset, or over a
+   * repository that does not contain a published package's consumers, cannot
+   * establish a closed world. Refuting an API-break claim on that basis is the
+   * commonest static-analysis overclaim there is.
+   */
+  "consumer_scope_unbounded",
   // Independent context and the supplied evidence disagree. Distinct from
   // insufficiency: something *is* known, and what is known conflicts. Folding
   // it into `insufficient_evidence` would hide the most interesting signal a
@@ -107,6 +123,10 @@ export const REASON_SUPPORTS: Readonly<
   insufficient_evidence: "inconclusive",
   context_incomplete: "inconclusive",
   no_applicable_procedure: "inconclusive",
+
+  contract_violated_at_call_site: "verified",
+  call_site_satisfies_contract: "rejected",
+  consumer_scope_unbounded: "inconclusive",
   conflicting_independent_evidence: "inconclusive",
 };
 

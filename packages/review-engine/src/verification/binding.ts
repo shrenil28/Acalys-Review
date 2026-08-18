@@ -110,12 +110,20 @@ const LIB = "lib.d.ts";
 /**
  * A program over exactly the verifier's own context.
  *
+ * Exported so the signature capability can reuse it. Sharing the *program*
+ * between two capabilities of the same component is not the coupling that
+ * matters — it is an observation substrate, like the parser. What must not be
+ * shared is the inference that settles a disputed proposition, and each
+ * capability keeps its own.
+ *
  * Not over the repository: the verifier reasons about what it planned for
  * itself, and widening the program here would quietly give it material its
  * planner declined to fetch — the context snapshot would then no longer
  * describe what the verifier actually saw.
  */
-function programOf(context: VerificationContext): ts.Program | undefined {
+export function programOf(
+  context: VerificationContext,
+): ts.Program | undefined {
   const files = new Map(
     context.items.map((item) => [item.path, item.content] as const),
   );

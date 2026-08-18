@@ -72,6 +72,15 @@ export const VERIFICATION_CAPABILITIES = [
    * provider-semantics claim must not reach it.
    */
   "async_value_use",
+  /**
+   * Whether a call still satisfies a changed callable contract.
+   *
+   * Covers a **named call site** and nothing else. Claims about "existing
+   * callers" or external consumers are a different proposition — a population
+   * rather than a site — and are declined, because refuting them needs a closed
+   * world this verifier cannot establish.
+   */
+  "signature_compatibility",
 ] as const;
 
 export type VerificationCapability = (typeof VERIFICATION_CAPABILITIES)[number];
@@ -123,6 +132,12 @@ export type CompetenceAssessment =
 export const REASONS_BY_CAPABILITY: Readonly<
   Record<VerificationCapability, readonly VerificationReason[]>
 > = {
+  signature_compatibility: [
+    "contract_violated_at_call_site",
+    "call_site_satisfies_contract",
+    "consumer_scope_unbounded",
+    "context_incomplete",
+  ],
   async_value_use: [
     "evidence_supports_claim",
     "independent_context_confirms",
@@ -218,7 +233,7 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     ],
     // A claim about provider semantics that also mentions a promise is still a
     // claim about provider semantics.
-    dominates: ["async_value_use", "other_families"],
+    dominates: ["async_value_use", "other_families", "signature_compatibility"],
   },
   {
     id: "async_value_use",
@@ -239,19 +254,33 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     dominates: [],
   },
   {
+    id: "signature_compatibility",
+    capability: "signature_compatibility",
+    declines: undefined,
+    // The vocabulary the signature analyzer emits — "`send()` is called without
+    // `b`, which this change made required" — plus the population phrasings,
+    // which route here and are then declined *inside* the capability. Declining
+    // there rather than here is deliberate: "we have no procedure for signature
+    // claims" and "we have one, and this particular claim needs a closed world"
+    // are different diagnoses.
+    patterns: [
+      /\bis called without\b/i,
+      /\bmade required\b/i,
+      /\bnew parameter\b/i,
+      /\bexisting callers\b/i,
+      /\bsignature\b/i,
+      /\bbreaks? (?:existing )?(?:callers|consumers)\b/i,
+    ],
+    dominates: [],
+  },
+  {
     id: "other_families",
     capability: undefined,
     declines: "unsupported_claim_family",
     // Recognized only to be declined. Naming them is what makes the gap
     // diagnosable: `unsupported_claim_family` on a swallowed-error claim is a
     // capability to build, and the funnel's stage attribution can say so.
-    patterns: [
-      /\bcatch\b/i,
-      /\bdiscards the error\b/i,
-      /\bnever uses it\b/i,
-      /\bis called without\b/i,
-      /\brequired\b/i,
-    ],
+    patterns: [/\bcatch\b/i, /\bdiscards the error\b/i, /\bnever uses it\b/i],
     dominates: [],
   },
 ];

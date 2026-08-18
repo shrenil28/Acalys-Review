@@ -7,11 +7,12 @@ import { ANALYZER_CORPUS, evaluateFunnel } from "../src/eval/index.js";
  *
  * The analyzer dashboard reports recall 1.0 and precision 1.0. Running the same
  * corpus through verification, promotion and policy reports **published recall
- * 0.5** — half the real defects the analyzer found never reach a developer,
- * because the deterministic verifier cannot re-derive their mechanism.
+ * 0.6** — four of ten real defects the analyzer found still never reach a
+ * developer, because the verifier has no procedure for their mechanism.
  *
  * Neither number is wrong. They measure different systems, and only the second
- * is the product. This file exists so the difference cannot quietly grow.
+ * is the product. This file exists so the difference cannot quietly grow, and
+ * so that every movement in it is attributable to one named capability.
  */
 describe("The funnel baseline", () => {
   it("never rejects a true defect", async () => {
@@ -57,7 +58,7 @@ describe("The funnel baseline", () => {
     //
     //     analyzer precision    10/11 → 1.0    lexical scope walk
     //     published precision     5/5   → 1.0   unchanged
-    //     published recall        0.5   → 0.5   unchanged
+    //     published recall        0.5   → 0.5   unchanged at the time
     //
     // The order mattered. The verifier was given independent binding first and
     // shown to stop the candidate — the only natural evidence that verification
@@ -103,20 +104,11 @@ describe("The funnel baseline", () => {
     expect(report.falsePositiveRefutationRate).toBeUndefined();
   });
 
-  it("distinguishes a measured zero from an absent denominator", async () => {
-    // `0 / 0` is not `0`. The first funnel report showed
-    // `falsePositivesCaught = 0` against a corpus with no false positives, and
-    // rendered as a zero it reads as "verification caught nothing" — an
-    // argument for deleting the verifier, when it was an argument about the
-    // corpus. Now the corpus has one, so the rate is defined and genuinely 0.
-    const report = await evaluateFunnel(ANALYZER_CORPUS);
-    // The live corpus has no false positives left, so both rates are
-    // undefined rather than confidently zero.
-    expect(report.falsePositiveFilterRate).toBeUndefined();
-
+  it("an empty corpus yields undefined ratios, not flattering ones", async () => {
+    // The degenerate case, kept separate from the live one above because they
+    // fail for different reasons: this catches a harness that evaluated
+    // nothing, that one catches a corpus that lost its false positives.
     const empty = await evaluateFunnel([]);
-    // No candidates at all: every ratio is undefined rather than a confident 0
-    // or a flattering 1.
     expect(empty.candidatePrecision).toBeUndefined();
     expect(empty.publishedPrecision).toBeUndefined();
     expect(empty.publishedRecall).toBeUndefined();
@@ -126,7 +118,7 @@ describe("The funnel baseline", () => {
   });
 
   it("attributes every lost defect to exactly one stage", async () => {
-    // `publishedRecall = 0.5` is equally consistent with a planner that fetched
+    // `publishedRecall = 0.6` is equally consistent with a planner that fetched
     // nothing, an analyzer that saw nothing, a verifier that refused, a verifier
     // that could not tell, an outage, and a policy that withheld. Six fixes,
     // three owners. The decomposition is what makes the number actionable.
@@ -140,13 +132,17 @@ describe("The funnel baseline", () => {
     // is hiding the losses it cannot explain.
     expect(attributed).toBe(report.planted - report.truePositivesPublished);
 
-    // And today they are all one stage, which is the whole diagnosis: the
-    // analyzer and planner lost nothing, policy withheld nothing, nothing was
-    // refuted, and nothing was unavailable. The verifier could not tell.
+    // Still one stage, which is the whole diagnosis: the analyzer and planner
+    // lost nothing, policy withheld nothing, nothing was refuted, and nothing
+    // was unavailable. The verifier could not tell.
     expect(report.losses).toEqual({
       not_proposed: 0,
       verifier_refuted: 0,
-      verifier_abstained: 5,
+      // 5 → 4. The signature capability reached one of them. The other four
+      // are one condition claim, one concurrency claim and two exception-flow
+      // claims — named targets rather than a mystery, which is the whole point
+      // of attributing losses to a stage.
+      verifier_abstained: 4,
       verification_unavailable: 0,
       policy_withheld: 0,
     });
@@ -181,9 +177,10 @@ describe("The funnel baseline", () => {
     //
     // What each number is currently saying:
     //
-    //     published recall 0.5     the verifier's reach, not the analyzer's
-    //                              accuracy. Five defects sit at
-    //                              `inconclusive`.
+    //     published recall 0.6     the verifier's reach, not the analyzer's
+    //                              accuracy. Four defects sit at
+    //                              `inconclusive`: one condition, one
+    //                              concurrency, two exception-flow.
     //     published precision 1.0  every published finding is real, against an
     //                              analyzer precision of 10/11 — verification
     //                              now buys precision instead of costing it.
@@ -203,12 +200,15 @@ describe("The funnel baseline", () => {
       publishedPrecision: report.publishedPrecision,
     }).toEqual({
       candidates: 10,
-      verified: 5,
+      verified: 6,
       rejected: 0,
-      inconclusive: 5,
-      promoted: 5,
-      published: 5,
-      publishedRecall: 0.5,
+      inconclusive: 4,
+      promoted: 6,
+      published: 6,
+      // 0.5 → 0.6, and the delta is attributable to exactly one capability:
+      // `caller-not-updated-for-new-parameter` moved from `inconclusive` to
+      // `verified`, and no other journey changed. Precision held at 1.0.
+      publishedRecall: 0.6,
       // Every published finding is real, and so is every candidate: the
       // analyzer's one false positive is gone at source. The verifier's
       // ability to stop it is preserved as a historical replay challenge.

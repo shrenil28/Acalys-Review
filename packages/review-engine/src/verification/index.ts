@@ -55,3 +55,18 @@ export {
   type CompetenceFailure,
   type VerificationCapability,
 } from "./competence.js";
+export {
+  SIGNATURE_CAPABILITY_ID,
+  SIGNATURE_CLAIM_KINDS,
+  classifySignatureClaim,
+  verifySignatureCompatibility,
+  type ConsumerCoverage,
+  type SignatureClaimKind,
+} from "./signature.js";
+export {
+  programOf,
+  resolveCallProduct,
+  DERIVATION_METHODS,
+  type CalleeBinding,
+  type DerivationMethod,
+} from "./binding.js";

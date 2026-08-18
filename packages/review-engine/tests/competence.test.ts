@@ -90,19 +90,27 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
   });
 
   it("declines claim families it has no procedure for", () => {
-    for (const [statement, reason] of [
-      [
-        "This `catch` discards the error and does nothing.",
-        "unsupported_claim_family",
-      ],
-      [
-        "`send()` is called without `b`, which this change made required.",
-        "unsupported_claim_family",
-      ],
-    ] as const) {
+    expect(
+      assessCompetence(
+        claim("This `catch` discards the error and does nothing."),
+      ),
+    ).toEqual({ kind: "unsupported", reason: "unsupported_claim_family" });
+  });
+
+  it("routes a signature claim to the signature capability", () => {
+    // This used to be declined as an unsupported family. It now has a
+    // procedure — and the POPULATION form routes here too, then is declined
+    // inside the capability rather than at the router. "We have no procedure
+    // for signature claims" and "we have one, and this claim needs a closed
+    // world" are different diagnoses, and only the second names a boundary
+    // worth building toward.
+    for (const statement of [
+      "`send()` is called without `b`, which this change made required.",
+      "the new parameter breaks existing callers of send()",
+    ]) {
       expect(assessCompetence(claim(statement)), statement).toEqual({
-        kind: "unsupported",
-        reason,
+        kind: "supported",
+        capability: "signature_compatibility",
       });
     }
   });
