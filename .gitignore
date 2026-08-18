@@ -14,6 +14,10 @@ coverage/
 !.env.example
 *.pem
 
+# Probe transcripts. Redacted on the way in, but they are raw provider
+# responses about a real repository and belong to the run, not the repo.
+probe-transcript-*.json
+
 # Editor / OS
 .DS_Store
 .idea/
