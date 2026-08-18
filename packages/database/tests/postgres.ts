@@ -159,6 +159,33 @@ export interface TestDatabase {
  * visible in `docker ps` during a hung run.
  */
 /**
+ * Containers this suite left behind on a previous run.
+ *
+ * Only this suite's, and only ones no longer running: a container that is up
+ * belongs to a concurrent run, and removing it would delete a live database
+ * out from under another vitest file.
+ */
+async function staleContainers(label: string): Promise<readonly string[]> {
+  try {
+    const { stdout } = await run("docker", [
+      "ps",
+      "-aq",
+      "--filter",
+      `label=acalys.suite=${label}`,
+      "--filter",
+      "status=exited",
+      "--filter",
+      "status=created",
+      "--filter",
+      "status=dead",
+    ]);
+    return stdout.split("\n").filter((id) => id.trim() !== "");
+  } catch {
+    return [];
+  }
+}
+
+/**
  * The host port Docker assigned.
  *
  * Read back rather than assumed. `docker port` is the only authority on it, and
@@ -192,6 +219,12 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "-d",
     "--name",
     CONTAINER,
+    // Labels are what make an abandoned container findable later. A name alone
+    // only helps if the next run happens to use the same one.
+    "--label",
+    "acalys.test=true",
+    "--label",
+    `acalys.suite=${label}`,
     "-e",
     `POSTGRES_PASSWORD=${PASSWORD}`,
     "-e",
@@ -219,6 +252,24 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "-c",
     "fsync=off",
   ]);
+
+  // Reap containers abandoned by earlier runs, before starting a new one.
+  //
+  // Process handlers cannot cover SIGKILL, a machine crash, or the daemon
+  // dying, so cleanup must not depend on this process getting a chance to run.
+  // Every container is labelled, and each run sweeps the ones a previous run
+  // left behind — which is what stops abandoned resources repeatedly inflating
+  // Docker's internal high-water mark.
+  //
+  // Scoped to this suite's label so parallel vitest files cannot destroy each
+  // other's databases: the failure that would cause is a suite whose tables
+  // vanish mid-run, which reads as a product bug rather than a harness one.
+  await run("docker", [
+    "rm",
+    "-f",
+    "--",
+    ...(await staleContainers(label)),
+  ]).catch(() => undefined);
 
   // Removed on an abrupt exit too, not only on a clean `stop()`.
   //
