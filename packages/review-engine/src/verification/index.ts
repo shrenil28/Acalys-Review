@@ -1,6 +1,7 @@
 export {
   FORBIDDEN_INPUT_KEYS,
   assertNoAnalyzerAuthority,
+  isAnalyzerArgument,
   readsAsArgument,
   toVerificationInput,
   type ProjectionResult,
@@ -9,13 +10,16 @@ export {
   type VerificationInput,
 } from "./input.js";
 export {
+  EXECUTION_FAILURES,
   PUBLICATION_POLICY,
   VERIFICATION_DECISIONS,
   VERIFICATION_REASONS,
+  isJudgement,
   isPublishable,
+  type ExecutionFailure,
+  type VerificationAttempt,
   type VerificationContext,
   type VerificationDecision,
-  type VerificationOutcome,
   type VerificationReason,
   type Verifier,
 } from "./decide.js";
@@ -24,3 +28,9 @@ export {
   claimIdentity,
   verificationCacheKey,
 } from "./cache.js";
+export {
+  DEFAULT_VERIFICATION_POLICY,
+  planVerificationContext,
+  type RepositorySnapshot,
+  type VerificationPolicy,
+} from "./plan-context.js";

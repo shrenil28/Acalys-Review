@@ -66,9 +66,11 @@ export interface VerificationClaim {
  * definitely a bug because…"*. Confidence and reasoning have then crossed the
  * boundary with no field named after them.
  *
- * So evidence admitted here is observational — a location, a declaration, a
- * tool result, a test outcome — and {@link toVerificationInput} rejects items
- * that read as an argument about those facts.
+ * So {@link toVerificationInput} drops items where the analyzer is arguing
+ * rather than observing — scoped by **provenance**, because a repository file
+ * containing "definitely unsafe" is an artifact worth quoting, while an
+ * `agent_observation` saying the same thing is the analyzer's voice wearing a
+ * fact's clothing.
  */
 export interface VerificationEvidence {
   readonly type: string;
@@ -99,6 +101,23 @@ export interface VerificationInput {
  * and recorded, so a rule that keeps producing argument is visible rather than
  * quietly weakening verification.
  */
+/**
+ * Provenance that can carry the analyzer's own voice.
+ *
+ * Scoping matters more than the patterns below. A repository file may legitimately
+ * contain `confidence = 0.97`, a doc comment may say "this operation is definitely
+ * unsafe", and a test name may read "I think this breaks" — those are *artifacts*,
+ * and quoting them is the evidence. Sanitizing them would delete the strongest
+ * material a verifier could be given, on the grounds that it contains a word.
+ *
+ * Only observations the analyzer authored itself are policed, because that is the
+ * only channel through which analyzer certainty can cross the boundary.
+ */
+const ANALYZER_AUTHORED: ReadonlySet<string> = new Set([
+  "agent_observation",
+  "knowledge",
+]);
+
 const ARGUMENT_MARKERS: readonly RegExp[] = [
   /\bconfiden(?:ce|t)\b/i,
   /\b\d{1,3}\s*%\s*(?:sure|certain|confident)/i,
@@ -110,6 +129,20 @@ const ARGUMENT_MARKERS: readonly RegExp[] = [
 
 export function readsAsArgument(observation: string): boolean {
   return ARGUMENT_MARKERS.some((marker) => marker.test(observation));
+}
+
+/**
+ * Whether an evidence item is the analyzer arguing rather than observing.
+ *
+ * Provenance first, wording second. `static_analysis`, `source`, `compiler`,
+ * `test` and `ci` items are artifacts of something other than the analyzer's
+ * opinion, and their wording is not ours to judge.
+ */
+export function isAnalyzerArgument(item: {
+  readonly type: string;
+  readonly observation: string;
+}): boolean {
+  return ANALYZER_AUTHORED.has(item.type) && readsAsArgument(item.observation);
 }
 
 export interface ProjectionResult {
@@ -134,7 +167,7 @@ export function toVerificationInput(
   const evidence: VerificationEvidence[] = [];
 
   for (const item of candidate.evidence) {
-    if (readsAsArgument(item.observation)) {
+    if (isAnalyzerArgument(item)) {
       dropped.push(item.observation);
       continue;
     }

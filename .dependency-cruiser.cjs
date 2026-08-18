@@ -182,10 +182,58 @@ module.exports = {
       from: {},
       to: { circular: true },
     },
+    // Every module in a library package must be reachable from that package's
+    // public entry point.
+    //
+    // `no-orphans` does not cover this: a file with outgoing imports is not an
+    // orphan even when nothing imports it. That gap let eighteen duplicate
+    // modules — a mutation script's `cp -r` copying `src/` into itself — pass
+    // every gate and reach a commit.
+    //
+    // Generated per package rather than written once, because dependency-cruiser
+    // reachability is expressed as "reachable from *this* module".
+    ...[
+      "contracts",
+      "database",
+      "code-intelligence",
+      "review-engine",
+      "api-client",
+    ].map((pkg) => ({
+      name: `no-unreachable-in-${pkg}`,
+      severity: "error",
+      comment:
+        `Every module under packages/${pkg}/src must be reachable from its ` +
+        "index. A module nothing imports is dead code or an accident.",
+      // Every declared entry point, not just the root one. `package.json`
+      // `exports` publishes `./eval`, `./domain`, `./api/v1` and `./internal`
+      // as separate subpaths, and a module reachable only from one of those is
+      // reachable — it is how consumers are meant to get at it.
+      from: {
+        path: `^packages/${pkg}/src/(index|eval/index|domain/index|api/v1/index|internal/index)\\.ts$`,
+      },
+      to: {
+        path: `^packages/${pkg}/src/.+\\.ts$`,
+        // Entry points are reachable by definition — a consumer imports them
+        // directly — so they are not required to be reachable from each other.
+        pathNot: [
+          "\\.d\\.ts$",
+          `^packages/${pkg}/src/(index|eval/index|domain/index|api/v1/index|internal/index)\\.ts$`,
+        ],
+        reachable: false,
+      },
+    })),
     {
       name: "no-orphans",
-      severity: "warn",
-      comment: "Unreachable modules are usually leftovers.",
+      // An error, not a warning. This rule already existed and already would
+      // have caught it: a mutation-testing script copied a package's `src/`
+      // into itself, creating eighteen unreachable duplicates, and `git add -A`
+      // committed them. Every gate passed. The module count jumped 248 → 271
+      // and nobody asked why, because warnings do not fail anything and so are
+      // not read.
+      severity: "error",
+      comment:
+        "Unreachable modules are leftovers. A module nothing imports is either " +
+        "dead code or an accident, and both are worth failing on.",
       from: {
         orphan: true,
         pathNot: [

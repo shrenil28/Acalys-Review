@@ -60,9 +60,41 @@ export const VERIFICATION_REASONS = [
 
 export type VerificationReason = (typeof VERIFICATION_REASONS)[number];
 
-export type VerificationOutcome =
+/**
+ * Why verification could not run.
+ *
+ * A separate vocabulary from {@link VerificationReason} on purpose. These are
+ * facts about our infrastructure; those are facts about the claim. One enum
+ * holding both would let a provider outage be counted as a rejection, and every
+ * dashboard would report a quality improvement.
+ */
+export const EXECUTION_FAILURES = [
+  "model_timeout",
+  "context_unavailable",
+  "provider_error",
+  "parse_failure",
+  "budget_exhausted",
+] as const;
+
+export type ExecutionFailure = (typeof EXECUTION_FAILURES)[number];
+
+/**
+ * One attempt to verify a claim.
+ *
+ * ```
+ * VerificationAttempt
+ * ├── completed   → decision: verified | rejected | inconclusive
+ * └── unavailable → execution failure: timeout | provider_error | …
+ * ```
+ *
+ * The shape is the point. `unavailable` is deliberately **not** a fourth
+ * decision: adding it to the semantic vocabulary would mix infrastructure state
+ * with epistemic state, and every consumer switching on a decision would then
+ * have to remember that one of the cases is not a judgement at all.
+ */
+export type VerificationAttempt =
   | {
-      readonly kind: "decided";
+      readonly status: "completed";
       readonly decision: VerificationDecision;
       readonly reasons: readonly VerificationReason[];
       /**
@@ -75,13 +107,12 @@ export type VerificationOutcome =
       readonly severity: FindingSeverity;
     }
   /**
-   * Verification could not run.
+   * Verification could not run. The claim has not been examined.
    *
-   * Deliberately not a decision. A finding whose verification failed has not
-   * been examined, and recording it as `rejected` would let an outage read as
-   * a quality improvement.
+   * Carries an {@link ExecutionFailure} rather than a free string, so
+   * "how often are we failing to verify, and why?" is answerable.
    */
-  | { readonly kind: "unavailable"; readonly code: string };
+  | { readonly status: "unavailable"; readonly failure: ExecutionFailure };
 
 export interface Verifier {
   readonly id: string;
@@ -89,7 +120,7 @@ export interface Verifier {
   verify(
     input: VerificationInput,
     context: VerificationContext,
-  ): Promise<VerificationOutcome> | VerificationOutcome;
+  ): Promise<VerificationAttempt> | VerificationAttempt;
 }
 
 /**
@@ -132,11 +163,21 @@ export const PUBLICATION_POLICY: Readonly<
   inconclusive: "suppress",
 };
 
-export function isPublishable(outcome: VerificationOutcome): boolean {
+export function isPublishable(attempt: VerificationAttempt): boolean {
   // `unavailable` is not publishable and is not a rejection either: the
   // candidate is still owed a verification.
   return (
-    outcome.kind === "decided" &&
-    PUBLICATION_POLICY[outcome.decision] === "publish"
+    attempt.status === "completed" &&
+    PUBLICATION_POLICY[attempt.decision] === "publish"
   );
+}
+
+/**
+ * Whether an attempt is a judgement about the claim.
+ *
+ * Used by metrics. A rejection rate that counts `unavailable` is measuring our
+ * uptime and calling it precision.
+ */
+export function isJudgement(attempt: VerificationAttempt): boolean {
+  return attempt.status === "completed";
 }

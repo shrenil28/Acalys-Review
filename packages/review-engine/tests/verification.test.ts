@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_VERIFICATION_POLICY,
+  EXECUTION_FAILURES,
   FORBIDDEN_INPUT_KEYS,
+  VERIFICATION_DECISIONS,
+  isAnalyzerArgument,
+  isJudgement,
+  planVerificationContext,
+  type VerificationAttempt,
   PUBLICATION_POLICY,
   assertNoAnalyzerAuthority,
   claimIdentity,
@@ -274,21 +281,28 @@ describe("The decision contract", () => {
   it("treats an execution failure as unverified, never as rejected", () => {
     // Collapsing these would make an outage read as a quality improvement, and
     // every metric would agree.
-    for (const code of [
-      "model_timeout",
-      "context_unavailable",
-      "parse_failure",
-    ]) {
-      const outcome = { kind: "unavailable", code } as const;
-      expect(isPublishable(outcome)).toBe(false);
-      expect(outcome).not.toHaveProperty("decision");
+    // Every declared failure, so a new one cannot be added without being
+    // covered here.
+    for (const failure of EXECUTION_FAILURES) {
+      const attempt: VerificationAttempt = { status: "unavailable", failure };
+
+      expect(isPublishable(attempt)).toBe(false);
+      // Not counted as a judgement: a rejection rate that includes these is
+      // measuring our uptime and calling it precision.
+      expect(isJudgement(attempt)).toBe(false);
+      expect(attempt).not.toHaveProperty("decision");
+      // The vocabularies stay disjoint, so no consumer switching on a decision
+      // can ever encounter an infrastructure state.
+      expect([...VERIFICATION_DECISIONS] as readonly string[]).not.toContain(
+        failure,
+      );
     }
   });
 
   it("does not publish an inconclusive verification", () => {
     expect(
       isPublishable({
-        kind: "decided",
+        status: "completed",
         decision: "inconclusive",
         reasons: ["insufficient_evidence"],
         confidence: 0.4,
@@ -300,12 +314,150 @@ describe("The decision contract", () => {
   it("publishes a verified one", () => {
     expect(
       isPublishable({
-        kind: "decided",
+        status: "completed",
         decision: "verified",
         reasons: ["independent_context_confirms"],
         confidence: 0.9,
         severity: "medium",
       }),
     ).toBe(true);
+  });
+});
+
+describe("Evidence hygiene is scoped by provenance", () => {
+  const persuasive = "I am 97% confident this is definitely a bug";
+
+  it("drops analyzer-authored persuasion", () => {
+    expect(
+      isAnalyzerArgument({
+        type: "agent_observation",
+        observation: persuasive,
+      }),
+    ).toBe(true);
+  });
+
+  it.each([
+    "source",
+    "static_analysis",
+    "compiler",
+    "test",
+    "ci",
+    "tool_output",
+  ])(
+    "keeps %s evidence even when the artifact itself contains that language",
+    (type) => {
+      // A repository file may legitimately contain `confidence = 0.97`, a doc
+      // comment may say "definitely unsafe", a test may be named "I think this
+      // breaks". Those are artifacts, and quoting them is the evidence.
+      // Sanitizing them deletes the strongest material a verifier could get,
+      // because it contains a word.
+      expect(isAnalyzerArgument({ type, observation: persuasive })).toBe(false);
+    },
+  );
+
+  it("cannot be used to smuggle confidence through an agent observation", () => {
+    const { input, droppedEvidence } = project(
+      candidateWith({
+        evidence: [
+          {
+            type: "agent_observation",
+            strength: "strong",
+            observation: "I am 97% confident this is definitely a bug",
+          },
+          {
+            type: "source",
+            strength: "deterministic",
+            observation:
+              "the file contains `// definitely unsafe: confidence = 0.97`",
+          },
+        ],
+      }),
+    );
+
+    expect(droppedEvidence).toHaveLength(1);
+    // The quoted artifact survived; the analyzer's voice did not.
+    expect(input.evidence).toHaveLength(1);
+    expect(input.evidence[0]?.type).toBe("source");
+    expect(JSON.stringify(input)).not.toContain("I am 97%");
+  });
+});
+
+describe("Verification context is planned independently", () => {
+  const repository = {
+    revisionId: REVISION,
+    files: new Map([
+      [
+        "src/a.ts",
+        'import { save } from "./store.js";\nexport function run(): void {\n  save();\n}',
+      ],
+      ["src/store.ts", "export async function save(): Promise<void> {}"],
+      [
+        "src/a.test.ts",
+        'import { run } from "./a.js";\nit("runs", () => run());',
+      ],
+      ["src/unrelated.ts", "export const unrelated = 1;"],
+    ]),
+  };
+
+  const plan = () =>
+    planVerificationContext({
+      verificationInput: project(candidateWith()).input,
+      repository,
+      policy: DEFAULT_VERIFICATION_POLICY,
+    });
+
+  it("selects the claimed location, its dependencies and its tests", () => {
+    const context = plan();
+    const paths = context.items.map((item) => item.path);
+    expect(paths).toContain("src/a.ts");
+    expect(paths).toContain("src/store.ts");
+    expect(paths).toContain("src/a.test.ts");
+    // Not everything: a planner that took the whole repository would be
+    // independent and useless.
+    expect(paths).not.toContain("src/unrelated.ts");
+  });
+
+  it("is identical no matter what the analyzer selected", () => {
+    // The property that makes independence real, tested *before* the verifier
+    // runs. The planner has no parameter for the analyzer's context — this
+    // asserts the consequence.
+    const first = plan();
+    const second = plan();
+    expect(second.digest).toBe(first.digest);
+    expect(second.items).toEqual(first.items);
+  });
+
+  it("cannot be handed the analyzer's context", () => {
+    // Architectural, not behavioural. Passing the analyzer's selection must be
+    // a compile error, so "the verifier reused the analyzer's context" needs a
+    // signature change — a reviewable act — rather than a quiet call-site slip.
+    planVerificationContext({
+      verificationInput: project(candidateWith()).input,
+      repository,
+      // @ts-expect-error the planner has no parameter for analyzer-selected context
+      analyzerContext: { items: [] },
+    });
+  });
+
+  it("records incompleteness when evidence points at a file it cannot read", () => {
+    const context = planVerificationContext({
+      verificationInput: project(
+        candidateWith({
+          evidence: [
+            {
+              type: "static_analysis",
+              strength: "deterministic",
+              observation: "declared elsewhere",
+              location: { path: "src/missing.ts", startLine: 1, endLine: 1 },
+            },
+          ],
+        }),
+      ).input,
+      repository,
+    });
+
+    // A verifier that cannot open the file an evidence item cites is agreeing
+    // on trust, and the decision has to know that.
+    expect(context.incomplete).toBe(true);
   });
 });
