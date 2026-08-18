@@ -675,6 +675,27 @@ describeWithPostgres(
       expect(Number(runs.rows[0]?.count)).toBe(1);
     }, 60_000);
 
+    it("no run in the database is publishing with no obligation", async () => {
+      // The entailment stated as a database-wide invariant rather than inferred
+      // from one run's history. `state = publishing` means the system owes an
+      // external effect; a run in that state with an empty ledger would be an
+      // obligation nobody can discharge, and nothing would ever notice.
+      for (const headSha of ["1".repeat(40), "2".repeat(40), "3".repeat(40)]) {
+        const context = await seedRun(headSha, `k-inv-${headSha.slice(0, 2)}`);
+        await advanceToSettled(context, options());
+      }
+
+      const orphaned = await database.pool.query<{ count: string }>(
+        `SELECT count(*)::text AS count
+         FROM review_runs r
+        WHERE r.state = 'publishing'
+          AND NOT EXISTS (
+            SELECT 1 FROM publication_intents p WHERE p.review_run_id = r.id
+          )`,
+      );
+      expect(Number(orphaned.rows[0]?.count)).toBe(0);
+    }, 60_000);
+
     it("rejected candidates produce no finding", async () => {
       // The candidate/finding distinction made visible: a verifier that confirmed
       // everything would hide a pipeline that had silently collapsed the two.

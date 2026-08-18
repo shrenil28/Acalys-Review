@@ -72,6 +72,33 @@ export interface AnalysisInput {
  * This was found by the crash-schedule test: a resumed run produced two
  * candidates where the reference produced three, purely because the surrogate
  * differed.
+ *
+ * # ⚠ This is NOT the real analyzer's cache key
+ *
+ * The stub analyzes nothing, so repository + head commit fully determines its
+ * output. A real analyzer's input is strictly larger, and reducing it to the
+ * head commit would be a serious bug — "same head SHA" would silently come to
+ * mean "same analysis" while the actual prompt differed.
+ *
+ * Two layers, and only the first is modelled here:
+ *
+ *     code / change identity
+ *         repository
+ *         base revision and merge base   ← the same head against a different
+ *                                          base is a different change
+ *         head revision
+ *         normalized ChangeManifest
+ *
+ *     analyzer-input identity
+ *         code / change identity
+ *         resolved path instructions and configuration snapshot
+ *         the context snapshot digest    ← P1-CONTEXT
+ *         analyzer id and version
+ *
+ * The second layer is what a real cache may key on, and it is exactly what
+ * `AnalysisContextSnapshot.digest` is for. Until that exists, this function
+ * deliberately serves only the stub, and any caching built on it would be
+ * wrong.
  */
 export function inputDigest(input: AnalysisInput): string {
   return sha256(`${input.repositoryId}|${input.headSha}`);

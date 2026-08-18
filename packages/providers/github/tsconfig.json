@@ -3,9 +3,6 @@
   "compilerOptions": {
     "noEmit": true,
     "types": ["node"],
-    // Typechecking resolves @acalys/contracts to source so a contract change is
-    // caught here immediately. Emit uses tsconfig.build.json, which clears this
-    // and resolves through the package's own exports.
     "paths": {
       "@acalys/contracts": ["../../contracts/src/index.ts"],
       "@acalys/contracts/domain": ["../../contracts/src/domain/index.ts"],
@@ -13,5 +10,5 @@
       "@acalys/contracts/internal": ["../../contracts/src/internal/index.ts"]
     }
   },
-  "include": ["src", "tests"]
+  "include": ["src", "tests", "scripts"]
 }
