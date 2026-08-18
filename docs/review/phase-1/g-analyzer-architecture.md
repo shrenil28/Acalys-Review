@@ -357,6 +357,64 @@ reviewer costing more than the bug it found.
 > Do not optimize for comments produced. Optimize for verified actionable bugs
 > per unit of developer attention and compute.
 
+### How to read the dashboard while the corpus is small
+
+A perfect score over seventeen cases means **the harness works**. It does not
+mean the reviewer has perfect precision and recall, and recording it as though
+it did would mislead exactly the person who reads it next. The current status is:
+
+```
+eval framework green  /  baseline corpus green
+```
+
+Corpus growth is the next target, and the useful cases are the ones where the
+obvious implementation fails rather than more of what already passes:
+
+```
+same symptom, different root cause
+misleading nearby code
+declaration present but semantically incompatible
+caller across a package or module boundary
+generic or overloaded async declarations
+nested promise chains
+callbacks reached through an alias
+clean code that closely resembles a known positive
+```
+
+Those pressure the architecture. More rules only pressure the rules.
+
+### Gates for wiring the engine into the worker
+
+The engine is only trustworthy once it runs inside the real lifecycle, so these
+are requirements on the integration rather than on the analyzers:
+
+```
+one ReviewRun          → one immutable revision/context input
+cancellation           → the analyzer stops starting new work
+superseded run         → results cannot publish
+engine failure         → the run takes the existing legal failure path
+retry                  → no duplicated findings or comments
+same revision + config → deterministic analyzers produce stable output
+budget exhaustion      → partial analysis is explicit, never silently complete
+```
+
+And the one that keeps reproducibility possible at all:
+
+> **No stage reconstructs domain state independently of the worker's canonical
+> snapshot.** The worker hands the engine one authoritative input bundle;
+> analyzers never re-fetch provider or repository state for themselves.
+
+The layering stays:
+
+```
+ReviewRun → review-engine → CandidateFinding[] → verification → ReviewFinding[]
+          → publisher projection
+```
+
+`FindingView` is a **presentation** projection and nothing else. In particular
+the verifier never reads it: verification needs the canonical finding and its
+evidence, not UI-shaped prose.
+
 ---
 
 ## Definition of done

@@ -5,6 +5,10 @@
     "types": ["node"],
     "paths": {
       "@acalys/contracts": ["../../packages/contracts/src/index.ts"],
+      "@acalys/review-engine": ["../../packages/review-engine/src/index.ts"],
+      "@acalys/code-intelligence": [
+        "../../packages/code-intelligence/src/index.ts"
+      ],
       "@acalys/contracts/domain": [
         "../../packages/contracts/src/domain/index.ts"
       ],

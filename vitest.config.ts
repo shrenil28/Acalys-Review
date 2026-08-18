@@ -42,6 +42,14 @@ export default defineConfig({
         find: /^@acalys\/webhook-gateway$/,
         replacement: workspace("apps/webhook-gateway/src/index.ts"),
       },
+      {
+        find: /^@acalys\/code-intelligence$/,
+        replacement: workspace("packages/code-intelligence/src/index.ts"),
+      },
+      {
+        find: /^@acalys\/review-engine$/,
+        replacement: workspace("packages/review-engine/src/index.ts"),
+      },
     ],
   },
   test: {

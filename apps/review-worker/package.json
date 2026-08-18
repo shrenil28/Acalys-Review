@@ -13,7 +13,9 @@
     "@acalys/contracts": "*",
     "@acalys/database": "*",
     "@acalys/provider-github": "*",
-    "zod": "^4.1.13"
+    "zod": "^4.1.13",
+    "@acalys/review-engine": "*",
+    "@acalys/code-intelligence": "*"
   },
   "devDependencies": {
     "@acalys/webhook-gateway": "*",

@@ -96,3 +96,16 @@ export {
   type ExecutionOptions,
   type ExecutionReport,
 } from "./execution.js";
+
+/**
+ * Every analyzer's identity, for the execution cache key.
+ *
+ * Exported as data rather than derived at the call site: an analyzer added
+ * without appearing here would silently share a cache key with the previous
+ * set, and the first symptom would be findings that stopped appearing.
+ */
+export const ALL_ANALYZER_IDS = [
+  "acalys.correctness.async-completion",
+  "acalys.correctness.swallowed-error",
+  "acalys.correctness.signature-compatibility",
+] as const;

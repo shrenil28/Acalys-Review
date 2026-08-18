@@ -16,7 +16,15 @@ async function main(): Promise<void> {
     process.stdout.write(`  ${label.padEnd(32)} ${String(value)}\n`);
   };
 
-  process.stdout.write("\nP1-G analyzer dashboard\n\n");
+  process.stdout.write("\nP1-G analyzer dashboard\n");
+  // The honest label. With a corpus this small, a perfect score is evidence
+  // that the harness works — not evidence that the reviewer is good. Reporting
+  // it as the latter would be misleading the moment the corpus grows, and the
+  // person most likely to be misled is whoever reads this next.
+  process.stdout.write(
+    `  status: eval framework green / baseline corpus green (${String(report.cases.length)} cases)\n` +
+      "  NOT a claim about reviewer precision or recall in the wild\n\n",
+  );
   line("cases", report.cases.length);
   line("recall", report.recall);
   line("precision", report.precision);

@@ -45,3 +45,14 @@ export {
   type RemotePublication,
   type ReviewPublicationPort,
 } from "./publisher.js";
+export {
+  REVIEW_PROCEDURE_VERSION,
+  analyzerCacheKey,
+  candidateFingerprint,
+  contextSnapshotDigest,
+  runRealAnalysis,
+  type AnalysisSource,
+  type ChangedFileSource,
+  type RealAnalysisOptions,
+  type RealAnalysisOutcome,
+} from "./analysis.js";
