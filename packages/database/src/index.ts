@@ -65,3 +65,9 @@ export {
   legalPublicationTransitions,
   type PublicationState,
 } from "./review/publication-state.js";
+export {
+  VerificationStore,
+  type AttemptRecord,
+  type PromotionRecord,
+  type StoredAttempt,
+} from "./review/verification-store.js";

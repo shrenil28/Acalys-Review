@@ -42,6 +42,19 @@ CREATE TABLE verification_attempts (
     -- the analyzer. Two candidates carrying one claim share this key.
     cache_key             CHAR(64)    NOT NULL,
 
+    -- The logical invocation this row records.
+    --
+    -- Separates "the same attempt delivered twice" from "a genuine second
+    -- verification attempt". An at-least-once worker redelivering its own work
+    -- must converge on the existing row; a deliberate re-verification must
+    -- produce a new one. Minted by the caller before the verifier runs, so a
+    -- redelivery carries the same id and a real retry carries a different one.
+    --
+    -- This is also why `attempt` is supplied rather than computed:
+    -- `MAX(attempt) + 1` is a race even behind a unique index, and losing that
+    -- race would look like a redelivery.
+    invocation_id         UUID        NOT NULL,
+
     -- Which attempt this is for this candidate, from 1.
     --
     -- Causality has to survive retries: "the same candidate, verified a second
@@ -77,8 +90,10 @@ CREATE TABLE verification_attempts (
 -- Idempotency for the verification stage: the same claim re-verified under the
 -- same procedure and context converges on one row rather than accumulating one
 -- per worker retry.
-CREATE UNIQUE INDEX verification_attempts_identity_uq
-    ON verification_attempts (candidate_finding_id, cache_key);
+-- Redelivery converges here: two workers persisting the same invocation
+-- produce one row, and the loser reads what the winner wrote.
+CREATE UNIQUE INDEX verification_attempts_invocation_uq
+    ON verification_attempts (invocation_id);
 
 -- Attempts are numbered per candidate, so the sequence is a fact in the data
 -- rather than something reconstructed from timestamps that may tie.

@@ -220,6 +220,27 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "fsync=off",
   ]);
 
+  // Removed on an abrupt exit too, not only on a clean `stop()`.
+  //
+  // An interrupted run — Ctrl-C, a crashed worker, a killed CI job — used to
+  // leave its container behind. Each one is small, but Docker Desktop's disk
+  // image only ever grows to its high-water mark, so the leak is permanent
+  // even after the container is gone. Dozens of aborted runs is how a test
+  // harness quietly consumes a third of a laptop.
+  const reap = (): void => {
+    try {
+      execFileSync("docker", ["rm", "-f", CONTAINER], {
+        stdio: "ignore",
+        timeout: 10_000,
+      });
+    } catch {
+      // Best effort: the process is already on its way out.
+    }
+  };
+  process.once("SIGINT", reap);
+  process.once("SIGTERM", reap);
+  process.once("exit", reap);
+
   const PORT = await publishedPort(CONTAINER);
   await waitForReady(CONTAINER, PORT);
 
