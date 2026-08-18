@@ -38,3 +38,13 @@ export {
   type TenantScope,
   type TransitionOutcome,
 } from "./review/ingestion-store.js";
+
+export {
+  ReviewStageStore,
+  type CandidateFindingRow,
+  type PublicationIntentRow,
+  type StageFaultInjector,
+  type StageOutcome,
+  type StageWork,
+  type VerificationRow,
+} from "./review/stage-store.js";
