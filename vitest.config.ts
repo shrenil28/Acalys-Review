@@ -6,6 +6,10 @@ const contracts = (subpath: string) =>
     new URL(`./packages/contracts/src/${subpath}`, import.meta.url),
   );
 
+/** Workspace packages resolve to source, for the same reason contracts do. */
+const workspace = (relative: string) =>
+  fileURLToPath(new URL(`./${relative}`, import.meta.url));
+
 export default defineConfig({
   resolve: {
     // Tests run against contracts' *source*, not its build output, so the
@@ -26,6 +30,14 @@ export default defineConfig({
         replacement: contracts("domain/index.ts"),
       },
       { find: /^@acalys\/contracts$/, replacement: contracts("index.ts") },
+      {
+        find: /^@acalys\/database$/,
+        replacement: workspace("packages/database/src/index.ts"),
+      },
+      {
+        find: /^@acalys\/provider-github$/,
+        replacement: workspace("packages/providers/github/src/index.ts"),
+      },
     ],
   },
   test: {
@@ -34,6 +46,7 @@ export default defineConfig({
     include: [
       "packages/*/tests/**/*.test.ts",
       "packages/providers/*/tests/**/*.test.ts",
+      "apps/webhook-gateway/tests/**/*.test.ts",
       "packages/*/src/**/*.test.ts",
     ],
     environment: "node",

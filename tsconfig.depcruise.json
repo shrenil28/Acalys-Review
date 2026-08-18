@@ -12,7 +12,8 @@
       "@acalys/contracts/internal": [
         "packages/contracts/src/internal/index.ts"
       ],
-      "@acalys/provider-github": ["packages/providers/github/src/index.ts"]
+      "@acalys/provider-github": ["packages/providers/github/src/index.ts"],
+      "@acalys/database": ["packages/database/src/index.ts"]
     }
   }
 }

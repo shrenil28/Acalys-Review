@@ -88,15 +88,31 @@ module.exports = {
       severity: "error",
       comment:
         "The UI must never depend on review-worker implementation details. It meets the backend at @acalys/contracts/api/v1 only.",
-      from: { path: "^apps/web" },
+      from: { path: "^apps/web/" },
       to: { path: "^packages/contracts/src/internal" },
+    },
+    {
+      name: "contracts-must-not-import-persistence",
+      severity: "error",
+      comment:
+        "Persistence technology must not leak into canonical contracts (P0.txt §60). A domain type that knows about the database makes the storage engine a contract change.",
+      from: { path: "^packages/contracts/" },
+      to: { path: "^packages/database/" },
+    },
+    {
+      name: "web-must-not-import-persistence",
+      severity: "error",
+      comment:
+        "The UI reaching the database bypasses the API layer entirely, and would put SQL and connection handling into a browser bundle.",
+      from: { path: "^apps/web/" },
+      to: { path: "^packages/database/" },
     },
     {
       name: "web-must-not-import-providers",
       severity: "error",
       comment:
         "A provider adapter is where GitHub's vocabulary lives. The UI reaching one would put provider payload shapes into the frontend — the leak the whole adapter boundary exists to prevent (P0.txt §1).",
-      from: { path: "^apps/web" },
+      from: { path: "^apps/web/" },
       to: { path: "^packages/providers/" },
     },
     {
@@ -139,8 +155,8 @@ module.exports = {
       severity: "error",
       comment:
         "Workers and services must never depend on frontend component structure.",
-      from: { path: "^(packages|apps)/(?!web)" },
-      to: { path: "^apps/web" },
+      from: { path: "^(packages|apps)/(?!web/)" },
+      to: { path: "^apps/web/" },
     },
 
     {

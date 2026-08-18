@@ -1,0 +1,30 @@
+{
+  "name": "@acalys/database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistence for Acalys: schema, transactional stores, and the webhook inbox. Domain contracts never import this.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "migrations"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@acalys/contracts": "*",
+    "pg": "^8.13.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.11.10"
+  }
+}
