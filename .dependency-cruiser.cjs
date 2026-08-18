@@ -108,6 +108,22 @@ module.exports = {
       to: { path: "^packages/database/" },
     },
     {
+      name: "code-intelligence-must-not-import-persistence",
+      severity: "error",
+      comment:
+        "Code intelligence is a pure analysis library over source text. Reaching the database would make it untestable without one and would couple context planning to storage.",
+      from: { path: "^packages/code-intelligence/" },
+      to: { path: "^packages/database/" },
+    },
+    {
+      name: "code-intelligence-must-not-import-providers",
+      severity: "error",
+      comment:
+        "Symbols and context planning are provider-neutral. A GitHub import here would make the planner unusable for GitLab or a local CLI review (§1).",
+      from: { path: "^packages/code-intelligence/" },
+      to: { path: "^packages/providers/" },
+    },
+    {
       name: "web-must-not-import-providers",
       severity: "error",
       comment:

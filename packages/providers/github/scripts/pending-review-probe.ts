@@ -36,6 +36,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
+import { basename } from "node:path";
 
 import { AppJwtSigner } from "../src/auth/jwt.js";
 import { GithubAppPrivateKey } from "../src/auth/private-key.js";
@@ -89,6 +90,46 @@ interface Recorded {
 
 const transcript: Recorded[] = [];
 
+/**
+ * Field names whose values are credentials, wherever they appear.
+ *
+ * The transcript is the point of this probe and also its biggest hazard: the
+ * installation-token exchange returns the token *in its response body*, so
+ * recording responses verbatim writes a live credential to a file on disk and
+ * very likely into a bug report.
+ *
+ * Raw provider responses are what makes the design evidence-based. Raw
+ * credentials are never part of that evidence.
+ */
+const SECRET_FIELDS = new Set([
+  "token",
+  "access_token",
+  "refresh_token",
+  "client_secret",
+  "authorization",
+  "password",
+]);
+
+/**
+ * Replaces credential values anywhere in a response, at any depth.
+ *
+ * Exported so `tests/probe-redaction.test.ts` can prove it — an unverified
+ * redaction is worse than none, because it is trusted.
+ */
+export function redactSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactSecrets);
+  if (value === null || typeof value !== "object") return value;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+      key,
+      SECRET_FIELDS.has(key.toLowerCase())
+        ? "[REDACTED]"
+        : redactSecrets(nested),
+    ]),
+  );
+}
+
 async function call(
   step: string,
   token: string,
@@ -110,7 +151,20 @@ async function call(
 
   const text = await response.text();
   const parsed: unknown = text === "" ? null : JSON.parse(text);
-  transcript.push({ step, method, url, status: response.status, body: parsed });
+
+  // Redacted on the way into the transcript, not on the way out. A redaction
+  // applied at write time is one a future `console.log(transcript)` bypasses.
+  // Note that `headers` is deliberately never recorded at all: the
+  // Authorization header is a bearer credential on every single request.
+  transcript.push({
+    step,
+    method,
+    url,
+    status: response.status,
+    body: redactSecrets(parsed),
+  });
+
+  // The caller still receives the real body — it needs the token to continue.
   return { status: response.status, body: parsed };
 }
 
@@ -238,4 +292,17 @@ async function main(): Promise<void> {
   process.stdout.write(`\nTranscript written to ${output}\n`);
 }
 
-await main();
+/**
+ * Runs only when invoked directly.
+ *
+ * Without the guard, importing this module to test its redaction *executes the
+ * probe* — which throws on missing credentials, and would write to a real pull
+ * request if they were present. A script whose side effects fire on import is
+ * a script that cannot be tested.
+ */
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url.endsWith(basename(process.argv[1]))
+) {
+  await main();
+}

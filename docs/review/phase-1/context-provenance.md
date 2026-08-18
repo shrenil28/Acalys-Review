@@ -99,6 +99,28 @@ Deliberately reusing existing canonical references rather than inventing paralle
 ```ts
 interface AnalysisContextSnapshot {
   readonly id: AnalysisContextSnapshotId;
+
+  /**
+   * What was analyzed — not merely which revision row it hung from.
+   *
+   * P1-E.1 established that identity is review target + revision, and P1-E.2
+   * established that the same head against a different base is a different
+   * change. A snapshot attributed only to a revision id could therefore be
+   * replayed against the wrong interpretation of the change and look correct.
+   *
+   * The property that matters, whatever the exact fields: **a context snapshot
+   * can never be replayed against a different interpretation of the change it
+   * described.**
+   */
+  readonly analysisSubject: {
+    readonly repositoryId: RepositoryId;
+    readonly base: GitObjectId;
+    readonly mergeBase?: GitObjectId | undefined;
+    readonly head: GitObjectId;
+    /** Digest of the normalized ChangeManifest — what was actually diffed. */
+    readonly changeDigest: Checksum;
+  };
+
   readonly revisionId: PullRequestRevisionId;
 
   readonly planner: {
