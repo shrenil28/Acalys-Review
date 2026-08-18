@@ -256,8 +256,17 @@ export interface ReconciledCandidate {
   readonly title: string;
   readonly claim: string;
   readonly explanation: string;
+  /** Empty when nothing examined the candidate; see {@link attempt}. */
   readonly attemptId: string;
-  readonly attempt: VerificationAttempt;
+  /**
+   * What verification concluded, or absent if nothing examined it.
+   *
+   * Absent rather than a fabricated `unavailable`: "nothing was scheduled" is a
+   * defect in our pipeline and "the verifier could not run" is a defect in the
+   * world. Both block the run; only the reason code says which system to go and
+   * look at.
+   */
+  readonly attempt: VerificationAttempt | undefined;
 }
 
 export interface PublicationScope {
@@ -350,7 +359,7 @@ export async function reconcileAndPlan(
         // The verifier's severity, not the analyzer's proposal. Once the defect
         // is independently established, the verification is the authority.
         severity:
-          candidate.attempt.status === "completed"
+          candidate.attempt?.status === "completed"
             ? candidate.attempt.severity
             : candidate.severity,
         category: candidate.category,
@@ -368,7 +377,7 @@ export async function reconcileAndPlan(
       findingId: id,
       fingerprint: candidate.fingerprintValue,
       severity:
-        candidate.attempt.status === "completed"
+        candidate.attempt?.status === "completed"
           ? candidate.attempt.severity
           : candidate.severity,
       category: candidate.category,

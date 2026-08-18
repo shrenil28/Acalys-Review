@@ -11,7 +11,9 @@
   "references": [
     { "path": "../../packages/contracts/tsconfig.build.json" },
     { "path": "../../packages/database/tsconfig.build.json" },
-    { "path": "../../packages/providers/github/tsconfig.build.json" }
+    { "path": "../../packages/providers/github/tsconfig.build.json" },
+    { "path": "../../packages/review-engine/tsconfig.build.json" },
+    { "path": "../../packages/code-intelligence/tsconfig.build.json" }
   ],
   "include": ["src"]
 }

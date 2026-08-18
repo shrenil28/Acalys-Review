@@ -182,6 +182,22 @@ const MUTATIONS = [
     suite: "apps/review-worker/tests/funnel.test.ts",
   },
   {
+    id: 21,
+    name: "one invocation may record two different results",
+    file: "packages/database/src/review/verification-store.ts",
+    find: "    if (storedResult !== requestedResult) {",
+    replace: "    if (false) {",
+    suite: "packages/database/tests/verification.test.ts",
+  },
+  {
+    id: 22,
+    name: "an unexamined candidate is reported as an outage",
+    file: "packages/review-engine/src/publication/promote.ts",
+    find: "  if (missing.length > 0) {",
+    replace: "  if (false) {",
+    suite: "packages/review-engine/tests/publication.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",

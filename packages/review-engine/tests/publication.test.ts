@@ -44,7 +44,7 @@ const unavailable: VerificationAttempt = {
 
 const candidate = (
   id: string,
-  attempt: VerificationAttempt,
+  attempt: VerificationAttempt | undefined,
   overrides: Partial<VerifiedCandidate> = {},
 ): VerifiedCandidate => ({
   candidateId: id,
@@ -134,6 +134,7 @@ describe("The funnel stays disaggregated", () => {
       rejected: 1,
       inconclusive: 1,
       unavailable: 1,
+      missing: 0,
     });
   });
 });
@@ -252,5 +253,62 @@ describe("Publication policy decides interruption, not truth", () => {
     const plan = planPublication([finding("f1")]);
     expect(JSON.stringify(plan)).not.toContain("verified");
     expect(JSON.stringify(plan)).not.toContain("confidence");
+  });
+});
+
+describe("An unexamined candidate is its own failure", () => {
+  it("blocks the run, as MISSING, when nothing examined a candidate", () => {
+    // Distinct from `verification_unavailable`, and the distinction is
+    // operational rather than pedantic:
+    //
+    //     missing      nothing was ever scheduled   → our pipeline is broken
+    //     unavailable  the verifier could not run   → the world is broken
+    //
+    // Both block. Reporting the second when the first is true sends whoever is
+    // on call to the model provider's status page instead of to the scheduler.
+    // The reason code was declared in `PROMOTION_BLOCKS` from the start and
+    // nothing produced it, because the worker fabricated an `unavailable`
+    // attempt for a candidate that had none.
+    const outcome = promoteVerified([
+      candidate("a", completed("verified")),
+      candidate("b", undefined),
+    ]);
+
+    expect(outcome.kind).toBe("blocked");
+    if (outcome.kind !== "blocked") throw new Error("unreachable");
+    expect(outcome.block).toBe("verification_missing");
+    expect(outcome.candidateIds).toEqual(["b"]);
+  });
+
+  it("reports missing ahead of unavailable when both are present", () => {
+    // A run with both has a pipeline defect AND an outage. The pipeline defect
+    // is ours, and it is the one that will still be there after the provider
+    // recovers.
+    const outcome = promoteVerified([
+      candidate("a", unavailable),
+      candidate("b", undefined),
+    ]);
+
+    expect(outcome.kind).toBe("blocked");
+    if (outcome.kind !== "blocked") throw new Error("unreachable");
+    expect(outcome.block).toBe("verification_missing");
+  });
+
+  it("counts an unexamined candidate separately in the funnel", () => {
+    // Folded into `unavailable`, a scheduling bug would read as a bad week for
+    // the verifier — the same mistake as folding `unavailable` into `rejected`,
+    // one level up.
+    const funnel = funnelOf([
+      candidate("a", completed("verified")),
+      candidate("b", unavailable),
+      candidate("c", undefined),
+    ]);
+
+    expect(funnel).toMatchObject({
+      candidates: 3,
+      verified: 1,
+      unavailable: 1,
+      missing: 1,
+    });
   });
 });

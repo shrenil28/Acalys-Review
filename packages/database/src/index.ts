@@ -66,6 +66,7 @@ export {
 } from "./review/publication-state.js";
 export {
   AttemptIdentityConflict,
+  AttemptResultConflict,
   VerificationStore,
   type AttemptRecord,
   type PromotionRecord,

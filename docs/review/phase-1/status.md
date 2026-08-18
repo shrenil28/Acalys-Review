@@ -10,9 +10,24 @@ P1-E.2                deterministic lifecycle + crash recovery  ✓
 P1-E.3                provider publication / reconciliation     ✓ LIVE PROVEN
 P1-F                  code intelligence + context planner       ✓
 P1-F.2                planner eval + committed baseline         ✓
+P1-G                  correctness analyzer                      ✓
+P1-H                  independent deterministic verifier        ✓
+P1-I                  durable trust funnel → publication        ✓
 P1-PUBLISH-SURFACES   design checkpoint                         recorded
-P1-G                  correctness analyzer                      next
+P1-VERIFY-CONCURRENCY design checkpoint                         recorded
+P1-J                  end-to-end review-quality baseline        next
 ```
+
+`P1-VERIFY-CONCURRENCY` is recorded rather than built, for the same reason
+`P1-PUBLISH-SURFACES` is. P1-I gives one invocation **result-persistence**
+idempotency; it does not give it **execution-concurrency** semantics, so two
+workers may both execute one recovered command. A deterministic verifier cannot
+disagree with itself, so the failure does not arise yet — but a model-backed one
+will, and then `ON CONFLICT (invocation_id)` means arrival order decides which
+conclusion the product stands behind. The detection half is built
+(`AttemptResultConflict`); the single-flight lease is not, and building it
+against a verifier that cannot exercise it would produce a code path that runs
+rarely. See [verification-execution-concurrency.md](./verification-execution-concurrency.md).
 
 `P1-PUBLISH-SURFACES` is recorded rather than built: the "one summary comment,
 edited across pushes" requirement exposed a real semantic distinction — an
@@ -31,6 +46,71 @@ or runtime problem — transaction boundaries, unstable execution identity, test
 harnesses that reported success without running. None was evidence that
 `ReviewRun`, findings, verification, fingerprints, or the provider-neutral
 contracts need redesigning.
+
+---
+
+## P1-I: the checkpoint that could not have failed
+
+The modules were built and tested. Nothing called them.
+
+A probe against the live orchestrator, on a run driven through the real
+lifecycle, produced:
+
+```
+candidate_findings              2
+verifications      (legacy)     2
+verification_attempts           0    ← the P1-I table, never written
+review_findings                 2    ← verification_attempt_id NULL
+publication_intents             3    ← one comment per finding, no policy
+```
+
+`VerificationStore`, `promoteVerified` and `planPublication` had **zero
+production callers**. Every guarantee was asserted about a library the worker
+did not use.
+
+And `findLifecycleViolations` already contained the two queries that catch
+exactly this. It was only ever called from a fixture seeding a run parked in
+`publishing` with no candidates and no findings, so both queries scanned zero
+rows and returned clean. Pointed at a run the orchestrator drove, it reported
+four violations immediately.
+
+The lesson is not "wire it up". **A boundary enforced by which function a worker
+happens to call is not a boundary.** Each joint of the funnel is now behind
+something the database will not let a caller skip:
+
+```
+an attempt   → requires a scheduled invocation    composite FK on
+                                                  (invocation, candidate, ordinal)
+a finding    → requires a VERIFIED attempt        FK to a generated column that
+                                                  is NULL for every other outcome
+a comment    → requires a `publish` decision      FK to a generated column that
+                                                  is NULL for a withheld one
+a merge block → cannot see publication state      no column, no FK, no import,
+                                                  enforced by dependency-cruiser
+```
+
+The legacy `verifications` table is dropped: `UNIQUE (candidate_finding_id)`
+with `ON CONFLICT DO NOTHING` silently discarded a second verification, and
+while it existed "the run has been verified" was satisfiable by a table the
+guarantees say nothing about.
+
+### Allocation is serialized, not raced
+
+The attempt ordinal comes from a durable `verification_invocations` row,
+allocated under a `FOR UPDATE` lock on the candidate taken **before** anything
+is read. The difference from the rejected design is not the arithmetic — it is
+that the read and the write happen under a lock held to commit, so contention
+**blocks** and never decides. Redelivery versus retry is answered by reading the
+request key under that lock, never by catching a unique violation.
+
+### Two mutations that survived, and what they exposed
+
+Disabling the `every_candidate_examined` prerequisite, and letting an
+`unavailable` attempt satisfy it, both passed the entire suite. The orchestrator
+verifies everything before requesting that transition, so the guard is only
+reachable from an externally corrupted database — which is what it is for, and
+why it needed a test that reaches it deliberately. 20/20 mutations now killed,
+every one with `executed > 0` and `skipped = 0`.
 
 ---
 

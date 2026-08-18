@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import {
   AttemptIdentityConflict,
+  AttemptResultConflict,
   VerificationScheduler,
   VerificationStore,
   type AttemptRecord,
@@ -258,6 +259,61 @@ describeWithPostgres("Verification persistence converges", () => {
       ),
     ).rejects.toThrow(AttemptIdentityConflict);
 
+    expect(await store().attemptsFor(ids.candidateId)).toHaveLength(1);
+  }, 60_000);
+
+  it("refuses one invocation that executed twice with different results", async () => {
+    // ── The verification analogue of the publication digest invariant ──────
+    //
+    // A redelivery re-presents a result that already exists. This is a second
+    // *execution* of a logical verification that was supposed to happen once,
+    // and `ON CONFLICT (invocation_id)` would silently let arrival order decide
+    // which conclusion the product stands behind.
+    //
+    // It cannot happen with a deterministic verifier, which is precisely why
+    // the check is worth having before the verifier is model-backed: by then
+    // the symptom is a published finding whose recorded reasons are not the
+    // ones that produced it, and nothing would have complained.
+    const ids = await seed();
+    const invocation = await schedule(ids, 1);
+
+    await store().recordAttempt(attempt(ids, invocation));
+
+    // Same invocation. Different conclusion.
+    await expect(
+      store().recordAttempt(
+        attempt(ids, invocation, {
+          outcome: {
+            status: "completed",
+            decision: "rejected",
+            reasons: ["claimed_mechanism_not_present"],
+            confidence: 0.2,
+            severity: "medium",
+          },
+        }),
+      ),
+    ).rejects.toThrow(AttemptResultConflict);
+
+    // Same decision, different reasons — still two executions, still refused.
+    await expect(
+      store().recordAttempt(
+        attempt(ids, invocation, {
+          outcome: {
+            status: "completed",
+            decision: "verified",
+            reasons: ["evidence_supports_claim"],
+            confidence: 0.9,
+            severity: "medium",
+          },
+        }),
+      ),
+    ).rejects.toThrow(AttemptResultConflict);
+
+    // A genuine redelivery — byte-identical result — still converges. Without
+    // this the check would have made at-least-once delivery unusable, which is
+    // the failure mode a stricter invariant usually introduces.
+    const replayed = await store().recordAttempt(attempt(ids, invocation));
+    expect(replayed.inserted).toBe(false);
     expect(await store().attemptsFor(ids.candidateId)).toHaveLength(1);
   }, 60_000);
 

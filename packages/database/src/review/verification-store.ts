@@ -152,6 +152,73 @@ export class AttemptIdentityConflict extends Error {
   }
 }
 
+/**
+ * One invocation, executed twice, reaching two different conclusions.
+ *
+ * Not a redelivery. A redelivery re-presents a result that already exists; this
+ * is a second *execution* of a logical verification that was supposed to happen
+ * once, and `ON CONFLICT (invocation_id)` would quietly let the first writer
+ * decide which conclusion the product stands behind.
+ *
+ * Harmless under a deterministic verifier, which is why it is worth adding now:
+ * the failure it catches becomes likely exactly when the verifier becomes
+ * model-backed, and at that point the symptom is a published finding whose
+ * recorded reasons are not the ones that produced it.
+ *
+ * The durable fix is single-flight execution — a lease on the invocation, so a
+ * second worker does not execute it at all. This is the detection half, and it
+ * is what tells you the lease is missing rather than leaving you to infer it.
+ */
+export class AttemptResultConflict extends Error {
+  public constructor(
+    public readonly invocationId: string,
+    public readonly stored: string,
+    public readonly incoming: string,
+  ) {
+    super(
+      `Invocation ${invocationId} already recorded a different result. One invocation is ` +
+        "one logical verification, so two conclusions means it executed twice — and " +
+        "converging on the first would let arrival order decide what the product claims.",
+    );
+    this.name = "AttemptResultConflict";
+  }
+}
+
+/**
+ * The substantive content of an attempt, as a comparable string.
+ *
+ * Everything that changes what happens downstream, and nothing that does not:
+ * no row id, no timestamp, no verifier identity — those legitimately differ
+ * between a row and the record describing it, and including them would make
+ * every redelivery look like a conflict.
+ *
+ * `confidence` is included even though it decides nothing on its own. Two
+ * executions that agree on the decision and differ on the number are still two
+ * executions, and that is the fact worth surfacing.
+ */
+function resultDigest(result: {
+  status: string;
+  decision: string | null;
+  reasons: readonly string[];
+  failure: string | null;
+  severity: string | null;
+  confidence: number | null;
+}): string {
+  return JSON.stringify({
+    status: result.status,
+    decision: result.decision,
+    // Order-sensitive: reasons are a sequence the verifier produced, and two
+    // orderings are two different explanations of the same conclusion.
+    reasons: result.reasons,
+    failure: result.failure,
+    severity: result.severity,
+    // NUMERIC(4,3) round-trips exactly at three decimal places, so this
+    // comparison is not floating-point luck.
+    confidence:
+      result.confidence === null ? null : result.confidence.toFixed(3),
+  });
+}
+
 export class VerificationStore {
   readonly #pool: PgPool;
   readonly #now: () => Date;
@@ -191,6 +258,8 @@ export class VerificationStore {
       decision: string | null;
       reasons: string[];
       failure: string | null;
+      severity: string | null;
+      confidence: string | null;
       inserted: boolean;
     }>(
       `INSERT INTO verification_attempts (
@@ -202,7 +271,7 @@ export class VerificationStore {
        ON CONFLICT (invocation_id)
          DO UPDATE SET invocation_id = verification_attempts.invocation_id
        RETURNING id, invocation_id, attempt, status, decision, reasons, failure,
-                 (xmax = 0) AS inserted`,
+                 severity, confidence, (xmax = 0) AS inserted`,
       [
         randomUUID(),
         record.organizationId,
@@ -243,6 +312,47 @@ export class VerificationStore {
         record.invocationId,
         row.attempt,
         record.attempt,
+      );
+    }
+
+    // And the same check on the substantive result.
+    //
+    // One invocation is one logical verification, so two executions of it
+    // reaching different conclusions is not a redelivery — it is evidence that
+    // the invocation was executed twice, and `ON CONFLICT` would silently let
+    // whichever writer arrived first decide which conclusion survives.
+    //
+    // That does not happen with a deterministic verifier. It is close to
+    // guaranteed with a model-backed one, which is why the check exists before
+    // that verifier does: by the time it is needed, the symptom would be a
+    // finding whose recorded reasons do not match the reasoning that produced
+    // it, and nothing would have complained.
+    //
+    // Directly analogous to the publication ledger's digest invariant, and for
+    // the same reason: a stable identity carrying changed content means the
+    // identity has stopped identifying one thing.
+    const storedResult = resultDigest({
+      status: row.status,
+      decision: row.decision,
+      reasons: row.reasons,
+      failure: row.failure,
+      severity: row.severity,
+      confidence: row.confidence === null ? null : Number(row.confidence),
+    });
+    const requestedResult = resultDigest({
+      status: outcome.status,
+      decision: outcome.status === "completed" ? outcome.decision : null,
+      reasons: outcome.status === "completed" ? [...outcome.reasons] : [],
+      failure: outcome.status === "unavailable" ? outcome.failure : null,
+      severity: outcome.status === "completed" ? outcome.severity : null,
+      confidence: outcome.status === "completed" ? outcome.confidence : null,
+    });
+
+    if (storedResult !== requestedResult) {
+      throw new AttemptResultConflict(
+        record.invocationId,
+        storedResult,
+        requestedResult,
       );
     }
 

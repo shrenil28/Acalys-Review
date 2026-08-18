@@ -353,16 +353,14 @@ async function readReconciliationInput(
   return rows.map((row): ReconciledCandidate => {
     const attempt =
       row.attemptId === null || row.status === null
-        ? // Nothing examined it. Modelled as `unavailable` so the promotion
-          // gate blocks the run, never as a decision — an unexamined claim has
-          // not been rejected, and recording it as one would improve every
-          // precision metric by losing candidates.
-          {
-            status: "unavailable" as const,
-            failure: "context_unavailable" as const,
-          }
+        ? // Nothing examined it. Left ABSENT rather than fabricated as an
+          // `unavailable` attempt: the promotion gate reports
+          // `verification_missing` for it, which sends an operator to the
+          // scheduler rather than to the model provider. Both block the run;
+          // only the reason says which system is broken.
+          undefined
         : row.status === "completed"
-          ? {
+          ? ({
               status: "completed" as const,
               decision: row.decision as
                 "verified" | "rejected" | "inconclusive",
@@ -370,11 +368,11 @@ async function readReconciliationInput(
               confidence: row.confidence ?? 0,
               severity: (row.severity ??
                 row.proposedSeverity) as FindingSeverity,
-            }
-          : {
+            } as const)
+          : ({
               status: "unavailable" as const,
               failure: (row.failure ?? "provider_error") as never,
-            };
+            } as const);
 
     return {
       candidateId: row.candidateId,

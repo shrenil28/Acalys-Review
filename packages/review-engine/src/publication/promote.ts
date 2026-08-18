@@ -30,7 +30,20 @@ export interface VerifiedCandidate {
   readonly severity: FindingSeverity;
   readonly category: string;
   readonly path: string;
-  readonly attempt: VerificationAttempt;
+  /**
+   * What verification concluded, or `undefined` if nothing examined it.
+   *
+   * The absence is deliberately modelled as an absence rather than as an
+   * attempt with some status. "Nothing was ever scheduled for this claim" and
+   * "the verifier ran and could not" are different failures with different
+   * fixes — the first is a pipeline defect, the second is an outage — and
+   * expressing the first as `unavailable` reports a bug in our own
+   * orchestration as someone else's infrastructure problem.
+   *
+   * Both block the run. Only the reason code tells an operator which one to go
+   * and look at.
+   */
+  readonly attempt: VerificationAttempt | undefined;
 }
 
 export const PROMOTION_BLOCKS = [
@@ -80,8 +93,24 @@ export type PromotionOutcome =
 export function promoteVerified(
   candidates: readonly VerifiedCandidate[],
 ): PromotionOutcome {
+  // Checked before `unavailable`, because a candidate nothing scheduled is a
+  // defect in the pipeline while an unavailable one is a defect in the world,
+  // and reporting the second when the first is true sends the operator to the
+  // wrong system.
+  const missing = candidates.filter(
+    (candidate) => candidate.attempt === undefined,
+  );
+
+  if (missing.length > 0) {
+    return {
+      kind: "blocked",
+      block: "verification_missing",
+      candidateIds: missing.map((candidate) => candidate.candidateId),
+    };
+  }
+
   const unavailable = candidates.filter(
-    (candidate) => candidate.attempt.status === "unavailable",
+    (candidate) => candidate.attempt?.status === "unavailable",
   );
 
   if (unavailable.length > 0) {
@@ -100,7 +129,7 @@ export function promoteVerified(
 
   for (const candidate of candidates) {
     const attempt = candidate.attempt;
-    if (attempt.status !== "completed") continue;
+    if (attempt === undefined || attempt.status !== "completed") continue;
 
     if (attempt.decision === "verified") {
       findings.push({
@@ -148,6 +177,7 @@ export interface VerificationFunnel {
   readonly rejected: number;
   readonly inconclusive: number;
   readonly unavailable: number;
+  readonly missing: number;
 }
 
 export function funnelOf(
@@ -161,19 +191,24 @@ export function funnelOf(
     candidates: candidates.length,
     verified: count(
       (c) =>
-        c.attempt.status === "completed" && c.attempt.decision === "verified",
+        c.attempt?.status === "completed" && c.attempt.decision === "verified",
     ),
     rejected: count(
       (c) =>
-        c.attempt.status === "completed" && c.attempt.decision === "rejected",
+        c.attempt?.status === "completed" && c.attempt.decision === "rejected",
     ),
     inconclusive: count(
       (c) =>
-        c.attempt.status === "completed" &&
+        c.attempt?.status === "completed" &&
         c.attempt.decision === "inconclusive",
     ),
     // Never folded into `rejected`: an outage is not a judgement, and counting
     // it as one makes analyzer precision improve when the verifier is down.
-    unavailable: count((c) => c.attempt.status === "unavailable"),
+    unavailable: count((c) => c.attempt?.status === "unavailable"),
+    // Kept separate from `unavailable` for the same reason `unavailable` is
+    // kept separate from `rejected`: a candidate nothing examined is a hole in
+    // the pipeline, and folding it into an infrastructure count would let a
+    // scheduling bug be read as a bad week for the verifier.
+    missing: count((c) => c.attempt === undefined),
   };
 }
