@@ -77,7 +77,7 @@ export class NormalizationError extends Error {
  * milliseconds. Always UTC on the fields Acalys reads.
  */
 const GITHUB_TIMESTAMP =
-  /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d{1,3})?Z$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?Z$/;
 
 /**
  * Converts GitHub's ISO-8601 timestamps to the canonical form.
@@ -99,10 +99,26 @@ const GITHUB_TIMESTAMP =
  * records an instant GitHub never sent — off by two days, in a field that
  * orders revisions and drives retention.
  *
- * So the parse is confirmed by round-tripping: if the `Date` re-emits a
- * different calendar time than the input named, the input was not a real
- * instant. That catches every rollover — Feb 29–31, Apr 31, Jun 31, Sep 31,
- * Nov 31 — with one comparison rather than a table of month lengths.
+ * So the parse is confirmed by comparing **calendar components**: each of the
+ * six numbers the input named must survive parsing unchanged. A rollover moves
+ * at least one of them, and the check needs no table of month lengths.
+ *
+ * # Components, not a string round-trip
+ *
+ * An earlier version compared `parsed.toISOString().slice(0, 19)` against the
+ * input's text. That happens to be correct here, and only because the regex
+ * above forbids offsets — but the correctness is a coincidence of formatting
+ * rather than a property of the check. Two RFC 3339 strings can denote the same
+ * instant and render differently, so the moment anyone loosened the pattern to
+ * accept `+05:30`, a *valid* timestamp would start being rejected and the
+ * failure would look like a data problem rather than a validator bug.
+ *
+ * Comparing numbers says what is actually meant: no component rolled over.
+ *
+ * Offsets remain rejected upstream, deliberately — GitHub sends UTC on these
+ * fields, and accepting a local-time provider without converting would record
+ * the wrong instant. If that ever changes, the offset must be applied *before*
+ * this comparison, because the components below are read as UTC.
  */
 function toTimestamp(value: string, field: string): Timestamp {
   const match = GITHUB_TIMESTAMP.exec(value);
@@ -118,11 +134,18 @@ function toTimestamp(value: string, field: string): Timestamp {
     throw new NormalizationError(field, `not a valid instant: ${value}`);
   }
 
-  // The round-trip. `match[1]` is the input's `YYYY-MM-DDTHH:MM:SS`; the
-  // Date's own ISO rendering must name the same calendar time, or a component
-  // was rolled over into the next month or year.
-  const [, calendarTime] = match;
-  if (parsed.toISOString().slice(0, 19) !== calendarTime) {
+  const [, year, month, day, hour, minute, second] = match;
+  const named = [year, month, day, hour, minute, second].map(Number);
+  const actual = [
+    parsed.getUTCFullYear(),
+    parsed.getUTCMonth() + 1, // getUTCMonth is 0-based; the string is 1-based.
+    parsed.getUTCDate(),
+    parsed.getUTCHours(),
+    parsed.getUTCMinutes(),
+    parsed.getUTCSeconds(),
+  ];
+
+  if (named.some((component, index) => component !== actual[index])) {
     throw new NormalizationError(
       field,
       `date does not exist: ${value} (would silently become ${parsed.toISOString()})`,

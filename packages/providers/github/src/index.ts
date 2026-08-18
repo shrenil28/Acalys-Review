@@ -54,3 +54,5 @@ export {
   toReviewTarget,
   toRevision,
 } from "./normalize/pull-request.js";
+
+export * from "./auth/index.js";
