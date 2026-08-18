@@ -7,7 +7,7 @@ P1-C     secure durable webhook ingestion          ✓
 P1-D     claims · leases · retries · concurrency   ✓
 P1-E.1   delivery → queued ReviewRun               ✓
 P1-E.2   deterministic lifecycle + crash recovery  ✓
-P1-E.3   real GitHub publication reconciliation    BLOCKED
+P1-E.3   real GitHub publication reconciliation    experiment ✓ / publisher pending
 P1-F     code intelligence + context planner       ✓
 P1-F.2   planner eval — metrics + committed baseline  ✓
 ```
@@ -26,7 +26,29 @@ contracts need redesigning.
 
 ---
 
-## Why E.3 is blocked, and why that is the right state
+## E.3 experiment: Outcome A
+
+The probe ran against a live App on a real pull request. Recovery works: the
+pending review was discoverable, the body marker survived byte-identically, the
+provider review id was recovered without having seen the create response, inline
+comments were retrievable, the recovered review was submitted, and exactly one
+logical publication resulted. Full evidence in
+[e3-experiment.md](./e3-experiment.md).
+
+The second experiment is the one that shapes the protocol. GitHub refuses a
+second **pending** review (422, "User can only have one pending review per pull
+request") but places no constraint once a review has been **submitted**. So a
+blind retry is harmless in the first window and produces a visible duplicate in
+the second — which is why reconcile-before-create is correctness rather than
+tidiness, and why the body marker has to exist at all.
+
+What remains for E.3 is the publisher itself: the `PublicationEffect` ledger,
+the crash/race matrix, and the `completed ⇒ all effects provider-confirmed`
+entailment, now that the experiment has defined what confirmed means.
+
+---
+
+## What being blocked established, and why that was the right state
 
 The entire publication design rests on one claim about GitHub's behaviour:
 

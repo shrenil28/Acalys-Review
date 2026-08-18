@@ -22,7 +22,6 @@
  *
  *     ACALYS_PROBE_APP_CLIENT_ID=Iv23li... \
  *     ACALYS_PROBE_PRIVATE_KEY_PATH=/path/to/app.private-key.pem \
- *     ACALYS_PROBE_INSTALLATION_ID=12345678 \
  *     ACALYS_PROBE_OWNER=acalys \
  *     ACALYS_PROBE_REPO=scratch \
  *     ACALYS_PROBE_PR=1 \
@@ -35,147 +34,63 @@
  * **It writes to a real pull request.** Use a scratch repository.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 
 import { AppJwtSigner } from "../src/auth/jwt.js";
 import { GithubAppPrivateKey } from "../src/auth/private-key.js";
+import {
+  call,
+  readConfig,
+  registerSecret,
+  writeTranscript,
+} from "./probe-harness.js";
 
-interface ProbeConfig {
-  readonly appClientId: string;
-  readonly privateKeyPath: string;
-  readonly installationId: string;
-  readonly owner: string;
-  readonly repo: string;
-  readonly pullNumber: number;
-}
+/**
+ * The first line in the diff that a review comment can be anchored to.
+ *
+ * GitHub accepts inline comments only on lines the diff touches, and rejects
+ * anything else with a 422 that reads like a permissions problem. Parsing the
+ * patch is the only way to know a line is acceptable without guessing.
+ *
+ * Returns a RIGHT-side line number, since an added line is unambiguously
+ * present in the head revision.
+ */
+function firstAddedLine(
+  body: unknown,
+): { readonly path: string; readonly line: number } | undefined {
+  if (!Array.isArray(body)) return undefined;
 
-function readConfig(): ProbeConfig {
-  const required = [
-    "ACALYS_PROBE_APP_CLIENT_ID",
-    "ACALYS_PROBE_PRIVATE_KEY_PATH",
-    "ACALYS_PROBE_INSTALLATION_ID",
-    "ACALYS_PROBE_OWNER",
-    "ACALYS_PROBE_REPO",
-    "ACALYS_PROBE_PR",
-  ] as const;
+  for (const entry of body as { filename?: string; patch?: string }[]) {
+    const patch = entry.patch;
+    const path = entry.filename;
+    if (patch === undefined || path === undefined) continue;
 
-  const missing = required.filter((name) => (process.env[name] ?? "") === "");
-  if (missing.length > 0) {
-    throw new Error(
-      `Probe cannot run without real credentials. Missing: ${missing.join(", ")}.\n` +
-        "This probe exists to measure GitHub's actual behaviour; mocking it would " +
-        "defeat its only purpose.",
-    );
+    let newLine = 0;
+    for (const line of patch.split("\n")) {
+      const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      if (hunk !== null) {
+        newLine = Number(hunk[1]);
+        continue;
+      }
+      if (line.startsWith("+")) return { path, line: newLine };
+      // Context lines advance the new-file counter; removals do not.
+      if (!line.startsWith("-") && !line.startsWith("\\")) newLine += 1;
+    }
   }
 
-  return {
-    appClientId: process.env["ACALYS_PROBE_APP_CLIENT_ID"] ?? "",
-    privateKeyPath: process.env["ACALYS_PROBE_PRIVATE_KEY_PATH"] ?? "",
-    installationId: process.env["ACALYS_PROBE_INSTALLATION_ID"] ?? "",
-    owner: process.env["ACALYS_PROBE_OWNER"] ?? "",
-    repo: process.env["ACALYS_PROBE_REPO"] ?? "",
-    pullNumber: Number(process.env["ACALYS_PROBE_PR"] ?? "0"),
-  };
-}
-
-/** Every request and response, so the design is made from evidence. */
-interface Recorded {
-  readonly step: string;
-  readonly method: string;
-  readonly url: string;
-  readonly status: number;
-  readonly body: unknown;
-}
-
-const transcript: Recorded[] = [];
-
-/**
- * Field names whose values are credentials, wherever they appear.
- *
- * The transcript is the point of this probe and also its biggest hazard: the
- * installation-token exchange returns the token *in its response body*, so
- * recording responses verbatim writes a live credential to a file on disk and
- * very likely into a bug report.
- *
- * Raw provider responses are what makes the design evidence-based. Raw
- * credentials are never part of that evidence.
- */
-const SECRET_FIELDS = new Set([
-  "token",
-  "access_token",
-  "refresh_token",
-  "client_secret",
-  "authorization",
-  "password",
-]);
-
-/**
- * Replaces credential values anywhere in a response, at any depth.
- *
- * Exported so `tests/probe-redaction.test.ts` can prove it — an unverified
- * redaction is worse than none, because it is trusted.
- */
-export function redactSecrets(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactSecrets);
-  if (value === null || typeof value !== "object") return value;
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
-      key,
-      SECRET_FIELDS.has(key.toLowerCase())
-        ? "[REDACTED]"
-        : redactSecrets(nested),
-    ]),
-  );
-}
-
-async function call(
-  step: string,
-  token: string,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<{ status: number; body: unknown }> {
-  const url = `https://api.github.com${path}`;
-  const response = await fetch(url, {
-    method,
-    headers: {
-      authorization: `Bearer ${token}`,
-      accept: "application/vnd.github+json",
-      "x-github-api-version": "2022-11-28",
-      ...(body === undefined ? {} : { "content-type": "application/json" }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-  });
-
-  const text = await response.text();
-  const parsed: unknown = text === "" ? null : JSON.parse(text);
-
-  // Redacted on the way into the transcript, not on the way out. A redaction
-  // applied at write time is one a future `console.log(transcript)` bypasses.
-  // Note that `headers` is deliberately never recorded at all: the
-  // Authorization header is a bearer credential on every single request.
-  transcript.push({
-    step,
-    method,
-    url,
-    status: response.status,
-    body: redactSecrets(parsed),
-  });
-
-  // The caller still receives the real body — it needs the token to continue.
-  return { status: response.status, body: parsed };
+  return undefined;
 }
 
 async function main(): Promise<void> {
   const config = readConfig();
 
+  const pem = readFileSync(config.privateKeyPath, "utf8");
+  registerSecret(pem);
+
   const signer = new AppJwtSigner({
     appClientId: config.appClientId,
-    privateKey: GithubAppPrivateKey.fromPem(
-      readFileSync(config.privateKeyPath, "utf8"),
-    ),
+    privateKey: GithubAppPrivateKey.fromPem(pem),
     clock: { now: () => new Date().toISOString() as never },
   });
 
@@ -187,20 +102,75 @@ async function main(): Promise<void> {
   process.stdout.write(`Probe identity: ${publicationId}\n`);
 
   const jwt = signer.sign();
+  registerSecret(jwt.token);
+
+  // Resolve the installation from the repository unless one was given. This is
+  // also the first real assertion the probe makes: if the App is not installed
+  // on this repository, everything after it would fail in a less obvious way.
+  let installationId = config.installationId;
+  if (installationId === "") {
+    const installation = await call(
+      "resolve-installation",
+      jwt.token,
+      "GET",
+      `/repos/${config.owner}/${config.repo}/installation`,
+    );
+    const resolved = (installation.body as { id?: number }).id;
+    if (installation.status !== 200 || resolved === undefined) {
+      throw new Error(
+        `The App is not installed on ${config.owner}/${config.repo} ` +
+          `(status ${String(installation.status)}). Install it there, or set ` +
+          "ACALYS_PROBE_INSTALLATION_ID explicitly.",
+      );
+    }
+    installationId = String(resolved);
+    process.stdout.write(`Resolved installation ${installationId}\n`);
+  }
+
   const tokenResponse = await call(
     "installation-token",
     jwt.token,
     "POST",
-    `/app/installations/${config.installationId}/access_tokens`,
+    `/app/installations/${installationId}/access_tokens`,
   );
   const token = (tokenResponse.body as { token?: string }).token ?? "";
   if (token === "") throw new Error("Could not obtain an installation token");
+  registerSecret(token);
 
   const base = `/repos/${config.owner}/${config.repo}/pulls/${String(config.pullNumber)}`;
 
-  // 2. Create a PENDING review — `event` omitted — carrying the marker in the
-  //    review BODY. On the body rather than only in inline comments, so
-  //    recovery is one list call rather than a scan of every comment.
+  // 2a. Find a line the provider will accept an inline comment on.
+  //
+  //     A review body alone would leave the "were the inline comments
+  //     retrievable after recovery?" question unanswered, and that is the half
+  //     of the publication that carries the findings. GitHub only accepts
+  //     comments on lines present in the diff, so the target is derived from
+  //     the diff rather than guessed.
+  const files = await call(
+    "list-pull-request-files",
+    token,
+    "GET",
+    `${base}/files`,
+  );
+  const anchor = firstAddedLine(files.body);
+  if (anchor === undefined) {
+    throw new Error(
+      "No added line found in the pull request diff. The probe needs one to " +
+        "attach an inline comment; push a change to the probe PR and retry.",
+    );
+  }
+  process.stdout.write(
+    `Inline anchor: ${anchor.path}:${String(anchor.line)} (RIGHT)\n`,
+  );
+
+  // 2b. Create a PENDING review — `event` omitted — carrying the marker in the
+  //     review BODY. On the body rather than only in inline comments, so
+  //     recovery is one list call rather than a scan of every comment.
+  //
+  //     The inline comment carries its own finding marker, because a review and
+  //     a finding are separately reconcilable identities: the review is the
+  //     publication unit, the finding is what survives across revisions.
+  const findingMarker = `<!-- acalys:finding:${publicationId}:f1 -->`;
   const created = await call(
     "create-pending-review",
     token,
@@ -208,6 +178,14 @@ async function main(): Promise<void> {
     `${base}/reviews`,
     {
       body: `${marker}\nAcalys probe: pending review recovery.`,
+      comments: [
+        {
+          path: anchor.path,
+          line: anchor.line,
+          side: "RIGHT",
+          body: `${findingMarker}\nAcalys probe: deterministic inline finding.`,
+        },
+      ],
     },
   );
 
@@ -287,9 +265,9 @@ async function main(): Promise<void> {
     );
   }
 
-  const output = `probe-transcript-${publicationId}.json`;
-  writeFileSync(output, JSON.stringify(transcript, null, 2), "utf8");
-  process.stdout.write(`\nTranscript written to ${output}\n`);
+  process.stdout.write(
+    `\nTranscript written to ${writeTranscript(publicationId)}\n`,
+  );
 }
 
 /**

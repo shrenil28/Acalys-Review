@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
-import { redactSecrets } from "../scripts/pending-review-probe.js";
+import {
+  assertNoCredentials,
+  clearRegisteredSecrets,
+  redactSecrets,
+  registerSecret,
+  scrubSecrets,
+} from "../scripts/probe-harness.js";
 
 /**
  * The probe records raw provider responses on purpose — that is what makes the
@@ -58,5 +64,112 @@ describe("Probe transcript redaction", () => {
     expect(redactSecrets(null)).toBeNull();
     expect(redactSecrets("plain")).toBe("plain");
     expect(redactSecrets(42)).toBe(42);
+  });
+});
+
+/**
+ * Field-name redaction only removes the values we predicted. These tests cover
+ * the ones we did not: a token echoed inside an error message, a credential
+ * shape nobody registered, a PEM serialized with escaped newlines. Those are
+ * the cases that actually leak, because nobody wrote a rule for them.
+ */
+describe("Value scrubbing catches credentials in unpredicted places", () => {
+  const TOKEN = "ghs_UNMISTAKABLEPROBEMARKER0123456789";
+  const PEM = [
+    "-----BEGIN RSA PRIVATE KEY-----",
+    "MIIEowIBAAKCAQEAunmistakableprobekeymarker",
+    "-----END RSA PRIVATE KEY-----",
+  ].join("\n");
+
+  beforeEach(() => {
+    clearRegisteredSecrets();
+  });
+
+  it("removes a registered token from a field no rule names", () => {
+    registerSecret(TOKEN);
+
+    // GitHub really does echo request material into error messages.
+    const errorBody = {
+      message: `Bad credentials for ${TOKEN}`,
+      documentation_url: `https://docs.github.com/rest?t=${TOKEN}`,
+      errors: [{ resource: "Review", detail: TOKEN }],
+    };
+
+    const scrubbed = JSON.stringify(scrubSecrets(errorBody));
+    expect(scrubbed).not.toContain(TOKEN);
+    expect(scrubbed).toContain("[REDACTED]");
+    // The diagnostic value survives — that is the point of scrubbing rather
+    // than dropping the field.
+    expect(scrubbed).toContain("Bad credentials for");
+    expect(scrubbed).toContain("resource");
+  });
+
+  it("removes a PEM both raw and with JSON-escaped newlines", () => {
+    registerSecret(PEM);
+
+    expect(JSON.stringify(scrubSecrets({ note: PEM }))).not.toContain(
+      "unmistakableprobekeymarker",
+    );
+    // The shape a PEM takes once it has been through a JSON round trip.
+    expect(
+      JSON.stringify(scrubSecrets({ note: PEM.replaceAll("\n", "\\n") })),
+    ).not.toContain("unmistakableprobekeymarker");
+  });
+
+  it("refuses to register a short value", () => {
+    // Scrubbing "ok" would corrupt every transcript containing it, and no real
+    // credential is that short.
+    expect(() => {
+      registerSecret("short");
+    }).toThrow(/short/i);
+  });
+});
+
+describe("Emission is refused when output looks like a credential", () => {
+  beforeEach(() => {
+    clearRegisteredSecrets();
+  });
+
+  it("throws on a registered secret that survived redaction", () => {
+    const token = "ghs_SURVIVEDREDACTION0123456789ABCD";
+    registerSecret(token);
+    expect(() => {
+      assertNoCredentials(`{"body":"${token}"}`);
+    }).toThrow(/redaction bug/i);
+  });
+
+  it.each([
+    ["installation token", "ghs_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
+    ["personal token", "ghp_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"],
+    ["PEM header", "-----BEGIN RSA PRIVATE KEY-----"],
+    ["JWT", "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJhcHAifQ.c2lnbmF0dXJlc2lnbg"],
+  ])("throws on an unregistered %s by shape alone", (_label, material) => {
+    // The only defence that works for a credential minted by a code path added
+    // after this file was written.
+    expect(() => {
+      assertNoCredentials(`{"transcript":"${material}"}`);
+    }).toThrow(/refusing to emit/i);
+  });
+
+  it("permits an ordinary transcript", () => {
+    const transcript = JSON.stringify([
+      {
+        step: "list-reviews",
+        method: "GET",
+        url: "https://api.github.com/repos/o/r/pulls/1/reviews",
+        status: 200,
+        body: [
+          {
+            id: 1,
+            state: "PENDING",
+            body: "<!-- acalys:publication:pub_abc123 -->",
+          },
+        ],
+      },
+    ]);
+
+    expect(() => {
+      assertNoCredentials(transcript);
+    }).not.toThrow();
   });
 });
