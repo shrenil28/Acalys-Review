@@ -853,4 +853,73 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     );
     expect(advanced).toEqual({ kind: "advanced", state: "reconciling" });
   }, 120_000);
+
+  // ── 14 ─────────────────────────────────────────────────────────────────
+  it("a finding citing an unverified attempt is refused by the database", async () => {
+    // The last joint of the funnel, made structural in 0008.
+    //
+    // `VerificationStore.promote` already refused this, and the entailment
+    // query already reported it. Neither is the guarantee: the first is code a
+    // second writer can skip — which is exactly what the orchestrator did for
+    // three checkpoints — and the second is a report, which arrives after the
+    // row exists.
+    const context = await seedRun();
+    await drive(context);
+
+    const rejected = await database.pool.query<{ id: string }>(
+      `SELECT id FROM verification_attempts
+        WHERE review_run_id = $1 AND decision = 'rejected'`,
+      [context.runId],
+    );
+    const inconclusive = await database.pool.query<{ id: string }>(
+      `SELECT id FROM verification_attempts
+        WHERE review_run_id = $1 AND decision = 'inconclusive'`,
+      [context.runId],
+    );
+    expect(rejected.rowCount).toBe(1);
+    expect(inconclusive.rowCount).toBe(1);
+
+    const forge = (attemptId: string | null, fingerprint: string) =>
+      database.pool.query(
+        `INSERT INTO review_findings (id, organization_id, repository_id, review_run_id,
+           revision_id, fingerprint_value, severity, category, confidence_score,
+           confidence_level, title, explanation, path, start_line, end_line, state,
+           verification_attempt_id, created_at, updated_at)
+         VALUES (gen_random_uuid(),$1,$2,$3,$4,$5,'high','correctness',0.9,'high',
+           't','e','src/x.ts',1,2,'verified',$6,$7,$7)`,
+        [
+          ORG,
+          REPO,
+          context.runId,
+          context.revisionId,
+          fingerprint,
+          attemptId,
+          at,
+        ],
+      );
+
+    // Neither a rejection nor an inconclusive result can be cited: the
+    // generated `verified_id` is NULL for both, and a foreign key cannot
+    // reference NULL.
+    await expect(
+      forge(rejected.rows[0]?.id ?? null, "1".repeat(64)),
+    ).rejects.toThrow(/review_findings_promoted_by_verification/);
+    await expect(
+      forge(inconclusive.rows[0]?.id ?? null, "2".repeat(64)),
+    ).rejects.toThrow(/review_findings_promoted_by_verification/);
+
+    // And omitting the citation is not the way around it.
+    await expect(forge(null, "3".repeat(64))).rejects.toThrow(
+      /verification_attempt_id/,
+    );
+
+    // The verified attempt IS citable, so the constraint is not simply
+    // refusing every insert.
+    const verified = await database.pool.query<{ id: string }>(
+      `SELECT id FROM verification_attempts
+        WHERE review_run_id = $1 AND decision = 'verified' LIMIT 1`,
+      [context.runId],
+    );
+    await forge(verified.rows[0]?.id ?? null, "4".repeat(64));
+  }, 120_000);
 });

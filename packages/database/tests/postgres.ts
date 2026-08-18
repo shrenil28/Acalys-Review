@@ -315,6 +315,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "0005_analysis_coverage.sql",
     "0006_verification_attempts.sql",
     "0007_verification_scheduling.sql",
+    "0008_promotion_referent.sql",
   ].map((name) =>
     readFileSync(
       fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)),

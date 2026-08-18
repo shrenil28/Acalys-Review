@@ -166,6 +166,22 @@ const MUTATIONS = [
     suite: "apps/review-worker/tests/funnel.test.ts",
   },
   {
+    id: 19,
+    name: "promote citing a rejected attempt (referent widened to any attempt)",
+    file: "packages/database/migrations/0008_promotion_referent.sql",
+    find: "        REFERENCES verification_attempts (verified_id);",
+    replace: "        REFERENCES verification_attempts (id);",
+    suite: "apps/review-worker/tests/funnel.test.ts",
+  },
+  {
+    id: 20,
+    name: "the promotion citation becomes optional again",
+    file: "packages/database/migrations/0008_promotion_referent.sql",
+    find: "    ALTER COLUMN verification_attempt_id SET NOT NULL;",
+    replace: "    ALTER COLUMN verification_attempt_id DROP NOT NULL;",
+    suite: "apps/review-worker/tests/funnel.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",
