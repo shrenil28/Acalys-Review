@@ -3,8 +3,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import fc from "fast-check";
 
 import {
+  findLifecycleViolations,
+  PolicyDecisionStore,
+  PreMergeStore,
   ReviewIngestionStore,
   ReviewStageStore,
+  VerificationScheduler,
+  VerificationStore,
   type TenantScope,
 } from "@acalys/database";
 import {
@@ -18,8 +23,8 @@ import {
   advance,
   advanceToSettled,
   analyze,
-  planPublications,
-  verify,
+  logicalKey,
+  verifyCandidate,
   type RunContext,
 } from "../src/index.js";
 
@@ -58,8 +63,11 @@ describeWithPostgres(
       database = await startPostgres("lifecycle");
       await assertSuiteIsActuallyRunning(database, [
         "candidate_findings",
-        "verifications",
+        "verification_invocations",
+        "verification_attempts",
         "review_findings",
+        "publication_decisions",
+        "premerge_check_results",
         "publication_intents",
       ]);
     }, 120_000);
@@ -97,7 +105,36 @@ describeWithPostgres(
 
     const ingestion = () => new ReviewIngestionStore(database.pool);
     const stages = () => new ReviewStageStore(database.pool);
-    const options = () => ({ ingestion: ingestion(), stages: stages() });
+    // Every store the funnel needs, supplied here rather than defaulted.
+    // `OrchestratorOptions` requires them: an orchestrator that could be built
+    // without a verification store is one that will be, and the pipeline that
+    // resulted promoted candidates nothing had examined.
+    const options = () => ({
+      ingestion: ingestion(),
+      stages: stages(),
+      scheduler: new VerificationScheduler(database.pool),
+      verifications: new VerificationStore(database.pool),
+      decisions: new PolicyDecisionStore(database.pool),
+      premerge: new PreMergeStore(database.pool),
+    });
+
+    /**
+     * Deletes rows the state machine says must exist, in dependency order.
+     *
+     * Only reachable from a test: the prerequisite checks exist for a database
+     * corrupted from outside, so corrupting it is what exercising them requires.
+     */
+    async function corruptByDeleting(
+      runId: string,
+      tables: readonly string[],
+    ): Promise<void> {
+      for (const table of tables) {
+        await database.pool.query(
+          `DELETE FROM ${table} WHERE review_run_id = $1`,
+          [runId],
+        );
+      }
+    }
 
     /** Creates a queued run and returns the context for driving it. */
     async function seedRun(headSha = HEAD, key = "k-1"): Promise<RunContext> {
@@ -372,11 +409,31 @@ describeWithPostgres(
               `candidates at ${state}`,
             ).toBeGreaterThan(0);
           }
-          if (reached("verifying")) {
-            expect(
-              outputs.verifications.length,
-              `verifications at ${state}`,
-            ).toBeGreaterThan(0);
+          if (reached("reconciling")) {
+            // Strengthened from "some verification exists at `verifying`".
+            //
+            // Verification now runs *while* the run is in `verifying` rather
+            // than as the output of entering it, so the old entailment no
+            // longer describes the pipeline. It was also the weaker claim:
+            // `count(*) > 0` is satisfied by a run where one candidate out of
+            // twenty was examined, which is the partial-review semantics the
+            // promotion gate exists to refuse.
+            //
+            // The entailment that matters is per candidate, and it starts at
+            // `reconciling` — the first state from which a finding can reach a
+            // developer.
+            const examined = outputs.verifications.filter(
+              (verification) => verification.status === "completed",
+            );
+            const candidateIds = new Set(
+              outputs.candidates.map((candidate) => candidate.id),
+            );
+            const examinedIds = new Set(
+              examined.map((verification) => verification.candidateFindingId),
+            );
+            expect(examinedIds.size, `examined at ${state}`).toBe(
+              candidateIds.size,
+            );
           }
           if (reached("publishing")) {
             expect(
@@ -594,10 +651,18 @@ describeWithPostgres(
           "UPDATE review_runs SET state = 'verifying' WHERE id = $1",
           [context.runId],
         );
-        await database.pool.query(
-          "DELETE FROM candidate_findings WHERE review_run_id = $1",
-          [context.runId],
-        );
+        // Deleted from the top of the trust chain down. The foreign keys run
+        // publication → finding → attempt → invocation → candidate, so
+        // corrupting the database now means dismantling it deliberately —
+        // which is the point of the chain existing.
+        await corruptByDeleting(context.runId, [
+          "publication_intents",
+          "publication_decisions",
+          "review_findings",
+          "verification_attempts",
+          "verification_invocations",
+          "candidate_findings",
+        ]);
 
         const outcome = await advance(context, options());
         expect(outcome.kind).toBe("invariant_violation");
@@ -619,10 +684,12 @@ describeWithPostgres(
           "UPDATE review_runs SET state = 'reconciling' WHERE id = $1",
           [context.runId],
         );
-        await database.pool.query(
-          "DELETE FROM verifications WHERE review_run_id = $1",
-          [context.runId],
-        );
+        await corruptByDeleting(context.runId, [
+          "publication_intents",
+          "publication_decisions",
+          "review_findings",
+          "verification_attempts",
+        ]);
 
         const outcome = await advance(context, options());
         expect(outcome.kind).toBe("invariant_violation");
@@ -695,9 +762,9 @@ describeWithPostgres(
 
       // Stable across recomputation — minted before any attempt, so an ambiguous
       // provider outcome stays reconcilable.
-      const replanned = planPublications(publicationScope, outputs.findings);
-      expect(replanned[0]?.logicalKey).toBe(review?.logicalKey);
-      expect(replanned[0]?.contentDigest).toBe(review?.contentDigest);
+      expect(logicalKey(publicationScope, "review", "run")).toBe(
+        review?.logicalKey,
+      );
     }, 60_000);
 
     // ── 10 ─────────────────────────────────────────────────────────────────
@@ -739,21 +806,75 @@ describeWithPostgres(
       expect(Number(orphaned.rows[0]?.count)).toBe(0);
     }, 60_000);
 
-    it("rejected candidates produce no finding", async () => {
+    it("only verified candidates become findings", async () => {
       // The candidate/finding distinction made visible: a verifier that confirmed
       // everything would hide a pipeline that had silently collapsed the two.
       const context = await seedRun();
       await advanceToSettled(context, options());
 
       const outputs = await stages().readOutputs(context.runId);
-      const verified = verify(outputs.candidates).filter(
-        (v) => v.decision === "verified",
+      const verified = outputs.candidates.filter(
+        (candidate) =>
+          verifyCandidate(candidate).status === "completed" &&
+          (verifyCandidate(candidate) as { decision: string }).decision ===
+            "verified",
       );
 
+      // Proves the stub actually exercises the distinction. Without this the
+      // assertion below passes trivially on a run where everything verified,
+      // which is the shape a collapsed pipeline also has.
+      expect(outputs.candidates.length).toBeGreaterThan(0);
       expect(outputs.findings).toHaveLength(verified.length);
       expect(outputs.findings.length).toBeLessThanOrEqual(
         outputs.candidates.length,
       );
+
+      // Every finding cites the attempt that established it, and none is
+      // `published` — promotion establishes that the defect is real, and
+      // nothing more.
+      for (const finding of outputs.findings) {
+        expect(finding.verificationAttemptId).not.toBeNull();
+        expect(finding.state).toBe("verified");
+      }
+    }, 60_000);
+
+    it("the database-wide entailments hold for a run the orchestrator drove", async () => {
+      // ── The assertion this checkpoint exists for ──────────────────────────
+      //
+      // `findLifecycleViolations` already contained the queries that catch an
+      // unverified promotion and an unexamined candidate. It was only ever
+      // called from `publication.test.ts`, whose fixture seeds a run parked in
+      // `publishing` with **no candidates and no findings** — so both queries
+      // scanned zero rows and returned clean, and the suite reported the trust
+      // boundary intact.
+      //
+      // Pointed at a run the orchestrator actually drove, the same function
+      // reported four violations. That is the difference between a check and a
+      // check that runs, and it is why this test lives here rather than beside
+      // the fixture that cannot fail it.
+      const context = await seedRun();
+      const outcome = await advanceToSettled(context, options());
+
+      // Prove the pipeline reached the states the entailments are about. An
+      // entailment suite that silently ran against a refused run would be
+      // vacuous in exactly the way this test was written to end.
+      expect(outcome).toEqual({ kind: "settled", state: "publishing" });
+
+      const counts = await database.pool.query<{
+        candidates: string;
+        attempts: string;
+        findings: string;
+      }>(
+        `SELECT (SELECT count(*) FROM candidate_findings)    AS candidates,
+                (SELECT count(*) FROM verification_attempts) AS attempts,
+                (SELECT count(*) FROM review_findings)       AS findings`,
+      );
+      expect(Number(counts.rows[0]?.candidates)).toBeGreaterThan(0);
+      expect(Number(counts.rows[0]?.attempts)).toBe(
+        Number(counts.rows[0]?.candidates),
+      );
+
+      expect(await findLifecycleViolations(database.pool)).toEqual([]);
     }, 60_000);
   },
 );

@@ -111,3 +111,4 @@ export const ALL_ANALYZER_IDS = [
 ] as const;
 export * from "./verification/index.js";
 export * from "./publication/index.js";
+export * from "./premerge/index.js";

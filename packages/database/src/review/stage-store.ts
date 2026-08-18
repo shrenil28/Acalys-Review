@@ -56,16 +56,6 @@ export interface CandidateFindingRow {
   readonly fingerprintValue: string;
 }
 
-export interface VerificationRow {
-  readonly candidateFindingId: string;
-  readonly decision: "verified" | "rejected" | "inconclusive";
-  readonly reasonCodes: readonly string[];
-  readonly confidenceScore: number;
-  readonly confidenceLevel: string;
-  readonly verifierId: string;
-  readonly verifierVersion: string;
-}
-
 /**
  * What the analysis actually covered.
  *
@@ -98,6 +88,20 @@ export interface PublicationIntentRow {
    * "was anything ever published here?".
    */
   readonly revisionId?: string | undefined;
+  /**
+   * The finding this publication renders, and the decision that authorized it.
+   *
+   * Both or neither. A finding-scoped publication with no decision is refused
+   * by `publication_intents_finding_needs_decision`, and a decision that said
+   * `withhold` has no `publishable_id` for the foreign key to reference — so
+   * "a withheld finding reached the ledger" is unrepresentable rather than
+   * merely forbidden.
+   *
+   * Run-level publications — the review container, the summary — belong to no
+   * finding and carry neither.
+   */
+  readonly reviewFindingId?: string | undefined;
+  readonly publicationDecisionId?: string | undefined;
 }
 
 /**
@@ -137,17 +141,25 @@ export type StageOutcome =
       readonly missing: string;
     };
 
-/** What a stage produces. Called inside the transaction. */
+/**
+ * What a stage produces. Called inside the transaction.
+ *
+ * `verifications` and `findings` used to be here, and their removal is the
+ * P1-I correction rather than a tidy-up.
+ *
+ * A stage that could write a `review_findings` row directly was a second way to
+ * promote a candidate, alongside `VerificationStore.promote` — and it was the
+ * one the orchestrator actually used, so every promotion in the live pipeline
+ * bypassed the gate that checks the candidate was verified. The findings it
+ * wrote carried `verification_attempt_id = NULL`, which the entailment query
+ * has always called a violation.
+ *
+ * Now promotion has exactly one implementation, it runs inside this
+ * transaction via the caller's `produce(client)`, and it refuses anything its
+ * attempt did not verify.
+ */
 export interface StageWork {
   readonly candidates?: readonly CandidateFindingRow[] | undefined;
-  readonly verifications?: readonly VerificationRow[] | undefined;
-  readonly findings?:
-    | readonly (CandidateFindingRow & {
-        readonly confidenceScore: number;
-        readonly confidenceLevel: string;
-        readonly severity: string;
-      })[]
-    | undefined;
   readonly publications?: readonly PublicationIntentRow[] | undefined;
 }
 
@@ -198,18 +210,30 @@ export class ReviewStageStore {
   /**
    * Produces a stage's output and advances the run, in one transaction.
    *
-   * `produce` is called *inside* the transaction and may run several times
-   * across retries — it must be deterministic and its writes must converge,
-   * which is what every unique key in `0003` is for.
+   * `produce` is called *inside* the transaction, is handed the transaction's
+   * own client, and may run several times across retries — it must be
+   * deterministic and its writes must converge, which is what every unique key
+   * in `0003` is for.
+   *
+   * It receives the client so that work which cannot be expressed as plain rows
+   * — promotion, which must check the verification behind each candidate, and
+   * policy, which must record a decision before a publication may cite it —
+   * commits in the same transaction as the transition. Doing that work outside
+   * and passing the rows in was the alternative, and it is how the promotion
+   * gate came to be bypassable: whatever a caller can assemble as a row, it can
+   * assemble without asking permission.
+   *
+   * It must NOT be used for anything that talks to a model, a provider, or the
+   * network. Those hold the run's row lock open for the duration.
    */
   public runStage(
     scope: TenantScope,
     runId: string,
     from: string,
     to: string,
-    produce: () => StageWork,
+    produce: (client: PgClient) => StageWork | Promise<StageWork>,
     prerequisites: readonly (
-      "candidates" | "verifications" | "findings"
+      "candidates" | "verifications" | "every_candidate_examined" | "findings"
     )[] = [],
     options?: {
       /**
@@ -265,24 +289,68 @@ export class ReviewStageStore {
       // Defence in depth. Under the atomic design this cannot fail; it exists
       // for the day the design is broken by someone else.
       for (const prerequisite of prerequisites) {
-        const table =
+        // `verifications` resolves to `verification_attempts`, and only to
+        // *completed* ones. The legacy `verifications` table this used to point
+        // at is gone (0007): it held one row per candidate forever, so a second
+        // verification of a candidate was silently discarded — and while it
+        // existed, "the run has been verified" could be satisfied by a table
+        // the P1-I guarantees say nothing about.
+        //
+        // `status = 'completed'` matters as much as the table name. An
+        // `unavailable` attempt has examined nothing, and counting it here
+        // would let a verifier outage satisfy the prerequisite that exists to
+        // notice one.
+        // `every_candidate_examined` counts what is MISSING; the others count
+        // what is present. Two shapes rather than one, because forcing this
+        // entailment into "is the count non-zero?" is what a `count(*) > 0`
+        // check on `verification_attempts` already is — and that check passes
+        // when one candidate out of twenty was verified, which is precisely the
+        // partial-review semantics this stage must not acquire by accident.
+        const [query, failWhenZero] =
           prerequisite === "candidates"
-            ? "candidate_findings"
+            ? [
+                "SELECT count(*)::text AS count FROM candidate_findings WHERE review_run_id = $1",
+                true,
+              ]
             : prerequisite === "verifications"
-              ? "verifications"
-              : "review_findings";
-        const count = await client.query<{ count: string }>(
-          `SELECT count(*)::text AS count FROM ${table} WHERE review_run_id = $1`,
-          [runId],
+              ? [
+                  `SELECT count(*)::text AS count FROM verification_attempts
+                    WHERE review_run_id = $1 AND status = 'completed'`,
+                  true,
+                ]
+              : prerequisite === "every_candidate_examined"
+                ? [
+                    // Candidates with no completed attempt. `unavailable` does
+                    // not count as examined: it has looked at nothing, and
+                    // letting it satisfy this is how a verifier outage renders
+                    // as a clean review.
+                    `SELECT count(*)::text AS count
+                       FROM candidate_findings c
+                      WHERE c.review_run_id = $1
+                        AND NOT EXISTS (
+                          SELECT 1 FROM verification_attempts v
+                           WHERE v.candidate_finding_id = c.id
+                             AND v.status = 'completed'
+                        )`,
+                    false,
+                  ]
+                : [
+                    "SELECT count(*)::text AS count FROM review_findings WHERE review_run_id = $1",
+                    true,
+                  ];
+
+        const count = Number(
+          (await client.query<{ count: string }>(query, [runId])).rows[0]
+            ?.count ?? 0,
         );
-        if (Number(count.rows[0]?.count ?? 0) === 0) {
+        if (failWhenZero === true ? count === 0 : count > 0) {
           return { kind: "prerequisite_missing", state, missing: prerequisite };
         }
       }
 
       await this.#faults.beforeWork?.();
 
-      const work = produce();
+      const work = await produce(client);
       const now = this.#now();
 
       for (const candidate of work.candidates ?? []) {
@@ -316,59 +384,6 @@ export class ReviewStageStore {
         );
       }
 
-      for (const verification of work.verifications ?? []) {
-        await client.query(
-          `INSERT INTO verifications (
-             id, organization_id, review_run_id, candidate_finding_id,
-             decision, reason_codes, confidence_score, confidence_level,
-             verifier_id, verifier_version, created_at
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-           ON CONFLICT (candidate_finding_id) DO NOTHING`,
-          [
-            randomUUID(),
-            scope.organizationId,
-            runId,
-            verification.candidateFindingId,
-            verification.decision,
-            JSON.stringify(verification.reasonCodes),
-            verification.confidenceScore,
-            verification.confidenceLevel,
-            verification.verifierId,
-            verification.verifierVersion,
-            now,
-          ],
-        );
-      }
-
-      for (const finding of work.findings ?? []) {
-        await client.query(
-          `INSERT INTO review_findings (
-             id, organization_id, repository_id, review_run_id,
-             fingerprint_value, severity, category, confidence_score,
-             confidence_level, title, explanation, path, start_line, end_line,
-             state, created_at, updated_at
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'verified',$15,$15)
-           ON CONFLICT (review_run_id, fingerprint_value) DO NOTHING`,
-          [
-            randomUUID(),
-            scope.organizationId,
-            scope.repositoryId,
-            runId,
-            finding.fingerprintValue,
-            finding.severity,
-            finding.category,
-            finding.confidenceScore,
-            finding.confidenceLevel,
-            finding.title,
-            finding.explanation,
-            finding.path,
-            finding.startLine,
-            finding.endLine,
-            now,
-          ],
-        );
-      }
-
       for (const publication of work.publications ?? []) {
         // `DO UPDATE` so the row is returned on conflict, and the digest that
         // comes back is the STORED one. Comparing it here is the enforcement of
@@ -384,8 +399,9 @@ export class ReviewStageStore {
           `INSERT INTO publication_intents (
              id, organization_id, review_run_id, provider, pull_request_id,
              revision_id, kind, logical_key, content_digest, state,
+             review_finding_id, publication_decision_id,
              created_at, updated_at
-           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'planned',$10,$10)
+           ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'planned',$10,$11,$12,$12)
            ON CONFLICT (review_run_id, logical_key)
              DO UPDATE SET updated_at = publication_intents.updated_at
            RETURNING content_digest`,
@@ -399,6 +415,8 @@ export class ReviewStageStore {
             publication.kind,
             publication.logicalKey,
             publication.contentDigest,
+            publication.reviewFindingId ?? null,
+            publication.publicationDecisionId ?? null,
             now,
           ],
         );
@@ -469,16 +487,22 @@ export class ReviewStageStore {
     readonly candidates: readonly { id: string; fingerprintValue: string }[];
     readonly verifications: readonly {
       candidateFindingId: string;
-      decision: string;
+      attempt: number;
+      status: string;
+      decision: string | null;
     }[];
     readonly findings: readonly {
+      id: string;
       fingerprintValue: string;
       severity: string;
+      state: string;
+      verificationAttemptId: string | null;
     }[];
     readonly publications: readonly {
       logicalKey: string;
       state: string;
       contentDigest: string;
+      reviewFindingId: string | null;
     }[];
   }> {
     const client = await this.#pool.connect();
@@ -490,26 +514,41 @@ export class ReviewStageStore {
         "SELECT id, fingerprint_value FROM candidate_findings WHERE review_run_id = $1 ORDER BY fingerprint_value",
         [runId],
       );
+      // Every attempt, not one per candidate. The audit trail is the point:
+      // "verifier v4 rejected it, v5 verified it after a bug fix" has to stay
+      // readable, and a query that collapsed to the latest would hide exactly
+      // the history that makes the verifier improvable.
       const verifications = await client.query<{
         candidate_finding_id: string;
-        decision: string;
+        attempt: number;
+        status: string;
+        decision: string | null;
       }>(
-        "SELECT candidate_finding_id, decision FROM verifications WHERE review_run_id = $1 ORDER BY candidate_finding_id",
+        `SELECT candidate_finding_id, attempt, status, decision
+           FROM verification_attempts
+          WHERE review_run_id = $1
+          ORDER BY candidate_finding_id, attempt`,
         [runId],
       );
       const findings = await client.query<{
+        id: string;
         fingerprint_value: string;
         severity: string;
+        state: string;
+        verification_attempt_id: string | null;
       }>(
-        "SELECT fingerprint_value, severity FROM review_findings WHERE review_run_id = $1 ORDER BY fingerprint_value",
+        `SELECT id, fingerprint_value, severity, state, verification_attempt_id
+           FROM review_findings WHERE review_run_id = $1 ORDER BY fingerprint_value`,
         [runId],
       );
       const publications = await client.query<{
         logical_key: string;
         state: string;
         content_digest: string;
+        review_finding_id: string | null;
       }>(
-        "SELECT logical_key, state, content_digest FROM publication_intents WHERE review_run_id = $1 ORDER BY logical_key",
+        `SELECT logical_key, state, content_digest, review_finding_id
+           FROM publication_intents WHERE review_run_id = $1 ORDER BY logical_key`,
         [runId],
       );
 
@@ -520,16 +559,22 @@ export class ReviewStageStore {
         })),
         verifications: verifications.rows.map((row) => ({
           candidateFindingId: row.candidate_finding_id,
+          attempt: row.attempt,
+          status: row.status,
           decision: row.decision,
         })),
         findings: findings.rows.map((row) => ({
+          id: row.id,
           fingerprintValue: row.fingerprint_value,
           severity: row.severity,
+          state: row.state,
+          verificationAttemptId: row.verification_attempt_id,
         })),
         publications: publications.rows.map((row) => ({
           logicalKey: row.logical_key,
           state: row.state,
           contentDigest: row.content_digest,
+          reviewFindingId: row.review_finding_id,
         })),
       };
     } finally {

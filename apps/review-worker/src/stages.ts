@@ -22,11 +22,8 @@
 
 import { createHash } from "node:crypto";
 
-import type {
-  CandidateFindingRow,
-  PublicationIntentRow,
-  VerificationRow,
-} from "@acalys/database";
+import type { VerificationAttempt } from "@acalys/review-engine";
+import type { CandidateFindingRow } from "@acalys/database";
 
 export const STUB_ANALYZER_ID = "acalys.analyzer.deterministic-stub";
 export const STUB_ANALYZER_VERSION = "1";
@@ -168,52 +165,68 @@ export function analyze(input: AnalysisInput): readonly CandidateFindingRow[] {
 }
 
 /**
- * Decides each candidate deterministically.
+ * Decides each candidate deterministically, across all three decisions.
  *
- * Some are rejected on purpose: a verifier that confirms everything would make
- * the candidate/finding distinction invisible, and the tests would pass on a
- * pipeline that had silently collapsed the two.
+ * Deliberately produces `rejected` and `inconclusive` as well as `verified`. A
+ * stub that confirmed everything would make the candidate/finding distinction
+ * invisible, and the funnel test would pass against a pipeline that had
+ * silently collapsed the two — which is exactly the pipeline this checkpoint
+ * found.
+ *
+ * The shape it returns is the review-engine's {@link VerificationAttempt}, not
+ * a row: `unavailable` is a status rather than a fourth decision, so no
+ * consumer can accidentally treat an outage as a judgement about the claim.
  */
-export function verify(
-  candidates: readonly {
-    readonly id: string;
-    readonly fingerprintValue: string;
-  }[],
-): readonly VerificationRow[] {
-  return candidates.map((candidate) => {
-    // The last hex digit of the fingerprint decides. Stable across replays,
-    // and roughly a quarter are rejected.
-    const nibble = Number.parseInt(candidate.fingerprintValue.slice(-1), 16);
-    const decision =
-      nibble % 4 === 0 ? ("rejected" as const) : ("verified" as const);
-    const score = decision === "verified" ? 0.92 : 0.15;
+export function verifyCandidate(candidate: {
+  readonly fingerprintValue: string;
+}): VerificationAttempt {
+  // The last hex digit of the fingerprint decides. Stable across replays.
+  const nibble = Number.parseInt(candidate.fingerprintValue.slice(-1), 16);
 
+  if (nibble % 4 === 0) {
     return {
-      candidateFindingId: candidate.id,
-      decision,
-      reasonCodes:
-        decision === "verified"
-          ? ["confirmed_by_static_trace"]
-          : ["false_positive"],
-      confidenceScore: score,
-      confidenceLevel: decision === "verified" ? "high" : "low",
-      verifierId: STUB_VERIFIER_ID,
-      verifierVersion: STUB_VERIFIER_VERSION,
+      status: "completed",
+      decision: "rejected",
+      reasons: ["claimed_mechanism_not_present"],
+      confidence: 0.15,
+      severity: "medium",
     };
-  });
+  }
+  if (nibble % 4 === 1) {
+    // Never folded into `rejected`. "We could not establish it" and "we
+    // established it is false" are different claims, and collapsing them makes
+    // every gap in context read as an analyzer false positive.
+    return {
+      status: "completed",
+      decision: "inconclusive",
+      reasons: ["insufficient_evidence"],
+      confidence: 0.3,
+      severity: "medium",
+    };
+  }
+  return {
+    status: "completed",
+    decision: "verified",
+    reasons: ["independent_context_confirms"],
+    confidence: 0.92,
+    severity: nibble % 4 === 2 ? "high" : "medium",
+  };
 }
 
+/** The stub verifier, in the shape the funnel consumes. */
+export const deterministicVerifier = {
+  id: STUB_VERIFIER_ID,
+  version: STUB_VERIFIER_VERSION,
+  verify: verifyCandidate,
+};
+
 /**
- * The publication intents for a run.
+ * The publication scope, and the logical key built from it.
  *
- * One `review` intent carrying the run-level identity, plus one
- * `inline_comment` per published finding. That mirrors the protocol the real
- * publisher will use — a single provider review as the publication unit rather
- * than N independent comments — so the ledger's shape is proven before any
- * network call depends on it.
- *
- * The logical key is minted here, **before** anything is attempted, which is
- * what makes an ambiguous provider outcome reconcilable at all.
+ * Every scope that makes two effects different is spelled out. Not
+ * `review:${runId}`: a run id is a UUID and would in fact be unique, which is
+ * what makes the short form dangerous — it is correct by accident, and a future
+ * key that drops a scope looks identical to one that never had it.
  */
 export interface PublicationScope {
   readonly organizationId: string;
@@ -224,20 +237,7 @@ export interface PublicationScope {
   readonly runId: string;
 }
 
-/**
- * The logical key: every scope that makes two effects different, spelled out.
- *
- * Not `review:${runId}`. A run id is a UUID and would in fact be unique, which
- * is exactly what makes the short form dangerous — it is correct by accident,
- * and a future key that drops a scope looks identical to one that never had it.
- * Written out, a dropped scope is visible in the data.
- *
- * Deliberately NOT derived from the head SHA, the finding's line, the provider
- * review id, or the webhook delivery id. The first two are content, the third
- * does not exist until after the effect it is supposed to identify, and the
- * fourth is transport.
- */
-function logicalKey(
+export function logicalKey(
   scope: PublicationScope,
   kind: string,
   discriminator: string,
@@ -253,64 +253,4 @@ function logicalKey(
     kind,
     discriminator,
   ].join(":");
-}
-
-export function planPublications(
-  scope: PublicationScope,
-  findings: readonly {
-    readonly fingerprintValue: string;
-    readonly severity: string;
-  }[],
-): readonly PublicationIntentRow[] {
-  const summaryBody = `Acalys reviewed this change and reported ${String(findings.length)} finding(s).`;
-
-  const review: PublicationIntentRow = {
-    kind: "review",
-    // One provider review per run, and the key is stable across retries because
-    // it contains nothing generated at attempt time.
-    logicalKey: logicalKey(scope, "review", "run"),
-    contentDigest: sha256(summaryBody),
-    provider: scope.provider,
-    pullRequestId: scope.pullRequestId,
-    revisionId: scope.revisionId,
-  };
-
-  const comments = findings.map((finding) => ({
-    kind: "inline_comment" as const,
-    // Finding-scoped, keyed on the fingerprint so the same finding on a later
-    // revision reconciles to the same comment rather than a duplicate.
-    logicalKey: logicalKey(scope, "inline_comment", finding.fingerprintValue),
-    contentDigest: sha256(`${finding.fingerprintValue}|${finding.severity}`),
-    provider: scope.provider,
-    pullRequestId: scope.pullRequestId,
-    revisionId: scope.revisionId,
-  }));
-
-  return [review, ...comments];
-}
-
-/** Promotes verified candidates to findings. Rejected ones produce no row. */
-export function reconcile(
-  candidates: readonly (CandidateFindingRow & { readonly id: string })[],
-  verifications: readonly VerificationRow[],
-): readonly (CandidateFindingRow & {
-  readonly confidenceScore: number;
-  readonly confidenceLevel: string;
-  readonly severity: string;
-})[] {
-  const byId = new Map(verifications.map((v) => [v.candidateFindingId, v]));
-
-  return candidates
-    .filter((candidate) => byId.get(candidate.id)?.decision === "verified")
-    .map((candidate) => {
-      const verification = byId.get(candidate.id);
-      return {
-        ...candidate,
-        confidenceScore: verification?.confidenceScore ?? 0,
-        confidenceLevel: verification?.confidenceLevel ?? "low",
-        // The verifier's opinion may differ from the producer's proposal; the
-        // published severity is the reconciled one, not the proposed one.
-        severity: candidate.proposedSeverity,
-      };
-    });
 }

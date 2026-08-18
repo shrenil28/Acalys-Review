@@ -30,20 +30,32 @@
  */
 
 import type {
+  PgClient,
+  PolicyDecisionStore,
+  PreMergeStore,
   ReviewIngestionStore,
   ReviewStageStore,
   StageWork,
   TenantScope,
+  VerificationScheduler,
+  VerificationStore,
 } from "@acalys/database";
+import type { FindingSeverity } from "@acalys/contracts/domain";
 
 import {
   analyze,
+  deterministicVerifier,
   inputDigest,
-  planPublications,
-  reconcile,
-  verify,
   type AnalysisInput,
 } from "./stages.js";
+import {
+  reconcileAndPlan,
+  runVerification,
+  type CandidateVerifier,
+  type FunnelConfig,
+  type FunnelStores,
+  type ReconciledCandidate,
+} from "./funnel.js";
 
 /** Where the orchestrator got to, and why it stopped. */
 export type AdvanceOutcome =
@@ -84,6 +96,20 @@ export type AdvanceOutcome =
 export interface OrchestratorOptions {
   readonly ingestion: ReviewIngestionStore;
   readonly stages: ReviewStageStore;
+  /**
+   * The durable verification boundary.
+   *
+   * Required, not optional. An optional store is a store a caller can forget,
+   * and "the orchestrator was constructed without one" is exactly how the
+   * pipeline came to be promoting candidates nothing had verified.
+   */
+  readonly scheduler: VerificationScheduler;
+  readonly verifications: VerificationStore;
+  readonly decisions: PolicyDecisionStore;
+  readonly premerge: PreMergeStore;
+  /** Swappable so a test can force `unavailable` without a whole verifier. */
+  readonly verifier?: CandidateVerifier | undefined;
+  readonly config?: FunnelConfig | undefined;
   readonly now?: (() => Date) | undefined;
 }
 
@@ -126,12 +152,20 @@ export async function advance(
     headSha: context.headSha,
   };
 
+  const stores: FunnelStores = {
+    scheduler: options.scheduler,
+    verifications: options.verifications,
+    decisions: options.decisions,
+    premerge: options.premerge,
+    stages: options.stages,
+  };
+
   const step = async (
     from: string,
     to: string,
-    produce: () => StageWork,
+    produce: (client: PgClient) => StageWork | Promise<StageWork>,
     prerequisites: readonly (
-      "candidates" | "verifications" | "findings"
+      "candidates" | "verifications" | "every_candidate_examined" | "findings"
     )[] = [],
   ): Promise<AdvanceOutcome> => {
     const outcome = await options.stages.runStage(
@@ -186,56 +220,77 @@ export async function advance(
       // it is the guard against an externally corrupted database.
       return step("analyzing", "reviewing", () => ({}), ["candidates"]);
 
-    case "reviewing": {
-      const outputs = await options.stages.readOutputs(context.runId);
-      return step(
-        "reviewing",
-        "verifying",
-        () => ({ verifications: verify(outputs.candidates) }),
-        ["candidates"],
-      );
-    }
+    case "reviewing":
+      // Verification runs while the run is IN `verifying`, not as the output of
+      // entering it. The verifier may call a model, and a stage that produced
+      // its output inside the transition transaction would hold the run's row
+      // lock across that call.
+      return step("reviewing", "verifying", () => ({}), ["candidates"]);
 
     case "verifying": {
       const outputs = await options.stages.readOutputs(context.runId);
-      const candidates = analyze(input).map((candidate) => ({
-        ...candidate,
-        id:
-          outputs.candidates.find(
-            (row) => row.fingerprintValue === candidate.fingerprintValue,
-          )?.id ?? "",
-      }));
-      const verifications = verify(outputs.candidates);
-
-      return step(
-        "verifying",
-        "reconciling",
-        () => ({ findings: reconcile(candidates, verifications) }),
-        ["candidates", "verifications"],
+      const outcome = await runVerification(
+        context.scope,
+        context.runId,
+        outputs.candidates,
+        options.verifier ?? deterministicVerifier,
+        stores,
       );
+
+      if (outcome.kind === "unavailable") {
+        // Strict production behaviour: an unverifiable candidate fails the run
+        // rather than publishing the subset that verified. Partial review may
+        // become a product feature; it must not be acquired by accident,
+        // because the shape it takes is "fewer comments on a successful
+        // review", which is indistinguishable from good news.
+        await options.stages.runStage(
+          context.scope,
+          context.runId,
+          "verifying",
+          "failed",
+          () => ({}),
+        );
+        return {
+          kind: "settled",
+          state: "failed",
+        };
+      }
+
+      // The prerequisite is per candidate, not `count(*) > 0`. A run whose
+      // twentieth candidate was never examined must not advance because the
+      // first nineteen were.
+      return step("verifying", "reconciling", () => ({}), [
+        "candidates",
+        "every_candidate_examined",
+      ]);
     }
 
     case "reconciling": {
-      const outputs = await options.stages.readOutputs(context.runId);
-      // The intents are written **here**, in the transition into `publishing`,
-      // so the obligation is durable before the run becomes uninterruptible.
+      const candidates = await readReconciliationInput(options, context.runId);
+
+      // Promotion, publication policy and the pre-merge branch all commit with
+      // the transition. The intents come back for `runStage` to write, so the
+      // ledger and `state = publishing` are one durable fact.
       return step(
         "reconciling",
         "publishing",
-        () => ({
-          publications: planPublications(
+        async (client) => {
+          const { intents } = await reconcileAndPlan(
+            context.scope,
             {
-              organizationId: context.scope.organizationId,
-              repositoryId: context.scope.repositoryId,
               provider: context.provider,
               pullRequestId: context.pullRequestId,
               revisionId: context.revisionId,
               runId: context.runId,
             },
-            outputs.findings,
-          ),
-        }),
-        ["candidates", "verifications"],
+            candidates,
+            stores,
+            client,
+            options.config ?? {},
+          );
+          return { publications: intents };
+        },
+        ["candidates", "every_candidate_examined"],
       );
     }
 
@@ -272,6 +327,70 @@ export async function advanceToSettled(
   throw new Error(
     `Orchestrator exceeded ${String(maxSteps)} steps; the run is not converging`,
   );
+}
+
+/**
+ * The reconciliation input: candidates paired with what verification concluded.
+ *
+ * Read from the database rather than recomputed from the analyzer, which is the
+ * correction this checkpoint forced. The previous implementation re-ran
+ * `analyze()` and matched the results to rows by fingerprint to recover the
+ * candidate ids — so the reconciler's view of "what did we claim?" came from
+ * running the analyzer a second time, and any nondeterminism in it would have
+ * silently dropped candidates from the funnel.
+ *
+ * A candidate with no attempt keeps a `null` attempt id and is carried into the
+ * promotion gate as missing, where the run is blocked. It is deliberately not
+ * filtered out here: a candidate that quietly left the review is the failure
+ * hardest to see from outside.
+ */
+async function readReconciliationInput(
+  options: OrchestratorOptions,
+  runId: string,
+): Promise<readonly ReconciledCandidate[]> {
+  const rows = await options.verifications.readForReconciliation(runId);
+
+  return rows.map((row): ReconciledCandidate => {
+    const attempt =
+      row.attemptId === null || row.status === null
+        ? // Nothing examined it. Modelled as `unavailable` so the promotion
+          // gate blocks the run, never as a decision — an unexamined claim has
+          // not been rejected, and recording it as one would improve every
+          // precision metric by losing candidates.
+          {
+            status: "unavailable" as const,
+            failure: "context_unavailable" as const,
+          }
+        : row.status === "completed"
+          ? {
+              status: "completed" as const,
+              decision: row.decision as
+                "verified" | "rejected" | "inconclusive",
+              reasons: row.reasons as never,
+              confidence: row.confidence ?? 0,
+              severity: (row.severity ??
+                row.proposedSeverity) as FindingSeverity,
+            }
+          : {
+              status: "unavailable" as const,
+              failure: (row.failure ?? "provider_error") as never,
+            };
+
+    return {
+      candidateId: row.candidateId,
+      fingerprintValue: row.fingerprintValue,
+      severity: row.proposedSeverity as FindingSeverity,
+      category: row.category,
+      path: row.path,
+      startLine: row.startLine,
+      endLine: row.endLine,
+      title: row.title,
+      claim: row.claim,
+      explanation: row.explanation,
+      attemptId: row.attemptId ?? "",
+      attempt,
+    };
+  });
 }
 
 export { inputDigest };

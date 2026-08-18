@@ -1,7 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { VerificationStore, type AttemptRecord } from "../src/index.js";
+import {
+  AttemptIdentityConflict,
+  VerificationScheduler,
+  VerificationStore,
+  type AttemptRecord,
+  type ScheduledInvocation,
+} from "../src/index.js";
 import {
   assertSuiteIsActuallyRunning,
   dockerAvailable,
@@ -35,6 +41,7 @@ describeWithPostgres("Verification persistence converges", () => {
   beforeAll(async () => {
     database = await startPostgres("verification");
     await assertSuiteIsActuallyRunning(database, [
+      "verification_invocations",
       "verification_attempts",
       "review_findings",
     ]);
@@ -112,13 +119,38 @@ describeWithPostgres("Verification persistence converges", () => {
   }
 
   const store = () => new VerificationStore(database.pool, () => now);
+  const scheduler = () => new VerificationScheduler(database.pool, () => now);
+
+  /**
+   * Allocates a command, the way the worker does.
+   *
+   * The tests used to mint `invocationId: randomUUID()` and pass an ordinal
+   * literal, which is what "the ordinal is supplied by the caller" permitted.
+   * Migration 0007's composite foreign key refuses that: an attempt may only
+   * claim an identity a scheduler durably allocated. So the helper schedules,
+   * and the attempt inherits both the id and the ordinal from the command —
+   * which is also how the production path now works.
+   */
+  const schedule = async (
+    ids: { runId: string; candidateId: string },
+    pass: number,
+    reason: "initial" | "retry_unavailable" | "operator_reverify" = "initial",
+  ): Promise<ScheduledInvocation> =>
+    scheduler().schedule({
+      organizationId: ORG,
+      reviewRunId: ids.runId,
+      candidateFindingId: ids.candidateId,
+      requestKey: `test:run:${ids.runId}:candidate:${ids.candidateId}:pass:${String(pass)}`,
+      reason,
+    });
 
   const attempt = (
     ids: { runId: string; candidateId: string },
+    invocation: ScheduledInvocation,
     overrides: Partial<AttemptRecord> = {},
   ): AttemptRecord => ({
-    invocationId: randomUUID(),
-    attempt: 1,
+    invocationId: invocation.invocationId,
+    attempt: invocation.attempt,
     candidateFindingId: ids.candidateId,
     reviewRunId: ids.runId,
     organizationId: ORG,
@@ -141,7 +173,7 @@ describeWithPostgres("Verification persistence converges", () => {
     // Redelivery, not retry. An at-least-once worker delivering its own work
     // twice must converge rather than accumulate.
     const ids = await seed();
-    const record = attempt(ids);
+    const record = attempt(ids, await schedule(ids, 1));
 
     const [first, second] = await Promise.all([
       store().recordAttempt(record),
@@ -158,9 +190,11 @@ describeWithPostgres("Verification persistence converges", () => {
   it("two genuine attempts keep distinct ordinals and neither overwrites the other", async () => {
     const ids = await seed();
 
+    const first = await schedule(ids, 1);
+    expect(first.attempt).toBe(1);
+
     const rejected = await store().recordAttempt(
-      attempt(ids, {
-        attempt: 1,
+      attempt(ids, first, {
         outcome: {
           status: "completed",
           decision: "rejected",
@@ -170,8 +204,15 @@ describeWithPostgres("Verification persistence converges", () => {
         },
       }),
     );
-    // The verifier was fixed and the claim re-examined.
-    const verified = await store().recordAttempt(attempt(ids, { attempt: 2 }));
+
+    // The verifier was fixed and the claim re-examined. A different request
+    // key, so the scheduler allocates rather than converges — and the ordinal
+    // it hands back is the authority, not a number this test chose.
+    const second = await schedule(ids, 2, "operator_reverify");
+    expect(second.attempt).toBe(2);
+    expect(second.allocated).toBe(true);
+
+    const verified = await store().recordAttempt(attempt(ids, second));
 
     expect(verified.id).not.toBe(rejected.id);
 
@@ -183,18 +224,47 @@ describeWithPostgres("Verification persistence converges", () => {
     expect(history[1]?.decision).toBe("verified");
   }, 60_000);
 
-  it("refuses a second attempt reusing an ordinal", async () => {
+  it("refuses an attempt claiming an ordinal no scheduler allocated", async () => {
+    // The stronger form of "refuses a second attempt reusing an ordinal".
+    //
+    // The ordinal is no longer a number the caller picks, so reusing one means
+    // presenting an identity the scheduler did not issue: a real invocation
+    // paired with someone else's ordinal.
     const ids = await seed();
-    await store().recordAttempt(attempt(ids, { attempt: 1 }));
+    const first = await schedule(ids, 1);
+    const second = await schedule(ids, 2, "operator_reverify");
+
+    // Invocation 2, carrying invocation 1's ordinal, with NO attempt rows yet.
+    // Nothing else can fire: `verification_attempts_sequence_uq` needs an
+    // existing row, and the ON CONFLICT path needs this invocation to have been
+    // recorded already. Only the composite foreign key can refuse this, which
+    // is the point of keying on all three columns — a single-column key on
+    // `invocation_id` would have let it through while looking correct.
     await expect(
-      store().recordAttempt(attempt(ids, { attempt: 1 })),
-    ).rejects.toThrow(/verification_attempts_sequence_uq/);
+      store().recordAttempt(
+        attempt(ids, { ...second, attempt: first.attempt }),
+      ),
+    ).rejects.toThrow(/verification_attempts_from_invocation/);
+    expect(await store().attemptsFor(ids.candidateId)).toHaveLength(0);
+
+    // The other half, which no constraint can reach: once an invocation HAS an
+    // attempt, `ON CONFLICT (invocation_id)` converges without inserting, so
+    // the database checks nothing and the caller is handed a row it did not
+    // describe. The store refuses it explicitly.
+    await store().recordAttempt(attempt(ids, first));
+    await expect(
+      store().recordAttempt(
+        attempt(ids, { ...first, attempt: second.attempt }),
+      ),
+    ).rejects.toThrow(AttemptIdentityConflict);
+
+    expect(await store().attemptsFor(ids.candidateId)).toHaveLength(1);
   }, 60_000);
 
   it("stores an unavailable attempt without it resembling a decision", async () => {
     const ids = await seed();
     const stored = await store().recordAttempt(
-      attempt(ids, {
+      attempt(ids, await schedule(ids, 1), {
         outcome: { status: "unavailable", failure: "model_timeout" },
       }),
     );
@@ -210,7 +280,9 @@ describeWithPostgres("Verification persistence converges", () => {
     // A lookup-then-insert is a race two workers lose together, and the symptom
     // is two comments about one defect.
     const ids = await seed();
-    const stored = await store().recordAttempt(attempt(ids));
+    const stored = await store().recordAttempt(
+      attempt(ids, await schedule(ids, 1)),
+    );
 
     const promotion = {
       reviewRunId: ids.runId,
@@ -248,7 +320,7 @@ describeWithPostgres("Verification persistence converges", () => {
     // The property that matters most: not merely idempotent function by
     // function, but convergent across a crash boundary.
     const ids = await seed();
-    const record = attempt(ids);
+    const record = attempt(ids, await schedule(ids, 1));
 
     const first = await store().recordAttempt(record);
     // The worker dies here. A replacement redelivers the same invocation.
@@ -284,8 +356,7 @@ describeWithPostgres("Verification persistence converges", () => {
     const ids = await seed();
     for (const decision of ["rejected", "inconclusive"] as const) {
       const stored = await store().recordAttempt(
-        attempt(ids, {
-          attempt: decision === "rejected" ? 1 : 2,
+        attempt(ids, await schedule(ids, decision === "rejected" ? 1 : 2), {
           outcome: {
             status: "completed",
             decision,

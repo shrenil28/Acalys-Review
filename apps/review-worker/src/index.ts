@@ -28,12 +28,24 @@ export {
   STUB_VERIFIER_ID,
   STUB_VERIFIER_VERSION,
   analyze,
+  deterministicVerifier,
   inputDigest,
-  planPublications,
-  reconcile,
-  verify,
+  logicalKey,
+  verifyCandidate,
   type AnalysisInput,
+  type PublicationScope,
 } from "./stages.js";
+export {
+  reconcileAndPlan,
+  runVerification,
+  verificationRequestKey,
+  type CandidateVerifier,
+  type FunnelConfig,
+  type FunnelResult,
+  type FunnelStores,
+  type ReconciledCandidate,
+  type VerificationStageOutcome,
+} from "./funnel.js";
 export {
   PublicationInvariantViolation,
   contentDigest,

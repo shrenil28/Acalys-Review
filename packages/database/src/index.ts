@@ -47,7 +47,6 @@ export {
   type StageFaultInjector,
   type StageOutcome,
   type StageWork,
-  type VerificationRow,
 } from "./review/stage-store.js";
 export {
   PublicationContentConflict,
@@ -66,8 +65,28 @@ export {
   type PublicationState,
 } from "./review/publication-state.js";
 export {
+  AttemptIdentityConflict,
   VerificationStore,
   type AttemptRecord,
   type PromotionRecord,
+  type ReconciliationRow,
   type StoredAttempt,
 } from "./review/verification-store.js";
+export {
+  INVOCATION_REASONS,
+  InvocationKeyConflict,
+  VerificationScheduler,
+  type InvocationReason,
+  type ScheduleRequest,
+  type ScheduledInvocation,
+} from "./review/verification-scheduler.js";
+export {
+  PUBLICATION_SURFACE,
+  PolicyDecisionConflict,
+  PolicyDecisionStore,
+  PreMergeStore,
+  type CheckRecord,
+  type DecisionRecord,
+  type StoredCheck,
+  type StoredDecision,
+} from "./review/policy-store.js";

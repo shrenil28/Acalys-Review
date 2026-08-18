@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   PublicationStore,
   ReviewIngestionStore,
+  VerificationScheduler,
   ReviewStageStore,
   canTransitionPublication,
   findLifecycleViolations,
@@ -637,13 +638,29 @@ describeWithPostgres(
         [ORG, REPO, runId, "d".repeat(64), "f".repeat(64), now],
       );
 
-      const insert = (columns: string, values: unknown[]) =>
-        database.pool.query(
+      // Each shape needs its own durably scheduled invocation: an attempt may
+      // only claim an identity a scheduler allocated (0007), so a test that
+      // minted `gen_random_uuid()` for `invocation_id` is now refused by the
+      // composite foreign key before it ever reaches the CHECK it is about.
+      // That refusal is correct, and it means the fixture has to go through the
+      // same door production does.
+      const scheduler = new VerificationScheduler(database.pool, clock);
+      let pass = 0;
+      const insert = async (columns: string, values: unknown[]) => {
+        pass += 1;
+        const invocation = await scheduler.schedule({
+          organizationId: ORG,
+          reviewRunId: runId,
+          candidateFindingId: candidate.rows[0]?.id ?? "",
+          requestKey: `test:constraint:${runId}:${String(pass)}`,
+          reason: "initial",
+        });
+        return database.pool.query(
           `INSERT INTO verification_attempts (id, organization_id, review_run_id,
            candidate_finding_id, verifier_id, verifier_version, context_digest,
-           cache_key, invocation_id, created_at, ${columns})
-         VALUES (gen_random_uuid(),$1,$2,$3,'v','1',$4,$5,gen_random_uuid(),$6,${values
-           .map((_unused, index) => `$${String(index + 7)}`)
+           cache_key, invocation_id, attempt, created_at, ${columns})
+         VALUES (gen_random_uuid(),$1,$2,$3,'v','1',$4,$5,$6,$7,$8,${values
+           .map((_unused, index) => `$${String(index + 9)}`)
            .join(",")})`,
           [
             ORG,
@@ -651,10 +668,13 @@ describeWithPostgres(
             candidate.rows[0]?.id,
             "c".repeat(64),
             "k".repeat(64),
+            invocation.invocationId,
+            invocation.attempt,
             now,
             ...values,
           ],
         );
+      };
 
       // "Verified, reason unknown" is a row nobody can audit.
       await expect(

@@ -30,16 +30,32 @@
  *         └── the verifier genuinely ran again
  * ```
  *
- * So the invocation id is minted by the caller *before* the verifier runs, and
- * the attempt ordinal is supplied rather than computed. `MAX(attempt) + 1` is a
- * race even behind a unique index, and losing that race would masquerade as a
- * redelivery — which is the one thing this distinction exists to prevent.
+ * So the invocation id is minted *before* the verifier runs, and the attempt
+ * ordinal comes with it. Neither is chosen here: both are allocated by
+ * `VerificationScheduler` against a durable `verification_invocations` row, and
+ * migration 0007 makes that structural — the composite foreign key
+ * `(invocation_id, candidate_finding_id, attempt)` means this store physically
+ * cannot write an attempt whose identity no scheduler allocated.
+ *
+ * The earlier design had the ordinal "supplied by the caller", which fixed the
+ * `MAX(attempt) + 1` race by moving it somewhere with no durable record of the
+ * decision. Two schedulers could still originate the same ordinal, and the
+ * database would report it as a unique violation — contention arriving where a
+ * domain answer was needed.
+ *
+ * # What promotion writes, and what it deliberately does not
+ *
+ * A promoted finding is `verified`, never `published`. Promotion establishes
+ * that the defect is **real**; publication policy separately decides whether a
+ * developer should be interrupted about it, and the publisher separately
+ * confirms the provider actually holds the comment. Writing `published` here
+ * would collapse all three, and `verified → published` would become automatic
+ * in the one place the product promises it is not.
  */
 
-import type { Pool, PoolClient } from "pg";
 import { randomUUID } from "node:crypto";
 
-type PgClient = Pool | PoolClient;
+import type { PgClient, PgPool } from "../webhook/postgres-inbox.js";
 
 export interface AttemptRecord {
   readonly invocationId: string;
@@ -91,11 +107,56 @@ export interface PromotionRecord {
   readonly explanation: string;
 }
 
+/** A candidate and its latest attempt, as reconciliation needs them. */
+export interface ReconciliationRow {
+  readonly candidateId: string;
+  readonly fingerprintValue: string;
+  readonly proposedSeverity: string;
+  readonly category: string;
+  readonly path: string;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly title: string;
+  readonly claim: string;
+  readonly explanation: string;
+  /** Null when nothing has examined this candidate. */
+  readonly attemptId: string | null;
+  readonly status: string | null;
+  readonly decision: string | null;
+  readonly reasons: readonly string[];
+  readonly confidence: number | null;
+  readonly severity: string | null;
+  readonly failure: string | null;
+}
+
+/**
+ * One invocation was presented as two different attempts.
+ *
+ * Not contention and not a redelivery. The invocation id and the ordinal are
+ * allocated together by the scheduler, so a pair that disagrees means a caller
+ * assembled an identity rather than carrying one — and the convergence it would
+ * silently receive is an attempt it did not describe.
+ */
+export class AttemptIdentityConflict extends Error {
+  public constructor(
+    public readonly invocationId: string,
+    public readonly stored: number,
+    public readonly requested: number,
+  ) {
+    super(
+      `Invocation ${invocationId} is attempt ${String(stored)}, but was presented as ` +
+        `attempt ${String(requested)}. The ordinal is allocated with the invocation; ` +
+        "a pair that disagrees was assembled rather than carried.",
+    );
+    this.name = "AttemptIdentityConflict";
+  }
+}
+
 export class VerificationStore {
-  readonly #pool: Pool;
+  readonly #pool: PgPool;
   readonly #now: () => Date;
 
-  public constructor(pool: Pool, now: () => Date = () => new Date()) {
+  public constructor(pool: PgPool, now: () => Date = () => new Date()) {
     this.#pool = pool;
     this.#now = now;
   }
@@ -108,9 +169,21 @@ export class VerificationStore {
    * round trip — and so `xmax = 0` can distinguish the insert from the
    * convergence, which is what makes "did I already do this?" answerable.
    */
-  public async recordAttempt(record: AttemptRecord): Promise<StoredAttempt> {
+  public async recordAttempt(
+    record: AttemptRecord,
+    client?: PgClient,
+  ): Promise<StoredAttempt> {
+    return client === undefined
+      ? this.#inTransaction((owned) => this.#recordAttempt(record, owned))
+      : this.#recordAttempt(record, client);
+  }
+
+  async #recordAttempt(
+    record: AttemptRecord,
+    client: PgClient,
+  ): Promise<StoredAttempt> {
     const outcome = record.outcome;
-    const result = await this.#pool.query<{
+    const result = await client.query<{
       id: string;
       invocation_id: string;
       attempt: number;
@@ -155,6 +228,24 @@ export class VerificationStore {
     if (row === undefined)
       throw new Error("verification attempt was not persisted");
 
+    // The convergence path returns the STORED row, so what comes back may
+    // disagree with what was asked for. `ON CONFLICT (invocation_id)` matches
+    // on the invocation alone, which means a redelivery carrying a different
+    // ordinal is silently accepted and the caller is handed a row that is not
+    // the one it described.
+    //
+    // The composite foreign key cannot catch this: on the conflict path no
+    // insert happens, so nothing is checked. This is the same shape as the
+    // publication ledger's digest check that a previous checkpoint found was
+    // described in a comment and performed by no code.
+    if (row.attempt !== record.attempt) {
+      throw new AttemptIdentityConflict(
+        record.invocationId,
+        row.attempt,
+        record.attempt,
+      );
+    }
+
     return {
       id: row.id,
       invocationId: row.invocation_id,
@@ -171,32 +262,112 @@ export class VerificationStore {
   public async attemptsFor(
     candidateFindingId: string,
   ): Promise<readonly StoredAttempt[]> {
-    const result = await this.#pool.query<{
-      id: string;
-      invocation_id: string;
-      attempt: number;
-      status: string;
-      decision: string | null;
-      reasons: string[];
-      failure: string | null;
-    }>(
-      `SELECT id, invocation_id, attempt, status, decision, reasons, failure
+    return this.#inTransaction(async (client) => {
+      const result = await client.query<{
+        id: string;
+        invocation_id: string;
+        attempt: number;
+        status: string;
+        decision: string | null;
+        reasons: string[];
+        failure: string | null;
+      }>(
+        `SELECT id, invocation_id, attempt, status, decision, reasons, failure
          FROM verification_attempts
         WHERE candidate_finding_id = $1
         ORDER BY attempt`,
-      [candidateFindingId],
-    );
+        [candidateFindingId],
+      );
 
-    return result.rows.map((row) => ({
-      id: row.id,
-      invocationId: row.invocation_id,
-      attempt: row.attempt,
-      status: row.status,
-      decision: row.decision,
-      reasons: row.reasons,
-      failure: row.failure,
-      inserted: false,
-    }));
+      return result.rows.map((row) => ({
+        id: row.id,
+        invocationId: row.invocation_id,
+        attempt: row.attempt,
+        status: row.status,
+        decision: row.decision,
+        reasons: row.reasons,
+        failure: row.failure,
+        inserted: false,
+      }));
+    });
+  }
+
+  /**
+   * Every candidate of a run, paired with its most recent attempt.
+   *
+   * The *most recent*, not the first. "Verifier v4 rejected it, v5 verified it
+   * after a bug fix" is the history the attempts table exists to keep, and a
+   * reconciliation that read the earliest attempt would act on the answer that
+   * was already known to be wrong.
+   *
+   * `LEFT JOIN`, so a candidate with no attempt at all comes back with a null
+   * attempt rather than vanishing from the result. A candidate that silently
+   * disappeared here would be promoted by nobody and blocked by nobody — it
+   * would simply cease to be part of the review, which is the failure mode
+   * hardest to notice from the outside.
+   */
+  public async readForReconciliation(
+    reviewRunId: string,
+  ): Promise<readonly ReconciliationRow[]> {
+    return this.#inTransaction(async (client) => {
+      const result = await client.query<{
+        candidate_id: string;
+        fingerprint_value: string;
+        proposed_severity: string;
+        category: string;
+        path: string;
+        start_line: number;
+        end_line: number;
+        title: string;
+        claim: string;
+        explanation: string;
+        attempt_id: string | null;
+        status: string | null;
+        decision: string | null;
+        reasons: string[] | null;
+        confidence: string | null;
+        severity: string | null;
+        failure: string | null;
+      }>(
+        `SELECT c.id AS candidate_id, c.fingerprint_value, c.proposed_severity,
+                c.category, c.path, c.start_line, c.end_line,
+                c.title, c.claim, c.explanation,
+                v.id AS attempt_id, v.status, v.decision, v.reasons,
+                v.confidence, v.severity, v.failure
+           FROM candidate_findings c
+           LEFT JOIN LATERAL (
+             SELECT a.id, a.status, a.decision, a.reasons, a.confidence,
+                    a.severity, a.failure
+               FROM verification_attempts a
+              WHERE a.candidate_finding_id = c.id
+              ORDER BY a.attempt DESC
+              LIMIT 1
+           ) v ON TRUE
+          WHERE c.review_run_id = $1
+          ORDER BY c.fingerprint_value`,
+        [reviewRunId],
+      );
+
+      return result.rows.map((row) => ({
+        candidateId: row.candidate_id,
+        fingerprintValue: row.fingerprint_value,
+        proposedSeverity: row.proposed_severity,
+        category: row.category,
+        path: row.path,
+        startLine: row.start_line,
+        endLine: row.end_line,
+        title: row.title,
+        claim: row.claim,
+        explanation: row.explanation,
+        attemptId: row.attempt_id,
+        status: row.status,
+        decision: row.decision,
+        reasons: row.reasons ?? [],
+        confidence: row.confidence === null ? null : Number(row.confidence),
+        severity: row.severity,
+        failure: row.failure,
+      }));
+    });
   }
 
   /**
@@ -210,9 +381,25 @@ export class VerificationStore {
    * Refuses to promote anything the attempt did not verify. Belt and braces
    * with the kernel's promotion gate: this is the last place the guarantee can
    * be enforced, and it is the one an ad-hoc script would go through.
+   *
+   * The finding is written `verified`, not `published`. See the module header:
+   * being real and being worth interrupting someone about are different
+   * decisions, and only the first has been made here.
    */
-  public async promote(record: PromotionRecord): Promise<{ id: string }> {
-    return this.#inTransaction(async (client) => {
+  public async promote(
+    record: PromotionRecord,
+    client?: PgClient,
+  ): Promise<{ id: string }> {
+    return client === undefined
+      ? this.#inTransaction((owned) => this.#promote(record, owned))
+      : this.#promote(record, client);
+  }
+
+  async #promote(
+    record: PromotionRecord,
+    client: PgClient,
+  ): Promise<{ id: string }> {
+    {
       const attempt = await client.query<{ decision: string | null }>(
         "SELECT decision FROM verification_attempts WHERE id = $1",
         [record.verificationAttemptId],
@@ -234,7 +421,7 @@ export class VerificationStore {
            confidence_score, confidence_level,
            path, start_line, end_line, fingerprint_value, state,
            verification_attempt_id, created_at, updated_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'published',$16,$17,$17)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,'verified',$16,$17,$17)
          ON CONFLICT (review_run_id, fingerprint_value)
            DO UPDATE SET updated_at = review_findings.updated_at
          RETURNING id`,
@@ -266,7 +453,7 @@ export class VerificationStore {
       if (id === undefined)
         throw new Error("promotion did not return a finding");
       return { id };
-    });
+    }
   }
 
   async #inTransaction<T>(run: (client: PgClient) => Promise<T>): Promise<T> {

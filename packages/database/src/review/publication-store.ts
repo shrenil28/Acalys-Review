@@ -506,5 +506,60 @@ export async function findLifecycleViolations(
     );
   }
 
+  // A comment published under a decision that withheld it.
+  //
+  // Unreachable through SQL — a withheld decision's `publishable_id` is NULL
+  // and a foreign key cannot reference NULL — which is exactly why the query
+  // exists: it proves the generated column and its unique index are still
+  // there, and would catch a migration that replaced them with a plain `id`
+  // reference.
+  const withheldButPublished = await pool.query<{ logical_key: string }>(
+    `SELECT p.logical_key
+       FROM publication_intents p
+       JOIN publication_decisions d ON d.id = p.publication_decision_id
+      WHERE d.decision <> 'publish'`,
+  );
+  for (const row of withheldButPublished.rows) {
+    violations.push(
+      `publication ${row.logical_key} was authorized by a decision that withheld it`,
+    );
+  }
+
+  // A comment citing a decision about a *different* finding.
+  //
+  // The pair has to agree, or the authorization is a rubber stamp: any
+  // `publish` decision anywhere in the run would license any comment.
+  const mismatched = await pool.query<{ logical_key: string }>(
+    `SELECT p.logical_key
+       FROM publication_intents p
+       JOIN publication_decisions d ON d.id = p.publication_decision_id
+      WHERE p.review_finding_id IS DISTINCT FROM d.review_finding_id`,
+  );
+  for (const row of mismatched.rows) {
+    violations.push(
+      `publication ${row.logical_key} cites a decision about a different finding`,
+    );
+  }
+
+  // A promoted finding that policy never considered.
+  //
+  // Once a run is `publishing`, every finding it promoted must have been
+  // decided — published or withheld. A finding nobody decided about is one the
+  // policy silently skipped, and the symptom is a real defect that never
+  // reaches anyone with no record of the omission.
+  const undecided = await pool.query<{ id: string }>(
+    `SELECT f.id FROM review_findings f
+       JOIN review_runs r ON r.id = f.review_run_id
+      WHERE r.state IN ('publishing', 'completed')
+        AND NOT EXISTS (
+          SELECT 1 FROM publication_decisions d WHERE d.review_finding_id = f.id
+        )`,
+  );
+  for (const row of undecided.rows) {
+    violations.push(
+      `review finding ${row.id} reached publishing with no publication decision`,
+    );
+  }
+
   return violations;
 }

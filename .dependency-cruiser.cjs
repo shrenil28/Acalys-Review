@@ -150,6 +150,34 @@ module.exports = {
         pathNot: "^packages/providers/$1/",
       },
     },
+    // ── Enforcement is not attention ────────────────────────────────────────
+    //
+    // A verified finding branches into two independent surfaces: publication
+    // policy decides whether to interrupt a developer, pre-merge policy decides
+    // whether to stop a merge. All the combinations are legitimate, including
+    // "not commented, still blocking" — a finding withheld because the comment
+    // budget was spent must still fail the merge check.
+    //
+    // That only holds while neither module can see the other. Written as a
+    // dependency rule rather than a comment because the coupling would arrive
+    // as a convenience: `evaluatePreMerge(findings, plan)` looks harmless, and
+    // from then on a rendering limit decides merges.
+    {
+      name: "no-premerge-publication-coupling",
+      severity: "error",
+      comment:
+        "Pre-merge enforcement must not depend on publication policy. If it could read a publication decision, `published == merge_blocking` becomes expressible — and a finding withheld by a comment budget would silently stop blocking a merge.",
+      from: { path: "^packages/review-engine/src/premerge/" },
+      to: { path: "^packages/review-engine/src/publication/" },
+    },
+    {
+      name: "no-publication-premerge-coupling",
+      severity: "error",
+      comment:
+        "And the other direction: publication policy must not consult merge enforcement. Deciding what to comment on because of what blocks a merge collapses the same two questions from the opposite side.",
+      from: { path: "^packages/review-engine/src/publication/" },
+      to: { path: "^packages/review-engine/src/premerge/" },
+    },
     {
       name: "api-client-must-not-import-internal",
       severity: "error",
