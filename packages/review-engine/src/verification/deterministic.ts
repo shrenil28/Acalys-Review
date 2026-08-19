@@ -33,6 +33,7 @@
 import ts from "typescript";
 
 import { resolveCallProduct } from "./binding.js";
+import { verifyAsyncCallbackContract } from "./callback.js";
 import { verifyConditionValue } from "./condition.js";
 import { verifyExceptionFlow } from "./exception.js";
 import { verifySignatureCompatibility } from "./signature.js";
@@ -281,6 +282,18 @@ export function verifyDeterministically(
   // is unsettleable whether or not the planner supplied the file, and reporting
   // it as a context gap would send someone to fix a planner that is working.
   const competence = assessCompetence(input);
+
+  if (
+    competence.kind === "supported" &&
+    competence.capability === "async_callback_contract"
+  ) {
+    const attempt = verifyAsyncCallbackContract(input, context);
+    if (attempt.status === "completed") {
+      assertReasonsSupport(attempt.decision, attempt.reasons);
+      assertReasonForCapability("async_callback_contract", attempt.reasons);
+    }
+    return attempt;
+  }
 
   if (
     competence.kind === "supported" &&

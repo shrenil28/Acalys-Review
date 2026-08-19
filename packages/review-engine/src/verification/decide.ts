@@ -116,6 +116,25 @@ export const VERIFICATION_REASONS = [
    * the permanent right answer, not a gap to close.
    */
   "intent_not_establishable",
+
+  // ── async callback contract ──────────────────────────────────────────
+  /** The receiver drops the callback's promise and the caller proceeds. */
+  "callback_result_discarded_by_receiver",
+  /** The receiver accepts a promise back, so it can wait for the callback. */
+  "receiver_awaits_callback_result",
+  /** The callback is synchronous; there is no promise to drop. */
+  "callback_returns_no_promise",
+  /** The receiver's declared callback contract could not be read. */
+  "receiver_contract_unavailable",
+  /**
+   * The promise is dropped, and nothing establishes that anything depended on
+   * it completing.
+   *
+   * The second half of the proposition, kept separate from the first. An
+   * ignored promise is a language fact; telemetry nobody waits for is not a
+   * defect, and verifying on the language fact alone would publish it.
+   */
+  "completion_relevance_unestablished",
   // Independent context and the supplied evidence disagree. Distinct from
   // insufficiency: something *is* known, and what is known conflicts. Folding
   // it into `insufficient_evidence` would hide the most interesting signal a
@@ -158,6 +177,12 @@ export const REASON_SUPPORTS: Readonly<
   suppressed_failure_reported_as_success: "verified",
   failure_suppression_is_contracted: "rejected",
   intent_not_establishable: "inconclusive",
+
+  callback_result_discarded_by_receiver: "verified",
+  receiver_awaits_callback_result: "rejected",
+  callback_returns_no_promise: "rejected",
+  receiver_contract_unavailable: "inconclusive",
+  completion_relevance_unestablished: "inconclusive",
   conflicting_independent_evidence: "inconclusive",
 };
 

@@ -7,8 +7,9 @@ import { ANALYZER_CORPUS, evaluateFunnel } from "../src/eval/index.js";
  *
  * The analyzer dashboard reports recall 1.0 and precision 1.0. Running the same
  * corpus through verification, promotion and policy reports **published recall
- * 0.7** — three of ten real defects the analyzer found still never reach a
- * developer, because the verifier has no procedure for their mechanism.
+ * 0.8** — two of ten real defects the analyzer found still never reach a
+ * developer, and both are silent catches whose intent the repository does not
+ * record.
  *
  * Neither number is wrong. They measure different systems, and only the second
  * is the product. This file exists so the difference cannot quietly grow, and
@@ -153,7 +154,7 @@ describe("The funnel baseline", () => {
   });
 
   it("attributes every lost defect to exactly one stage", async () => {
-    // `publishedRecall = 0.7` is equally consistent with a planner that fetched
+    // `publishedRecall = 0.8` is equally consistent with a planner that fetched
     // nothing, an analyzer that saw nothing, a verifier that refused, a verifier
     // that could not tell, an outage, and a policy that withheld. Six fixes,
     // three owners. The decomposition is what makes the number actionable.
@@ -173,11 +174,12 @@ describe("The funnel baseline", () => {
     expect(report.losses).toEqual({
       not_proposed: 0,
       verifier_refuted: 0,
-      // 5 → 4 → 3. Signature took one, condition-value took another. The
-      // remaining three are one concurrency claim — an async callback handed to
-      // `forEach`, which is a callback-contract proposition and deliberately
-      // NOT this condition capability — and two exception-flow claims.
-      verifier_abstained: 3,
+      // 5 → 4 → 3 → 2. Signature, condition-value and now the async callback
+      // contract each took one. The remaining two are both exception-flow, and
+      // both may be permanent: a `catch {}` in a function that does nothing
+      // afterwards is best-effort teardown and a forgotten handler at the same
+      // time, and the repository does not say which.
+      verifier_abstained: 2,
       verification_unavailable: 0,
       policy_withheld: 0,
     });
@@ -212,10 +214,10 @@ describe("The funnel baseline", () => {
     //
     // What each number is currently saying:
     //
-    //     published recall 0.7     the verifier's reach, not the analyzer's
-    //                              accuracy. Three defects sit at
-    //                              `inconclusive`: one concurrency claim and
-    //                              two exception-flow claims.
+    //     published recall 0.8     two defects sit at `inconclusive`, both
+    //                              silent catches. Unlike every earlier
+    //                              abstention, these may be permanent rather
+    //                              than a capability yet to be built.
     //     published precision 1.0  every published finding is real, against an
     //                              analyzer precision of 10/11 — verification
     //                              now buys precision instead of costing it.
@@ -235,17 +237,16 @@ describe("The funnel baseline", () => {
       publishedPrecision: report.publishedPrecision,
     }).toEqual({
       candidates: 10,
-      verified: 7,
+      verified: 8,
       rejected: 0,
-      inconclusive: 3,
-      promoted: 7,
-      published: 7,
-      // 0.6 → 0.7, and again attributable to exactly one capability:
-      // `promise-as-condition` moved from `inconclusive` to `verified`, and no
-      // other journey changed. In particular `async-callback-in-foreach` did
-      // NOT move — if it had, the condition capability would have grown into
-      // "control flow" and stopped knowing what it was checking.
-      publishedRecall: 0.7,
+      inconclusive: 2,
+      promoted: 8,
+      published: 8,
+      // 0.7 → 0.8, attributable to the async callback contract capability:
+      // `async-callback-in-foreach` moved from `inconclusive` to `verified`,
+      // and no other journey changed. The two catch cases in particular did
+      // not — if they had, the capability would have escaped its boundary.
+      publishedRecall: 0.8,
       // Every published finding is real, and so is every candidate: the
       // analyzer's one false positive is gone at source. The verifier's
       // ability to stop it is preserved as a historical replay challenge.

@@ -420,6 +420,104 @@ describe("Every reason code is reachable", () => {
       ]),
     );
 
+    // The callback capability's five reasons, each from a real adjudication.
+    const callback = (
+      lines: readonly string[],
+      line: number,
+      statement = "`forEach` discards the promise its async callback returns.",
+    ): VerificationAttempt =>
+      verify(
+        { "src/loop.ts": lines.join("\n") },
+        {
+          claim: {
+            statement,
+            steps: ["`forEach` ignores its callback's return value"],
+            trigger: "the iteration runs",
+            consequence: "the caller proceeds before the work finishes",
+          },
+          location: { path: "src/loop.ts", startLine: line, endLine: line },
+        },
+      );
+
+    const SAVE =
+      "async function save(item: number): Promise<void> {\n  return;\n}";
+
+    // discarded by the receiver, and something proceeds afterwards
+    record(
+      callback(
+        [
+          SAVE,
+          "export function run(items: number[]): void {",
+          "  items.forEach(async (item) => {",
+          "    await save(item);",
+          "  });",
+          "  done();",
+          "}",
+          "function done(): void {}",
+        ],
+        5,
+      ),
+    );
+    // the receiver accepts a promise back
+    record(
+      callback(
+        [
+          SAVE,
+          "interface Queue {",
+          "  forEach(cb: (item: number) => Promise<void>): Promise<void>;",
+          "}",
+          "export async function run(q: Queue): Promise<void> {",
+          "  await q.forEach(async (item) => {",
+          "    await save(item);",
+          "  });",
+          "}",
+        ],
+        8,
+      ),
+    );
+    // a synchronous callback: nothing to drop
+    record(
+      callback(
+        [
+          "function save(item: number): void {}",
+          "export function run(items: number[]): void {",
+          "  items.forEach((item) => {",
+          "    save(item);",
+          "  });",
+          "}",
+        ],
+        3,
+      ),
+    );
+    // the receiver's contract cannot be read
+    record(
+      callback(
+        [
+          SAVE,
+          "export function run(x: { each(cb: unknown): unknown }): void {",
+          "  x.each(async (item: number) => {",
+          "    await save(item);",
+          "  });",
+          "}",
+        ],
+        5,
+      ),
+    );
+    // dropped, but nothing establishes that completion mattered
+    record(
+      callback(
+        [
+          SAVE,
+          "export async function run(items: number[]): Promise<void> {",
+          "  items.forEach(async (item) => {",
+          "    await save(item);",
+          "  });",
+          "}",
+        ],
+        5,
+      ),
+    );
+
     // `not_caused_by_change` is declared and this verifier cannot yet produce
     // it: the counterfactual is decided in the analyzer, and re-deciding it
     // here would need change data the verifier is not given. Named explicitly

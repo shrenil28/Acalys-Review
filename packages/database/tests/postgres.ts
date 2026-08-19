@@ -25,12 +25,22 @@
 
 import { execFileSync, execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 import pg from "pg";
 
 const run = promisify(execFile);
+
+/**
+ * Identifies this process's containers.
+ *
+ * Distinct per run, so `acalys.run!=RUN_ID` selects exactly the resources an
+ * earlier run abandoned — which is the set stale reaping should target, and
+ * nothing wider.
+ */
+const RUN_ID = randomUUID();
 
 const IMAGE = "postgres:16-alpine";
 const PASSWORD = "acalys-test";
@@ -327,6 +337,16 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     "acalys.test=true",
     "--label",
     `acalys.suite=${label}`,
+    // Run attribution, so stale reaping can target resources this machine's
+    // EARLIER runs left behind without touching the run in progress.
+    //
+    // The rule this enforces: test infrastructure may delete only what it can
+    // positively attribute to an Acalys test run. "Dangling" is Docker's
+    // ownership concept, not ours — a developer's stopped compose database is
+    // dangling, and a sweep that reclaims disk by deleting what it does not
+    // recognise is a hazard rather than a cleanup.
+    "--label",
+    `acalys.run=${RUN_ID}`,
     "-e",
     `POSTGRES_PASSWORD=${PASSWORD}`,
     "-e",

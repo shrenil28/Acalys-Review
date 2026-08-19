@@ -100,6 +100,15 @@ export const VERIFICATION_CAPABILITIES = [
    * syntax; the defect is a consequence.
    */
   "exception_flow",
+  /**
+   * Whether the API receiving an async callback drops the promise it returns,
+   * and whether anything depended on that work finishing.
+   *
+   * Separate from `async_value_use` because the disputed fact is about the
+   * RECEIVER's contract, not the callee's. `items.forEach(async …)` and
+   * `await queue.forEach(async …)` are the same syntax with opposite verdicts.
+   */
+  "async_callback_contract",
 ] as const;
 
 export type VerificationCapability = (typeof VERIFICATION_CAPABILITIES)[number];
@@ -151,6 +160,14 @@ export type CompetenceAssessment =
 export const REASONS_BY_CAPABILITY: Readonly<
   Record<VerificationCapability, readonly VerificationReason[]>
 > = {
+  async_callback_contract: [
+    "callback_result_discarded_by_receiver",
+    "receiver_awaits_callback_result",
+    "callback_returns_no_promise",
+    "receiver_contract_unavailable",
+    "completion_relevance_unestablished",
+    "context_incomplete",
+  ],
   exception_flow: [
     "suppressed_failure_reported_as_success",
     "failure_suppression_is_contracted",
@@ -270,6 +287,7 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
       "signature_compatibility",
       "condition_value_semantics",
       "exception_flow",
+      "async_callback_contract",
     ],
   },
   {
@@ -329,6 +347,29 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
       /\bbreaks? (?:existing )?(?:callers|consumers)\b/i,
     ],
     dominates: [],
+  },
+  {
+    id: "async_callback_contract",
+    capability: "async_callback_contract",
+    declines: undefined,
+    // The analyzer's phrasing: "`forEach` discards the promise its async
+    // callback returns." Matches on the RECEIVER relationship rather than on
+    // the word `promise`, which every async claim contains.
+    // Keyed on the RECEIVER relationship, not on the word "promise".
+    //
+    // The first draft matched `/\bdiscards the promise\b/`, which a plain
+    // floating-promise claim legitimately says in its own steps — "the
+    // statement discards the promise". That claim was then routed here, found
+    // no async callback, and came back REJECTED: a true defect refuted by a
+    // capability it was never about. The over-match cost more than the
+    // under-match would have.
+    patterns: [
+      /\basync callback\b/i,
+      /\bcallback(?:'s)? (?:return|result)\b/i,
+      /\bdiscards the promise its\b/i,
+    ],
+    // Mentions a promise by construction, so it overlaps the async matcher.
+    dominates: ["async_value_use"],
   },
   {
     id: "exception_flow",

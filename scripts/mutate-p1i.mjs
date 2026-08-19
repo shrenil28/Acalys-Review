@@ -207,13 +207,15 @@ const MUTATIONS = [
   },
   {
     id: 24,
-    name: "external semantics dominates nothing",
+    // Aimed at the mechanism rather than the data. The earlier version matched
+    // the external-semantics `dominates` array literally and went stale on
+    // every capability added — three times — reporting INVALID when the
+    // property was in fact untested. A mutation whose pattern rots is a
+    // mutation that quietly stops being evidence.
+    name: "declared dominance is ignored",
     file: "packages/review-engine/src/verification/competence.ts",
-    find:
-      '    dominates: [\n      "async_value_use",\n' +
-      '      "signature_compatibility",\n      "condition_value_semantics",\n' +
-      '      "exception_flow",\n    ],',
-    replace: "    dominates: [],",
+    find: "  const dominated = new Set(matched.flatMap((matcher) => matcher.dominates));",
+    replace: "  const dominated = new Set<string>();",
     suite: "packages/review-engine/tests/competence.test.ts",
   },
   {
@@ -354,6 +356,31 @@ const MUTATIONS = [
     find: "        if (ts.isReturnStatement(after) && reportsSuccess(after.expression)) {",
     replace: "        if (ts.isReturnStatement(after)) {",
     suite: "packages/review-engine/tests/exception.test.ts",
+  },
+  {
+    id: 41,
+    name: "the receiver is identified by method name instead of binding",
+    file: "packages/review-engine/src/verification/callback.ts",
+    find: '  if (contract.kind === "consumes" || contract.kind === "propagates") {',
+    replace: "  if (false) {",
+    suite: "packages/review-engine/tests/callback.test.ts",
+  },
+  {
+    id: 42,
+    name: "an ignored callback promise alone proves the defect",
+    file: "packages/review-engine/src/verification/callback.ts",
+    find: "  if (!proceedsAfterwards(call)) {",
+    replace: "  if (false) {",
+    suite: "packages/review-engine/tests/callback.test.ts",
+  },
+  {
+    id: 43,
+    name: "an unreadable receiver contract is assumed to drop the promise",
+    file: "packages/review-engine/src/verification/callback.ts",
+    find: '    return decide("inconclusive", ["receiver_contract_unavailable"], 0.2);\n  }\n  if (contract.kind === "consumes"',
+    replace:
+      '    return decide("verified", ["callback_result_discarded_by_receiver"], 0.2);\n  }\n  if (contract.kind === "consumes"',
+    suite: "packages/review-engine/tests/callback.test.ts",
   },
   {
     id: 17,

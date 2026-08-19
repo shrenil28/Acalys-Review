@@ -5,6 +5,8 @@ import fc from "fast-check";
 import {
   CLAIM_MATCHERS,
   REASONS_BY_CAPABILITY,
+  VERIFICATION_CAPABILITIES,
+  type VerificationCapability,
   assertReasonForCapability,
   assessCompetence,
 } from "../src/index.js";
@@ -225,6 +227,65 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
       ),
       { numRuns: 25 },
     );
+  });
+
+  it("property: every declared capability is reachable, and reachable alone", () => {
+    // ── The conformance the router bug needed ─────────────────────────────
+    //
+    // The exception capability was written, tested directly, and correct — and
+    // every catch claim came back `ambiguous_claim_target`, because a catch-all
+    // registry entry still carried the same patterns. A capability that cannot
+    // be routed to does not exist, and its own unit tests will not notice
+    // because they call it directly.
+    //
+    // So each declared capability must have a canonical claim that selects
+    // exactly it. Exhaustiveness is asserted against the capability list rather
+    // than the fixture list, so adding a capability without a fixture fails
+    // here instead of shipping unreachable.
+    // Statement AND steps, as the analyzers actually emit them. A fixture with
+    // empty steps would have passed while the real claim was misrouted: the
+    // floating-promise claim's own steps say "the statement discards the
+    // promise", which an early callback matcher caught — routing a true defect
+    // to a capability it was never about, where it came back REJECTED.
+    const CANONICAL: Readonly<
+      Record<VerificationCapability, readonly [string, readonly string[]]>
+    > = {
+      async_value_use: [
+        "The promise returned by `save()` is discarded.",
+        ["`save` is asynchronous", "the statement discards the promise"],
+      ],
+      condition_value_semantics: [
+        "`isReady()` returns a promise and is used directly as a condition.",
+        ["a Promise object is always truthy, whatever it later resolves to"],
+      ],
+      signature_compatibility: [
+        "`send()` is called without `b`, which this change made required.",
+        ["the declaration gained a required parameter"],
+      ],
+      exception_flow: [
+        "This `catch` discards the error and does nothing.",
+        ["the guarded operation can throw", "the failure is not observed"],
+      ],
+      async_callback_contract: [
+        "`forEach` discards the promise its async callback returns.",
+        ["`forEach` ignores its callback's return value"],
+      ],
+    };
+
+    for (const capability of VERIFICATION_CAPABILITIES) {
+      const fixture = CANONICAL[capability];
+      expect(fixture, `no canonical claim for ${capability}`).toBeDefined();
+      expect(assessCompetence(claim(...fixture)), capability).toEqual({
+        kind: "supported",
+        capability,
+      });
+    }
+
+    // And the reverse: a claim no capability covers matches nothing at all,
+    // rather than matching several and being reported as ambiguous.
+    expect(
+      assessCompetence(claim("The widget frobnicates during reticulation.")),
+    ).toEqual({ kind: "unsupported", reason: "unsupported_claim_family" });
   });
 
   it("keeps every capability's reason set inside the global vocabulary", () => {

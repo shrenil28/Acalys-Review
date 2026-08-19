@@ -252,6 +252,140 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
       "identical shape, synchronous declaration — teaching the condition mechanism against only the positive half would confirm this one too",
     pairedWith: "promise-in-condition-real",
   },
+  // ── async callback contract ────────────────────────────────────────────
+  //
+  // The proposition is about the RECEIVER, not the callback. The first two are
+  // the same syntax with opposite verdicts, which is what a rule keyed on the
+  // method name cannot do.
+  {
+    id: "callback-dropped-by-array-foreach",
+    gold: "should_verify",
+    files: {
+      "src/loop.ts": [
+        "async function save(item: number): Promise<void> {",
+        "  return;",
+        "}",
+        "export function run(items: number[]): void {",
+        "  items.forEach(async (item) => {",
+        "    await save(item);",
+        "  });",
+        "  markComplete();",
+        "}",
+        "function markComplete(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`forEach` discards the promise its async callback returns.",
+      "src/loop.ts",
+      5,
+    ),
+    because:
+      "`Array.forEach` declares its callback as returning `void`, so the promise is dropped by contract — and the next statement proceeds as though the saves finished",
+    pairedWith: "callback-awaited-by-custom-receiver",
+  },
+  {
+    id: "callback-awaited-by-custom-receiver",
+    gold: "should_reject",
+    files: {
+      "src/loop.ts": [
+        "async function save(item: number): Promise<void> {",
+        "  return;",
+        "}",
+        "interface Queue {",
+        "  forEach(callback: (item: number) => Promise<void>): Promise<void>;",
+        "}",
+        "export async function run(queue: Queue): Promise<void> {",
+        "  await queue.forEach(async (item) => {",
+        "    await save(item);",
+        "  });",
+        "  markComplete();",
+        "}",
+        "function markComplete(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`forEach` discards the promise its async callback returns.",
+      "src/loop.ts",
+      8,
+    ),
+    because:
+      "identical syntax, identical method name, and this receiver accepts a promise back — the case a name-keyed rule gets wrong, silently, inside someone's own abstraction",
+    pairedWith: "callback-dropped-by-array-foreach",
+  },
+  {
+    id: "callback-propagated-by-map",
+    gold: "should_reject",
+    files: {
+      "src/loop.ts": [
+        "async function save(item: number): Promise<void> {",
+        "  return;",
+        "}",
+        "export async function run(items: number[]): Promise<void> {",
+        "  await Promise.all(",
+        "    items.map(async (item) => {",
+        "      await save(item);",
+        "    }),",
+        "  );",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`map` discards the promise its async callback returns.",
+      "src/loop.ts",
+      6,
+    ),
+    because:
+      "nothing is dropped: `map` hands the promises back and the caller awaits them — distinguishing this from `forEach` needs the declared contract, not the shape",
+  },
+  {
+    id: "callback-consumer-unresolvable",
+    gold: "should_abstain",
+    files: {
+      "src/loop.ts": [
+        "async function save(item: number): Promise<void> {",
+        "  return;",
+        "}",
+        "export function run(external: { each(cb: unknown): unknown }): void {",
+        "  external.each(async (item: number) => {",
+        "    await save(item);",
+        "  });",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`each` discards the promise its async callback returns.",
+      "src/loop.ts",
+      5,
+    ),
+    because:
+      "the receiver's callback parameter is untyped, so its contract is genuinely unavailable — and assuming it drops the promise would be the name-keyed mistake by another route",
+  },
+  {
+    id: "callback-synchronous",
+    gold: "should_reject",
+    files: {
+      "src/loop.ts": [
+        "function save(item: number): void {",
+        "  return;",
+        "}",
+        "export function run(items: number[]): void {",
+        "  items.forEach((item) => {",
+        "    save(item);",
+        "  });",
+        "  markComplete();",
+        "}",
+        "function markComplete(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`forEach` discards the promise its async callback returns.",
+      "src/loop.ts",
+      5,
+    ),
+    because:
+      "there is no promise to drop; the receiver contract is irrelevant when the callback is synchronous",
+  },
+
   // ── exception flow: the asymmetry, in fixtures ─────────────────────────
   //
   // Neither direction gets a default. Refuting needs affirmative evidence that

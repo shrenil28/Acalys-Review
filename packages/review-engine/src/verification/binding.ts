@@ -108,6 +108,61 @@ export type CalleeBinding =
 const LIB = "lib.d.ts";
 
 /**
+ * A minimal standard library, declaring the contracts these capabilities need
+ * to read.
+ *
+ * Not a convenience. Without it `items.forEach(async …)` cannot be bound at
+ * all, and the async-callback capability abstains on every real instance — so
+ * the only way to settle those claims would be to key on the method NAME, which
+ * gets `await queue.forEach(async …)` wrong in someone's own abstraction.
+ *
+ * What is written here is the genuine declared contract: `Array.forEach` really
+ * does declare its callback as returning `void`, which is precisely why the
+ * promise is dropped. The verifier still binds the receiver through the checker
+ * and reads whatever declaration it lands on; this only makes the built-in one
+ * available to land on.
+ *
+ * Deliberately small. The full `lib.dom.d.ts` would dominate the cost of every
+ * verification, and nothing here needs it — the facts in dispute are about
+ * user code and a handful of library contracts.
+ */
+const LIB_SOURCE = `
+interface Boolean {}
+interface Number {}
+interface String { length: number; }
+interface Object {}
+interface Function {}
+interface IArguments {}
+interface RegExp {}
+interface PromiseLike<T> {
+  then<R>(onfulfilled?: (value: T) => R | PromiseLike<R>): PromiseLike<R>;
+}
+interface Promise<T> {
+  then<R>(onfulfilled?: (value: T) => R | PromiseLike<R>): Promise<R>;
+  catch(onrejected?: (reason: unknown) => unknown): Promise<T>;
+  finally(onfinally?: () => void): Promise<T>;
+}
+interface Array<T> {
+  length: number;
+  [n: number]: T;
+  forEach(callbackfn: (value: T, index: number, array: T[]) => void): void;
+  map<U>(callbackfn: (value: T, index: number, array: T[]) => U): U[];
+  filter(predicate: (value: T, index: number, array: T[]) => unknown): T[];
+}
+interface ReadonlyArray<T> {
+  length: number;
+  readonly [n: number]: T;
+  forEach(callbackfn: (value: T, index: number, array: readonly T[]) => void): void;
+}
+declare var Promise: {
+  all<T>(values: readonly (T | PromiseLike<T>)[]): Promise<T[]>;
+  resolve<T>(value: T): Promise<T>;
+  resolve(): Promise<void>;
+  reject(reason?: unknown): Promise<never>;
+};
+`;
+
+/**
  * A program over exactly the verifier's own context.
  *
  * Exported so the signature capability can reuse it. Sharing the *program*
@@ -142,9 +197,10 @@ export function programOf(
 
   const host: ts.CompilerHost = {
     fileExists: (fileName) => files.has(fileName) || fileName === LIB,
-    readFile: (fileName) => files.get(fileName),
+    readFile: (fileName) =>
+      fileName === LIB ? LIB_SOURCE : files.get(fileName),
     getSourceFile: (fileName) => {
-      const content = files.get(fileName);
+      const content = fileName === LIB ? LIB_SOURCE : files.get(fileName);
       if (content === undefined) return undefined;
       return ts.createSourceFile(
         fileName,
@@ -154,10 +210,6 @@ export function programOf(
         fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
       );
     },
-    // No real lib: the context holds application sources, and pulling the full
-    // standard library in would dominate the cost of every verification. The
-    // `Promise` check below is therefore structural rather than an assignability
-    // test against the real `PromiseLike`.
     getDefaultLibFileName: () => LIB,
     writeFile: () => undefined,
     getCurrentDirectory: () => "/",
@@ -220,7 +272,7 @@ export function programOf(
 
   function buildProgram(): ts.Program | undefined {
     try {
-      return ts.createProgram([...files.keys()], options, host);
+      return ts.createProgram([LIB, ...files.keys()], options, host);
     } catch {
       return undefined;
     }

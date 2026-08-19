@@ -58,9 +58,8 @@ describe("Verifier capability, on injected challenges", () => {
     // about a POPULATION of callers against an exported declaration, and
     // refuting that needs a closed world the verifier cannot establish —
     // "findReferences returned four" is not "four consumers exist".
-    // Eight: the two catch cases added here — an unknowable teardown and a
-    // catch whose comment says the right words — join the six before them.
-    expect(abstentions).toHaveLength(8);
+    // Nine, with an untyped callback receiver whose contract cannot be read.
+    expect(abstentions).toHaveLength(9);
     expect(abstentions.every((outcome) => outcome.correct)).toBe(true);
   });
 
@@ -76,16 +75,20 @@ describe("Verifier capability, on injected challenges", () => {
     // mechanism work, and the cost of leaving them is exactly the recall this
     // line reports.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
-    // Four of five. The new exception pair discriminates: a suppressed failure
-    // followed by an assertion of success verifies, and a suppression that
-    // supplies a fallback is refuted.
+    // Five of six. The new callback pair discriminates: `items.forEach(async …)`
+    // verifies and `await queue.forEach(async …)` is refuted — the same syntax
+    // and the same method name, separated only by the declared contract.
+    //
+    // The exception pair discriminates too: a suppressed failure followed by an
+    // assertion of success verifies, and a suppression supplying a fallback is
+    // refuted.
     //
     // The fifth is `empty-catch-real` / `empty-catch-unprovable-intent`, and it
     // does NOT discriminate — deliberately. Both are `catch {}` with nothing
     // downstream, and nothing in either repository says which was meant. That
     // is the pair the capability is designed to abstain on.
-    expect(report.pairsTotal).toBe(5);
-    expect(report.pairsDiscriminated).toBe(4);
+    expect(report.pairsTotal).toBe(6);
+    expect(report.pairsDiscriminated).toBe(5);
   });
 
   it("still filters the candidate the analyzer used to produce", () => {
@@ -148,21 +151,19 @@ describe("Verifier capability, on injected challenges", () => {
     // once would leave attribution worse, not better.
     expect(report.matrix).toEqual({
       should_verify: {
-        // 4 → 5: a suppressed failure followed by `return true` verifies,
-        // because the consequence is provable. `empty-catch-real` stays
-        // inconclusive and stays a MISS: nothing downstream asserts success, so
-        // the capability has no affirmative evidence, and relabelling it would
-        // be exactly the goalpost move the corpus exists to prevent.
-        verified: 5,
+        // 5 → 6: `Array.forEach` dropping its callback's promise, with a
+        // statement afterwards that proceeds as though the work finished.
+        // `empty-catch-real` stays inconclusive and stays a MISS.
+        verified: 6,
         rejected: 0,
         inconclusive: 1,
         unavailable: 0,
       },
       should_reject: {
         verified: 0,
-        // 10 → 12: a catch supplying a fallback, and a catch that rethrows.
-        // Both are contracts expressed in code rather than in a comment.
-        rejected: 12,
+        // 12 → 15: a receiver that awaits its callback, `map` propagating the
+        // promises out, and a synchronous callback with nothing to drop.
+        rejected: 15,
         // One: the historical replay. The replay
         // comes back `inconclusive` rather than `rejected` because the
         // verifier's own binding says the callee is synchronous while the
@@ -180,11 +181,10 @@ describe("Verifier capability, on injected challenges", () => {
       should_abstain: {
         verified: 0,
         rejected: 0,
-        // Eight, with the two catch abstentions. For a `catch {}` in a
-        // function that does nothing afterwards, this is the permanent right
-        // answer rather than a gap: best-effort teardown and a forgotten
-        // handler are the same code.
-        inconclusive: 8,
+        // Nine, adding the untyped callback receiver. Assuming an unreadable
+        // receiver drops the promise would be the name-keyed mistake by
+        // another route.
+        inconclusive: 9,
         unavailable: 0,
       },
     });
@@ -194,7 +194,7 @@ describe("Verifier capability, on injected challenges", () => {
     // Fail-closed: an empty matrix satisfies every zero above.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
     expect(report.outcomes).toHaveLength(VERIFIER_CHALLENGES.length);
-    expect(report.outcomes.length).toBeGreaterThanOrEqual(26);
+    expect(report.outcomes.length).toBeGreaterThanOrEqual(31);
     expect(report.provenance).toBe("injected");
     for (const gold of ["should_verify", "should_reject", "should_abstain"]) {
       expect(
