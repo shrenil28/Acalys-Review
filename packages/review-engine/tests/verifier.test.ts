@@ -371,6 +371,55 @@ describe("Every reason code is reachable", () => {
     );
     record(condition("function enabled(): boolean {\n  return false;\n}"));
 
+    // The exception capability's three reasons, from real adjudications.
+    const exception = (lines: readonly string[]): VerificationAttempt =>
+      verify(
+        { "src/commit.ts": lines.join("\n") },
+        {
+          claim: {
+            statement: "This `catch` discards the error and does nothing.",
+            steps: [],
+            trigger: "the guarded operation throws",
+            consequence: "the failure disappears",
+          },
+          location: { path: "src/commit.ts", startLine: 4, endLine: 4 },
+        },
+      );
+
+    record(
+      exception([
+        "export function commit(): boolean {",
+        "  try {",
+        "    write();",
+        "  } catch {}",
+        "  return true;",
+        "}",
+        "function write(): void {}",
+      ]),
+    );
+    record(
+      exception([
+        "export function commit(): void {",
+        "  try {",
+        "    write();",
+        "  } catch (error) {",
+        "    throw error;",
+        "  }",
+        "}",
+        "function write(): void {}",
+      ]),
+    );
+    record(
+      exception([
+        "export function shutdown(): void {",
+        "  try {",
+        "    release();",
+        "  } catch {}",
+        "}",
+        "function release(): void {}",
+      ]),
+    );
+
     // `not_caused_by_change` is declared and this verifier cannot yet produce
     // it: the counterfactual is decided in the analyzer, and re-deciding it
     // here would need change data the verifier is not given. Named explicitly

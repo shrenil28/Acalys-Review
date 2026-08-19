@@ -117,6 +117,41 @@ describe("The funnel baseline", () => {
     expect(empty.tokensPerPublishedFinding).toBeUndefined();
   });
 
+  it("records whether the two sides agreed by different means", async () => {
+    // ── Descriptive, not a score ──────────────────────────────────────────
+    //
+    // The shadowed-parameter false positive survived two structurally
+    // independent components because both searched for a declaration by NAME.
+    // The second agreeing carried no information, and nothing in the report
+    // said so — "two stages concurred" and "two stages called the same broken
+    // helper" looked identical.
+    //
+    // Every verdict now names how each side settled its fact. Zero correlation
+    // today: the analyzer proposes from the symbol graph, and every capability
+    // adjudicates through the checker, its diagnostics, or consequence
+    // analysis.
+    //
+    // Deliberately NOT `independenceScore = 0.73`. Sometimes the compiler is
+    // the authoritative evidence and both sides should use it; a number would
+    // become something to optimize before anyone knows what it means.
+    const report = await evaluateFunnel(ANALYZER_CORPUS);
+
+    expect(report.correlatedDerivations).toBe(0);
+    for (const journey of report.journeys) {
+      expect(journey.derivation?.candidate).toBe(
+        "code_intelligence_symbol_graph",
+      );
+      expect(journey.derivation?.shared).toBeUndefined();
+    }
+
+    // And the channels are actually varied, so "no correlation" is a
+    // measurement rather than a consequence of every capability being the same.
+    const channels = new Set(
+      report.journeys.map((journey) => journey.derivation?.verification),
+    );
+    expect(channels.size).toBeGreaterThanOrEqual(2);
+  });
+
   it("attributes every lost defect to exactly one stage", async () => {
     // `publishedRecall = 0.7` is equally consistent with a planner that fetched
     // nothing, an analyzer that saw nothing, a verifier that refused, a verifier

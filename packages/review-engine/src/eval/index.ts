@@ -17,6 +17,7 @@ export {
   evaluateFunnel,
   runFunnelCase,
   type CandidateJourney,
+  type DecisionDerivation,
   type FunnelReport,
   type LossAttribution,
   type LossStage,

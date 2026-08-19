@@ -101,6 +101,21 @@ export const VERIFICATION_REASONS = [
    * value is already awaited.
    */
   "condition_value_is_not_a_promise",
+
+  // ── exception flow ───────────────────────────────────────────────────
+  /** The failure is suppressed and something downstream reports success. */
+  "suppressed_failure_reported_as_success",
+  /** The suppression is contracted: a rethrow, a fallback, a handled error. */
+  "failure_suppression_is_contracted",
+  /**
+   * Neither direction has affirmative evidence.
+   *
+   * Distinct from `insufficient_evidence`, which says the verifier could not
+   * reach what it needed. This says it looked and the repository genuinely does
+   * not record whether the author meant it — which for some silent catches is
+   * the permanent right answer, not a gap to close.
+   */
+  "intent_not_establishable",
   // Independent context and the supplied evidence disagree. Distinct from
   // insufficiency: something *is* known, and what is known conflicts. Folding
   // it into `insufficient_evidence` would hide the most interesting signal a
@@ -139,6 +154,10 @@ export const REASON_SUPPORTS: Readonly<
 
   condition_branches_on_promise: "verified",
   condition_value_is_not_a_promise: "rejected",
+
+  suppressed_failure_reported_as_success: "verified",
+  failure_suppression_is_contracted: "rejected",
+  intent_not_establishable: "inconclusive",
   conflicting_independent_evidence: "inconclusive",
 };
 

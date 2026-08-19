@@ -71,3 +71,4 @@ export {
   type DerivationMethod,
 } from "./binding.js";
 export { CONDITION_CAPABILITY_ID, verifyConditionValue } from "./condition.js";
+export { EXCEPTION_CAPABILITY_ID, verifyExceptionFlow } from "./exception.js";

@@ -103,12 +103,27 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
     ).toEqual({ kind: "unsupported", reason: "requires_external_semantics" });
   });
 
-  it("declines claim families it has no procedure for", () => {
+  it("declines a claim no matcher recognises", () => {
+    // There is no catch-all entry in the registry. One existed, carrying the
+    // same patterns as the exception-flow matcher, and the result was that
+    // every catch claim matched two entries and came back
+    // `ambiguous_claim_target` — a capability that worked perfectly, behind a
+    // router that would not reach it.
     expect(
-      assessCompetence(
-        claim("This `catch` discards the error and does nothing."),
-      ),
+      assessCompetence(claim("The widget frobnicates during reticulation.")),
     ).toEqual({ kind: "unsupported", reason: "unsupported_claim_family" });
+  });
+
+  it("routes a swallowed-error claim to the exception capability", () => {
+    for (const statement of [
+      "This `catch` discards the error and does nothing.",
+      "This `catch` binds `error` and never uses it.",
+    ]) {
+      expect(assessCompetence(claim(statement)), statement).toEqual({
+        kind: "supported",
+        capability: "exception_flow",
+      });
+    }
   });
 
   it("routes a signature claim to the signature capability", () => {

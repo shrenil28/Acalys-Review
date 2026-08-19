@@ -92,6 +92,14 @@ export const VERIFICATION_CAPABILITIES = [
    * eventually confident about a claim it never checked.
    */
   "condition_value_semantics",
+  /**
+   * Whether a suppressed failure violates a contract or honours one.
+   *
+   * The capability most likely to be wrong if it is decisive, so it is built to
+   * abstain unless one direction has affirmative evidence. `catch {}` is a
+   * syntax; the defect is a consequence.
+   */
+  "exception_flow",
 ] as const;
 
 export type VerificationCapability = (typeof VERIFICATION_CAPABILITIES)[number];
@@ -143,6 +151,13 @@ export type CompetenceAssessment =
 export const REASONS_BY_CAPABILITY: Readonly<
   Record<VerificationCapability, readonly VerificationReason[]>
 > = {
+  exception_flow: [
+    "suppressed_failure_reported_as_success",
+    "failure_suppression_is_contracted",
+    "intent_not_establishable",
+    "conflicting_independent_evidence",
+    "context_incomplete",
+  ],
   condition_value_semantics: [
     "condition_branches_on_promise",
     "condition_value_is_not_a_promise",
@@ -252,9 +267,9 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     // claim about provider semantics.
     dominates: [
       "async_value_use",
-      "other_families",
       "signature_compatibility",
       "condition_value_semantics",
+      "exception_flow",
     ],
   },
   {
@@ -316,13 +331,17 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     dominates: [],
   },
   {
-    id: "other_families",
-    capability: undefined,
-    declines: "unsupported_claim_family",
-    // Recognized only to be declined. Naming them is what makes the gap
-    // diagnosable: `unsupported_claim_family` on a swallowed-error claim is a
-    // capability to build, and the funnel's stage attribution can say so.
-    patterns: [/\bcatch\b/i, /\bdiscards the error\b/i, /\bnever uses it\b/i],
+    id: "exception_flow",
+    capability: "exception_flow",
+    declines: undefined,
+    // The swallowed-error analyzer's phrasings: "This `catch` discards the
+    // error and does nothing." and "This `catch` binds `e` and never uses it."
+    patterns: [
+      /\bcatch\b/i,
+      /\bdiscards the error\b/i,
+      /\bnever uses it\b/i,
+      /\bswallow/i,
+    ],
     dominates: [],
   },
 ];
@@ -352,6 +371,11 @@ export function assessCompetence(
   );
 
   if (matched.length === 0) {
+    // No matcher fired. There is no "declines everything else" entry in the
+    // registry — one existed, carrying the same patterns as the exception-flow
+    // matcher, and the result was that every catch claim matched two entries
+    // and was reported as `ambiguous_claim_target`. A capability that works
+    // perfectly is worth nothing behind a router that will not reach it.
     return { kind: "unsupported", reason: "unsupported_claim_family" };
   }
 

@@ -58,8 +58,9 @@ describe("Verifier capability, on injected challenges", () => {
     // about a POPULATION of callers against an exported declaration, and
     // refuting that needs a closed world the verifier cannot establish —
     // "findReferences returned four" is not "four consumers exist".
-    // Six, with the unresolvable condition callee added.
-    expect(abstentions).toHaveLength(6);
+    // Eight: the two catch cases added here — an unknowable teardown and a
+    // catch whose comment says the right words — join the six before them.
+    expect(abstentions).toHaveLength(8);
     expect(abstentions.every((outcome) => outcome.correct)).toBe(true);
   });
 
@@ -75,11 +76,16 @@ describe("Verifier capability, on injected challenges", () => {
     // mechanism work, and the cost of leaving them is exactly the recall this
     // line reports.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
-    // Three of four. Async, signature and now condition discriminate; the catch
-    // pair abstains on both halves, which is safe and useless, and is the last
-    // named target.
-    expect(report.pairsTotal).toBe(4);
-    expect(report.pairsDiscriminated).toBe(3);
+    // Four of five. The new exception pair discriminates: a suppressed failure
+    // followed by an assertion of success verifies, and a suppression that
+    // supplies a fallback is refuted.
+    //
+    // The fifth is `empty-catch-real` / `empty-catch-unprovable-intent`, and it
+    // does NOT discriminate — deliberately. Both are `catch {}` with nothing
+    // downstream, and nothing in either repository says which was meant. That
+    // is the pair the capability is designed to abstain on.
+    expect(report.pairsTotal).toBe(5);
+    expect(report.pairsDiscriminated).toBe(4);
   });
 
   it("still filters the candidate the analyzer used to produce", () => {
@@ -108,6 +114,24 @@ describe("Verifier capability, on injected challenges", () => {
     expect(replay?.actual).not.toBe("verified");
   });
 
+  it("cannot be talked out of a finding by a comment", () => {
+    // ── The adversarial case, at the capability level ─────────────────────
+    //
+    // `// best effort: intentionally ignored` beside a real suppressed failure.
+    // If a comment could refute the claim, anyone could silence the reviewer by
+    // typing the right words next to a defect — and the corpus already contains
+    // a case that does exactly that.
+    //
+    // Comments can say where to look for a contract. They are not the contract.
+    const report = evaluateChallenges(VERIFIER_CHALLENGES);
+    const commented = report.outcomes.find(
+      (outcome) => outcome.id === "catch-comment-is-not-a-contract",
+    );
+    expect(commented, "the fixture is missing").toBeDefined();
+    expect(commented?.actual).not.toBe("rejected");
+    expect(commented?.correct).toBe(true);
+  });
+
   it("records the committed capability matrix", () => {
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
 
@@ -124,19 +148,21 @@ describe("Verifier capability, on injected challenges", () => {
     // once would leave attribution worse, not better.
     expect(report.matrix).toEqual({
       should_verify: {
-        // 3 → 4: the condition defect now verifies. The one remaining
-        // inconclusive is the empty catch.
-        verified: 4,
+        // 4 → 5: a suppressed failure followed by `return true` verifies,
+        // because the consequence is provable. `empty-catch-real` stays
+        // inconclusive and stays a MISS: nothing downstream asserts success, so
+        // the capability has no affirmative evidence, and relabelling it would
+        // be exactly the goalpost move the corpus exists to prevent.
+        verified: 5,
         rejected: 0,
         inconclusive: 1,
         unavailable: 0,
       },
       should_reject: {
         verified: 0,
-        // 7 → 10: the condition lookalike, the awaited condition and the
-        // shadowed condition callee. The awaited one is the case a
-        // declaration-based check gets wrong — `enabled` really is `async`.
-        rejected: 10,
+        // 10 → 12: a catch supplying a fallback, and a catch that rethrows.
+        // Both are contracts expressed in code rather than in a comment.
+        rejected: 12,
         // One: the historical replay. The replay
         // comes back `inconclusive` rather than `rejected` because the
         // verifier's own binding says the callee is synchronous while the
@@ -154,10 +180,11 @@ describe("Verifier capability, on injected challenges", () => {
       should_abstain: {
         verified: 0,
         rejected: 0,
-        // Six: the two unknowables, the absent location, the unbindable async
-        // callee, the reclassified population claim, and the unbindable
-        // condition callee.
-        inconclusive: 6,
+        // Eight, with the two catch abstentions. For a `catch {}` in a
+        // function that does nothing afterwards, this is the permanent right
+        // answer rather than a gap: best-effort teardown and a forgotten
+        // handler are the same code.
+        inconclusive: 8,
         unavailable: 0,
       },
     });
@@ -167,7 +194,7 @@ describe("Verifier capability, on injected challenges", () => {
     // Fail-closed: an empty matrix satisfies every zero above.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
     expect(report.outcomes).toHaveLength(VERIFIER_CHALLENGES.length);
-    expect(report.outcomes.length).toBeGreaterThanOrEqual(21);
+    expect(report.outcomes.length).toBeGreaterThanOrEqual(26);
     expect(report.provenance).toBe("injected");
     for (const gold of ["should_verify", "should_reject", "should_abstain"]) {
       expect(

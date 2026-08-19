@@ -90,6 +90,17 @@ export function dockerAvailable(): boolean {
  * never counted against it — the failure mode that once had one suite killing
  * another's database.
  */
+let volumeBaseline: ReadonlySet<string> | undefined;
+
+/** Volumes that existed before this process started creating any. */
+async function captureVolumeBaseline(): Promise<void> {
+  if (volumeBaseline !== undefined) return;
+  const listed = await run("docker", ["volume", "ls", "-q"]).catch(() => ({
+    stdout: "",
+  }));
+  volumeBaseline = new Set(listed.stdout.trim().split("\n").filter(Boolean));
+}
+
 export async function assertResourcesReleased(suite: string): Promise<void> {
   const containers = await run("docker", [
     "ps",
@@ -108,8 +119,12 @@ export async function assertResourcesReleased(suite: string): Promise<void> {
   }
 
   // Anonymous volumes are not labelled, so they cannot be attributed to a
-  // suite. Dangling is the closest safe proxy: a volume any container still
-  // uses is not dangling, so a parallel suite's data is never implicated.
+  // suite by name. Attribution is by TIME instead: anything dangling that did
+  // not exist when this process started.
+  //
+  // Not "everything dangling". A developer's local compose database is dangling
+  // whenever its stack is stopped, and failing the suite over it — or worse,
+  // pruning it — would make the harness a hazard on the machine it runs on.
   const dangling = await run("docker", [
     "volume",
     "ls",
@@ -117,7 +132,11 @@ export async function assertResourcesReleased(suite: string): Promise<void> {
     "--filter",
     "dangling=true",
   ]).catch(() => ({ stdout: "" }));
-  const orphaned = dangling.stdout.trim().split("\n").filter(Boolean);
+  const orphaned = dangling.stdout
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .filter((volume) => volumeBaseline?.has(volume) !== true);
 
   if (orphaned.length > 0) {
     throw new Error(
@@ -347,6 +366,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
   // Scoped to this suite's label so parallel vitest files cannot destroy each
   // other's databases: the failure that would cause is a suite whose tables
   // vanish mid-run, which reads as a product bug rather than a harness one.
+  await captureVolumeBaseline();
   await run("docker", [
     "rm",
     "-f",
@@ -355,13 +375,17 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     ...(await staleContainers(label)),
   ]).catch(() => undefined);
 
-  // And anonymous volumes no container references any more.
+  // NOT `docker volume prune`.
   //
-  // Scoped to dangling volumes, which is safe: a volume in use by any container
-  // — including another suite's, running right now — is not dangling and is not
-  // touched. This is the sweep that recovers from runs killed before the
-  // handlers below could fire, which is the case the handlers cannot cover.
-  await run("docker", ["volume", "prune", "-f"]).catch(() => undefined);
+  // That was here, and it was destructive: a developer's local compose database
+  // whose stack happens to be stopped is a dangling volume, and pruning would
+  // delete it. `acalys-local_acalys-postgres-data` sat one command away from
+  // being wiped by running the test suite.
+  //
+  // `rm -f -v` above already removes the anonymous volume belonging to each
+  // reaped container, which closes the leak at its source and touches nothing
+  // else. A sweep that reclaims disk by deleting whatever it does not recognise
+  // is not a cleanup, it is a hazard.
 
   // Removed on an abrupt exit too, not only on a clean `stop()`.
   //

@@ -60,11 +60,50 @@ import {
   DEFAULT_VERIFICATION_POLICY,
   planVerificationContext,
 } from "../verification/plan-context.js";
+import { assessCompetence } from "../verification/competence.js";
 import { toVerificationInput } from "../verification/input.js";
 import { verifyDeterministically } from "../verification/deterministic.js";
 import type { VerificationAttempt } from "../verification/decide.js";
 import type { AnalyzerCase, Bucket } from "./corpus.js";
 import { runCase } from "./run.js";
+
+/**
+ * How each side established the fact that decided the claim.
+ *
+ * Descriptive, and deliberately not a score. The useful question when several
+ * components agree is not *how many agreed* but *did they agree by different
+ * means* — and without this recorded, "three stages concurred" and "three
+ * stages called the same broken helper" are indistinguishable after the fact.
+ *
+ * `shared` is not automatically bad. Sometimes the compiler is the
+ * authoritative evidence and both sides should use it; what matters is that the
+ * eval can tell the two situations apart. Turning this into
+ * `independenceScore = 0.73` would create something to optimize before anyone
+ * knows what it means.
+ */
+export interface DecisionDerivation {
+  /** How the analyzer settled it. */
+  readonly candidate: string;
+  /** How verification settled it. */
+  readonly verification: string;
+  /** Named when both used the same channel; `undefined` when they did not. */
+  readonly shared: string | undefined;
+}
+
+/**
+ * What each capability uses to settle its disputed fact.
+ *
+ * The analyzer proposes every one of these from `@acalys/code-intelligence`'s
+ * symbol graph, so the interesting column is the verifier's.
+ */
+const VERIFICATION_DERIVATION: Readonly<Record<string, string>> = {
+  async_value_use: "typescript_checker",
+  condition_value_semantics: "typescript_checker",
+  signature_compatibility: "typescript_diagnostics",
+  exception_flow: "ast_consequence_analysis",
+};
+
+const CANDIDATE_DERIVATION = "code_intelligence_symbol_graph";
 
 /** One candidate, and everything that happened to it. */
 export interface CandidateJourney {
@@ -82,6 +121,12 @@ export interface CandidateJourney {
   readonly attempt: VerificationAttempt;
   readonly promoted: boolean;
   readonly published: boolean;
+  /**
+   * Whether the two sides reached this verdict by the same route.
+   *
+   * `undefined` when the candidate never reached a capability.
+   */
+  readonly derivation: DecisionDerivation | undefined;
 }
 
 export interface FunnelReport {
@@ -160,6 +205,17 @@ export interface FunnelReport {
   readonly tokensPerPublishedFinding: Ratio;
   readonly analysisTokens: number;
   readonly verificationTokens: number;
+
+  /**
+   * Verdicts where analyzer and verifier used the same decisive channel.
+   *
+   * Watched, not minimized. It is how the shadowed-parameter false positive
+   * survived two independent components: both searched for a declaration by
+   * name, so the second one agreeing carried no information. Recording it means
+   * a future recurrence is diagnosable as "both depended on X" rather than
+   * "both happened to be wrong".
+   */
+  readonly correlatedDerivations: number;
 }
 
 /**
@@ -255,6 +311,23 @@ export async function runFunnelCase(testCase: AnalyzerCase): Promise<{
 
     const attempt = verifyDeterministically(input, context);
 
+    const competence = assessCompetence(input);
+    const verification =
+      competence.kind === "supported"
+        ? (VERIFICATION_DERIVATION[competence.capability] ?? "unknown")
+        : "none";
+    const derivation: DecisionDerivation = {
+      candidate: CANDIDATE_DERIVATION,
+      verification,
+      // Named rather than flagged: "both used the TypeScript checker" is a
+      // different situation from "both used a name search", and only the label
+      // survives being read six months later.
+      shared:
+        verification === CANDIDATE_DERIVATION
+          ? CANDIDATE_DERIVATION
+          : undefined,
+    };
+
     candidates.push({
       candidateId,
       fingerprint: finding.identityHint,
@@ -269,6 +342,7 @@ export async function runFunnelCase(testCase: AnalyzerCase): Promise<{
       family: finding.family,
       wanted: testCase.expect.includes(finding.family),
       attempt,
+      derivation,
     });
   }
 
@@ -460,5 +534,8 @@ export async function evaluateFunnel(
     ),
     analysisTokens,
     verificationTokens,
+    correlatedDerivations: count(
+      (journey) => journey.derivation?.shared !== undefined,
+    ),
   };
 }

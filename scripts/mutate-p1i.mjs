@@ -210,8 +210,9 @@ const MUTATIONS = [
     name: "external semantics dominates nothing",
     file: "packages/review-engine/src/verification/competence.ts",
     find:
-      '    dominates: [\n      "async_value_use",\n      "other_families",\n' +
-      '      "signature_compatibility",\n      "condition_value_semantics",\n    ],',
+      '    dominates: [\n      "async_value_use",\n' +
+      '      "signature_compatibility",\n      "condition_value_semantics",\n' +
+      '      "exception_flow",\n    ],',
     replace: "    dominates: [],",
     suite: "packages/review-engine/tests/competence.test.ts",
   },
@@ -328,6 +329,31 @@ const MUTATIONS = [
     find: "      /\\bbranch(?:es)? on\\b/i,",
     replace: "      /\\bawait\\w*\\b/i,",
     suite: "packages/review-engine/tests/condition.test.ts",
+  },
+  {
+    id: 38,
+    name: "an empty catch alone counts as a violation",
+    file: "packages/review-engine/src/verification/exception.ts",
+    find: '  return decide("inconclusive", ["intent_not_establishable"], 0.2);',
+    replace:
+      '  return decide("verified", ["suppressed_failure_reported_as_success"], 0.2);',
+    suite: "packages/review-engine/tests/exception.test.ts",
+  },
+  {
+    id: 39,
+    name: "a rethrow no longer counts as contracted suppression",
+    file: "packages/review-engine/src/verification/exception.ts",
+    find: "    if (ts.isThrowStatement(node)) rethrows = true;",
+    replace: "    if (false) rethrows = true;",
+    suite: "packages/review-engine/tests/exception.test.ts",
+  },
+  {
+    id: 40,
+    name: "any return after the catch counts as reporting success",
+    file: "packages/review-engine/src/verification/exception.ts",
+    find: "        if (ts.isReturnStatement(after) && reportsSuccess(after.expression)) {",
+    replace: "        if (ts.isReturnStatement(after)) {",
+    suite: "packages/review-engine/tests/exception.test.ts",
   },
   {
     id: 17,

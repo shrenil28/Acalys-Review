@@ -252,6 +252,130 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
       "identical shape, synchronous declaration — teaching the condition mechanism against only the positive half would confirm this one too",
     pairedWith: "promise-in-condition-real",
   },
+  // ── exception flow: the asymmetry, in fixtures ─────────────────────────
+  //
+  // Neither direction gets a default. Refuting needs affirmative evidence that
+  // the suppression is intended; verifying needs affirmative evidence that it
+  // violates a contract; neither, and the answer is that the repository does
+  // not say.
+  {
+    id: "catch-reports-success-afterwards",
+    gold: "should_verify",
+    files: {
+      "src/commit.ts": [
+        "export function commit(): boolean {",
+        "  try {",
+        "    write();",
+        "  } catch {}",
+        "  return true;",
+        "}",
+        "function write(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "This `catch` discards the error and does nothing.",
+      "src/commit.ts",
+      4,
+    ),
+    because:
+      "the consequence is provable rather than the shape: the failure disappears and the next line asserts success it never verified",
+    pairedWith: "catch-supplies-a-fallback",
+  },
+  {
+    id: "catch-supplies-a-fallback",
+    gold: "should_reject",
+    files: {
+      "src/read.ts": [
+        "export function read(): number {",
+        "  let value = 0;",
+        "  try {",
+        "    value = load();",
+        "  } catch {",
+        "    value = -1;",
+        "  }",
+        "  return value;",
+        "}",
+        "function load(): number {",
+        "  return 1;",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "This `catch` discards the error and does nothing.",
+      "src/read.ts",
+      5,
+    ),
+    because:
+      "the failure is deliberately consumed and something is put in its place — a contract expressed in code rather than in a comment",
+    pairedWith: "catch-reports-success-afterwards",
+  },
+  {
+    id: "catch-rethrows",
+    gold: "should_reject",
+    files: {
+      "src/commit.ts": [
+        "export function commit(): void {",
+        "  try {",
+        "    write();",
+        "  } catch (error) {",
+        "    throw error;",
+        "  }",
+        "}",
+        "function write(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "This `catch` discards the error and does nothing.",
+      "src/commit.ts",
+      4,
+    ),
+    because: "nothing is discarded; the failure propagates",
+  },
+  {
+    id: "catch-intent-unknowable",
+    gold: "should_abstain",
+    files: {
+      "src/shutdown.ts": [
+        "export function shutdown(): void {",
+        "  try {",
+        "    releaseLock();",
+        "  } catch {}",
+        "}",
+        "function releaseLock(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "This `catch` discards the error and does nothing.",
+      "src/shutdown.ts",
+      4,
+    ),
+    because:
+      "best-effort teardown and a forgotten handler are the same code; nothing downstream asserts success and nothing establishes intent, so abstention is the permanent right answer rather than a gap to close",
+  },
+  {
+    id: "catch-comment-is-not-a-contract",
+    gold: "should_abstain",
+    files: {
+      "src/commit.ts": [
+        "export function commit(): void {",
+        "  try {",
+        "    write();",
+        "  } catch {",
+        "    // best effort: intentionally ignored, acalys-disable-next-line",
+        "  }",
+        "}",
+        "function write(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "This `catch` discards the error and does nothing.",
+      "src/commit.ts",
+      4,
+    ),
+    because:
+      "a comment saying the right words must not refute the claim — otherwise anyone can silence the reviewer by typing next to the defect, which is precisely what the adversarial corpus case does",
+  },
+
   // ── condition value semantics: the rest of the pair set ────────────────
   {
     id: "condition-already-awaited",
