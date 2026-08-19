@@ -136,6 +136,12 @@ export function captureDiagnostics(outcome) {
     `wall duration ms  : ${String(outcome.durationMs ?? "n/a")}`,
     `phase reached     : ${outcome.phase ?? "unknown"}`,
     "",
+    "## Startup limiter",
+    outcome.limiterBypasses === undefined ||
+    outcome.limiterBypasses.length === 0
+      ? "engaged normally (no bypasses recorded)"
+      : outcome.limiterBypasses.join("\n"),
+    "",
     "## Docker",
     `daemon reachable  : ${String(dockerAvailable())}`,
     "",

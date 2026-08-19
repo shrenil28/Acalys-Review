@@ -52,6 +52,21 @@ const DEFAULT_ROOT = join(tmpdir(), "acalys-postgres-startup");
  */
 const STALE_AFTER_MS = 120_000;
 
+/**
+ * Set when the limiter could not engage and startups ran unthrottled.
+ *
+ * This limiter began as a performance nicety and has become an
+ * environment-stability mitigation, so its absence is now worth knowing about.
+ * A future Docker crash under an unthrottled fallback would otherwise look
+ * exactly like the original mystery — and the whole point of the diagnostics
+ * work was that the next one should not.
+ *
+ * It stays fail-open. Refusing to run because a *mitigation* was unavailable
+ * would turn an optimisation into a dependency. Bypass is recorded, not
+ * enforced.
+ */
+export const bypassReasons: string[] = [];
+
 interface Holder {
   readonly pid: number;
   readonly takenAt: number;
@@ -126,7 +141,12 @@ export async function withStartupSlot<T>(
 ): Promise<T> {
   try {
     mkdirSync(root, { recursive: true });
-  } catch {
+  } catch (error) {
+    bypassReasons.push(
+      `lock root unavailable at ${root}: ${
+        error instanceof Error ? error.message : "unknown"
+      }`,
+    );
     return await work();
   }
 
@@ -142,6 +162,14 @@ export async function withStartupSlot<T>(
       }
     }
     if (held === undefined) await sleep(50 + Math.random() * 100);
+  }
+
+  if (held === undefined) {
+    // Every slot stayed occupied past the deadline. Proceeding unthrottled is
+    // the deliberate choice; leaving no trace of it is not.
+    bypassReasons.push(
+      `no slot acquired within ${String(STALE_AFTER_MS * 2)}ms; proceeding unthrottled`,
+    );
   }
 
   try {

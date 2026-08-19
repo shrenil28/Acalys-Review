@@ -38,3 +38,4 @@ export {
   type ConfusionMatrix,
   type VerifierReport,
 } from "./verifier-eval.js";
+export * from "../telemetry/index.js";

@@ -61,6 +61,12 @@ import {
   planVerificationContext,
 } from "../verification/plan-context.js";
 import { assessCompetence } from "../verification/competence.js";
+import {
+  NULL_RECORDER,
+  measure,
+  type Recorder,
+  type WorkProfile,
+} from "../telemetry/index.js";
 import { toVerificationInput } from "../verification/input.js";
 import { verifyDeterministically } from "../verification/deterministic.js";
 import type { VerificationAttempt } from "../verification/decide.js";
@@ -216,6 +222,16 @@ export interface FunnelReport {
    * "both happened to be wrong".
    */
   readonly correlatedDerivations: number;
+
+  /**
+   * How much work the competence router decided was necessary.
+   *
+   * Carried in the quality report because it is the bridge to economics: once
+   * a model-backed verifier exists, `deepVerificationRequired` is what says
+   * whether the cheap deterministic layer is avoiding expensive work or merely
+   * preceding it.
+   */
+  readonly work: WorkProfile;
 }
 
 /**
@@ -274,7 +290,18 @@ export type LossAttribution = Readonly<Record<LossStage, number>>;
  * independence the type signature already enforces; doing it any other way here
  * would measure a verifier that does not exist.
  */
-export async function runFunnelCase(testCase: AnalyzerCase): Promise<{
+export async function runFunnelCase(
+  testCase: AnalyzerCase,
+  /**
+   * Where measurements go. Defaults to a recorder that discards everything.
+   *
+   * The default is not a convenience: the non-interference proof needs a
+   * configuration in which measurement genuinely does nothing, so that
+   * identical output shows instrumentation is inert rather than merely
+   * careful.
+   */
+  recorder: Recorder = NULL_RECORDER,
+): Promise<{
   readonly journeys: readonly CandidateJourney[];
   readonly analysisTokens: number;
   readonly verificationTokens: number;
@@ -302,14 +329,43 @@ export async function runFunnelCase(testCase: AnalyzerCase): Promise<{
       repository: snapshot,
       policy: DEFAULT_VERIFICATION_POLICY,
     });
-    verificationTokens += context.items.reduce(
+    const contextTokens = context.items.reduce(
       // Same four-characters-per-token approximation the planner uses, so the
-      // two halves of the token budget are measured on one scale.
+      // two halves of the token budget are measured on one scale. An ESTIMATE,
+      // and named that way everywhere: `inputTokens` is reserved for usage a
+      // provider reports.
       (total, item) => total + Math.ceil(item.content.length / 4),
       0,
     );
+    verificationTokens += contextTokens;
 
-    const attempt = verifyDeterministically(input, context);
+    const attempt = await measure(
+      recorder,
+      {
+        runId: `eval:${testCase.id}`,
+        stage: "verification",
+        // Logical identity: one candidate, one verification. A retry of this
+        // same claim would raise `attempt`, not mint a new invocation.
+        invocationId: candidateId,
+        candidateId,
+        implementationKind: "deterministic",
+        procedureId: "acalys.verifier.re-derivation",
+        procedureVersion: "1.0.0",
+        attempt: 1,
+        context: {
+          items: context.items.length,
+          characters: context.items.reduce(
+            (total, item) => total + item.content.length,
+            0,
+          ),
+          tokenEstimate: contextTokens,
+          omittedItems: 0,
+          assemblyMs: 0,
+        },
+        inference: undefined,
+      },
+      () => verifyDeterministically(input, context),
+    );
 
     const competence = assessCompetence(input);
     const verification =
@@ -391,13 +447,14 @@ export const EVAL_PUBLICATION_CONFIG: PublicationConfig = {
 
 export async function evaluateFunnel(
   cases: readonly AnalyzerCase[],
+  recorder: Recorder = NULL_RECORDER,
 ): Promise<FunnelReport> {
   const journeys: CandidateJourney[] = [];
   let analysisTokens = 0;
   let verificationTokens = 0;
 
   for (const testCase of cases) {
-    const outcome = await runFunnelCase(testCase);
+    const outcome = await runFunnelCase(testCase, recorder);
     journeys.push(...outcome.journeys);
     analysisTokens += outcome.analysisTokens;
     verificationTokens += outcome.verificationTokens;
@@ -537,5 +594,20 @@ export async function evaluateFunnel(
     correlatedDerivations: count(
       (journey) => journey.derivation?.shared !== undefined,
     ),
+    work: {
+      candidatesTotal: candidates,
+      competenceSupported: count(
+        (journey) => journey.derivation?.verification !== "none",
+      ),
+      competenceUnsupported: count(
+        (journey) => journey.derivation?.verification === "none",
+      ),
+      // Everything, today. The number that will matter is the next one.
+      deterministicallySettled: candidates,
+      // Reserved for a verifier that costs something. Zero is a real count
+      // here: no candidate was deferred to an expensive procedure, because
+      // there is no expensive procedure.
+      deepVerificationRequired: 0,
+    },
   };
 }
