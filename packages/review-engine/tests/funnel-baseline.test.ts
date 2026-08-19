@@ -7,7 +7,7 @@ import { ANALYZER_CORPUS, evaluateFunnel } from "../src/eval/index.js";
  *
  * The analyzer dashboard reports recall 1.0 and precision 1.0. Running the same
  * corpus through verification, promotion and policy reports **published recall
- * 0.6** — four of ten real defects the analyzer found still never reach a
+ * 0.7** — three of ten real defects the analyzer found still never reach a
  * developer, because the verifier has no procedure for their mechanism.
  *
  * Neither number is wrong. They measure different systems, and only the second
@@ -118,7 +118,7 @@ describe("The funnel baseline", () => {
   });
 
   it("attributes every lost defect to exactly one stage", async () => {
-    // `publishedRecall = 0.6` is equally consistent with a planner that fetched
+    // `publishedRecall = 0.7` is equally consistent with a planner that fetched
     // nothing, an analyzer that saw nothing, a verifier that refused, a verifier
     // that could not tell, an outage, and a policy that withheld. Six fixes,
     // three owners. The decomposition is what makes the number actionable.
@@ -138,11 +138,11 @@ describe("The funnel baseline", () => {
     expect(report.losses).toEqual({
       not_proposed: 0,
       verifier_refuted: 0,
-      // 5 → 4. The signature capability reached one of them. The other four
-      // are one condition claim, one concurrency claim and two exception-flow
-      // claims — named targets rather than a mystery, which is the whole point
-      // of attributing losses to a stage.
-      verifier_abstained: 4,
+      // 5 → 4 → 3. Signature took one, condition-value took another. The
+      // remaining three are one concurrency claim — an async callback handed to
+      // `forEach`, which is a callback-contract proposition and deliberately
+      // NOT this condition capability — and two exception-flow claims.
+      verifier_abstained: 3,
       verification_unavailable: 0,
       policy_withheld: 0,
     });
@@ -177,10 +177,10 @@ describe("The funnel baseline", () => {
     //
     // What each number is currently saying:
     //
-    //     published recall 0.6     the verifier's reach, not the analyzer's
-    //                              accuracy. Four defects sit at
-    //                              `inconclusive`: one condition, one
-    //                              concurrency, two exception-flow.
+    //     published recall 0.7     the verifier's reach, not the analyzer's
+    //                              accuracy. Three defects sit at
+    //                              `inconclusive`: one concurrency claim and
+    //                              two exception-flow claims.
     //     published precision 1.0  every published finding is real, against an
     //                              analyzer precision of 10/11 — verification
     //                              now buys precision instead of costing it.
@@ -200,15 +200,17 @@ describe("The funnel baseline", () => {
       publishedPrecision: report.publishedPrecision,
     }).toEqual({
       candidates: 10,
-      verified: 6,
+      verified: 7,
       rejected: 0,
-      inconclusive: 4,
-      promoted: 6,
-      published: 6,
-      // 0.5 → 0.6, and the delta is attributable to exactly one capability:
-      // `caller-not-updated-for-new-parameter` moved from `inconclusive` to
-      // `verified`, and no other journey changed. Precision held at 1.0.
-      publishedRecall: 0.6,
+      inconclusive: 3,
+      promoted: 7,
+      published: 7,
+      // 0.6 → 0.7, and again attributable to exactly one capability:
+      // `promise-as-condition` moved from `inconclusive` to `verified`, and no
+      // other journey changed. In particular `async-callback-in-foreach` did
+      // NOT move — if it had, the condition capability would have grown into
+      // "control flow" and stopped knowing what it was checking.
+      publishedRecall: 0.7,
       // Every published finding is real, and so is every candidate: the
       // analyzer's one false positive is gone at source. The verifier's
       // ability to stop it is preserved as a historical replay challenge.

@@ -74,6 +74,62 @@ export function dockerAvailable(): boolean {
  * start or a schema that failed to migrate fails the suite instead of quietly
  * degrading it to zero assertions.
  */
+/**
+ * What this run created no longer exists.
+ *
+ * Two generations of the same operational bug landed here: containers leaked,
+ * that was fixed, and the anonymous volumes underneath them filled the disk
+ * anyway. Both fixes were of the form *we called the cleanup command*, and both
+ * were believed until a symptom appeared somewhere else — the second as nine
+ * integration suites failing to start.
+ *
+ * So the invariant is not that cleanup ran. It is that the resources are gone,
+ * checked by asking Docker rather than by trusting the call.
+ *
+ * Scoped to this suite's own label, so a parallel suite's live container is
+ * never counted against it — the failure mode that once had one suite killing
+ * another's database.
+ */
+export async function assertResourcesReleased(suite: string): Promise<void> {
+  const containers = await run("docker", [
+    "ps",
+    "-aq",
+    "--filter",
+    `label=acalys.suite=${suite}`,
+  ]).catch(() => ({ stdout: "" }));
+  const remaining = containers.stdout.trim().split("\n").filter(Boolean);
+
+  if (remaining.length > 0) {
+    throw new Error(
+      `Suite ${suite} left ${String(remaining.length)} container(s) behind: ` +
+        `${remaining.join(", ")}. Cleanup ran and the resources are still here, ` +
+        "which is the distinction this check exists to make.",
+    );
+  }
+
+  // Anonymous volumes are not labelled, so they cannot be attributed to a
+  // suite. Dangling is the closest safe proxy: a volume any container still
+  // uses is not dangling, so a parallel suite's data is never implicated.
+  const dangling = await run("docker", [
+    "volume",
+    "ls",
+    "-q",
+    "--filter",
+    "dangling=true",
+  ]).catch(() => ({ stdout: "" }));
+  const orphaned = dangling.stdout.trim().split("\n").filter(Boolean);
+
+  if (orphaned.length > 0) {
+    throw new Error(
+      `${String(orphaned.length)} dangling volume(s) remain after ${suite}. ` +
+        "The Postgres image declares its data directory as a VOLUME, so a " +
+        "removal without `-v` orphans one per container — which reached 872 " +
+        "volumes and 62GB before the disk filled and containers stopped " +
+        "becoming reachable.",
+    );
+  }
+}
+
 export async function assertSuiteIsActuallyRunning(
   database: TestDatabase,
   expectedTables: readonly string[],

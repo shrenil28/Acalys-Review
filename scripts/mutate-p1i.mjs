@@ -207,9 +207,11 @@ const MUTATIONS = [
   },
   {
     id: 24,
-    name: "external semantics no longer dominates the async family",
+    name: "external semantics dominates nothing",
     file: "packages/review-engine/src/verification/competence.ts",
-    find: '    dominates: ["async_value_use", "other_families", "signature_compatibility"],',
+    find:
+      '    dominates: [\n      "async_value_use",\n      "other_families",\n' +
+      '      "signature_compatibility",\n      "condition_value_semantics",\n    ],',
     replace: "    dominates: [],",
     suite: "packages/review-engine/tests/competence.test.ts",
   },
@@ -301,6 +303,31 @@ const MUTATIONS = [
     find: "        diagnostic.start >= from &&\n        diagnostic.start <= to,",
     replace: "        true,",
     suite: "packages/review-engine/tests/signature.test.ts",
+  },
+  {
+    id: 35,
+    name: "an unbindable condition callee is assumed to be a promise",
+    file: "packages/review-engine/src/verification/condition.ts",
+    find: '    return decide("inconclusive", ["insufficient_evidence"], 0.25);',
+    replace:
+      '    return decide("verified", ["condition_branches_on_promise"], 0.25);',
+    suite: "packages/review-engine/tests/condition.test.ts",
+  },
+  {
+    id: 36,
+    name: "an awaited condition is still treated as branching on a promise",
+    file: "packages/review-engine/src/verification/condition.ts",
+    find: "  if (site.unwrapped) {",
+    replace: "  if (false) {",
+    suite: "packages/review-engine/tests/condition.test.ts",
+  },
+  {
+    id: 37,
+    name: "the condition capability also claims forEach callbacks",
+    file: "packages/review-engine/src/verification/competence.ts",
+    find: "      /\\bbranch(?:es)? on\\b/i,",
+    replace: "      /\\bawait\\w*\\b/i,",
+    suite: "packages/review-engine/tests/condition.test.ts",
   },
   {
     id: 17,

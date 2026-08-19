@@ -92,6 +92,15 @@ export const VERIFICATION_REASONS = [
    * commonest static-analysis overclaim there is.
    */
   "consumer_scope_unbounded",
+
+  // ── condition value semantics ────────────────────────────────────────
+  /** The branch consumes a promise object rather than a resolved boolean. */
+  "condition_branches_on_promise",
+  /**
+   * The condition's value is not a promise — the callee is synchronous, or the
+   * value is already awaited.
+   */
+  "condition_value_is_not_a_promise",
   // Independent context and the supplied evidence disagree. Distinct from
   // insufficiency: something *is* known, and what is known conflicts. Folding
   // it into `insufficient_evidence` would hide the most interesting signal a
@@ -127,6 +136,9 @@ export const REASON_SUPPORTS: Readonly<
   contract_violated_at_call_site: "verified",
   call_site_satisfies_contract: "rejected",
   consumer_scope_unbounded: "inconclusive",
+
+  condition_branches_on_promise: "verified",
+  condition_value_is_not_a_promise: "rejected",
   conflicting_independent_evidence: "inconclusive",
 };
 

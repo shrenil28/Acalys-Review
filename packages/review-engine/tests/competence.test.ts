@@ -37,13 +37,27 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
     for (const statement of [
       "The promise returned by `save()` is discarded.",
       "`save()` is chained with `.then` but its rejection is never handled.",
-      "`isReady()` returns a promise and is used directly as a condition.",
     ]) {
       expect(assessCompetence(claim(statement)), statement).toEqual({
         kind: "supported",
         capability: "async_value_use",
       });
     }
+
+    // A condition claim mentions a promise by construction, so it matches the
+    // async matcher too. Declared dominance says which proposition is actually
+    // being made — "is this value consumed" and "does this branch test the
+    // wrong thing" need different evidence and support different reasons.
+    expect(
+      assessCompetence(
+        claim(
+          "`isReady()` returns a promise and is used directly as a condition.",
+        ),
+      ),
+    ).toEqual({
+      kind: "supported",
+      capability: "condition_value_semantics",
+    });
   });
 
   it("declines a claim about semantics no repository contains", () => {

@@ -70,3 +70,4 @@ export {
   type CalleeBinding,
   type DerivationMethod,
 } from "./binding.js";
+export { CONDITION_CAPABILITY_ID, verifyConditionValue } from "./condition.js";

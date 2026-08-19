@@ -33,6 +33,7 @@
 import ts from "typescript";
 
 import { resolveCallProduct } from "./binding.js";
+import { verifyConditionValue } from "./condition.js";
 import { verifySignatureCompatibility } from "./signature.js";
 import { assertReasonForCapability, assessCompetence } from "./competence.js";
 import {
@@ -279,6 +280,18 @@ export function verifyDeterministically(
   // is unsettleable whether or not the planner supplied the file, and reporting
   // it as a context gap would send someone to fix a planner that is working.
   const competence = assessCompetence(input);
+
+  if (
+    competence.kind === "supported" &&
+    competence.capability === "condition_value_semantics"
+  ) {
+    const attempt = verifyConditionValue(input, context);
+    if (attempt.status === "completed") {
+      assertReasonsSupport(attempt.decision, attempt.reasons);
+      assertReasonForCapability("condition_value_semantics", attempt.reasons);
+    }
+    return attempt;
+  }
 
   if (
     competence.kind === "supported" &&

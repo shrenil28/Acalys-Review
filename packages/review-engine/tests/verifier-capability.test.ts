@@ -58,7 +58,8 @@ describe("Verifier capability, on injected challenges", () => {
     // about a POPULATION of callers against an exported declaration, and
     // refuting that needs a closed world the verifier cannot establish —
     // "findReferences returned four" is not "four consumers exist".
-    expect(abstentions).toHaveLength(5);
+    // Six, with the unresolvable condition callee added.
+    expect(abstentions).toHaveLength(6);
     expect(abstentions.every((outcome) => outcome.correct)).toBe(true);
   });
 
@@ -74,12 +75,11 @@ describe("Verifier capability, on injected challenges", () => {
     // mechanism work, and the cost of leaving them is exactly the recall this
     // line reports.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
-    // Four pairs now: async, condition, catch, and the new signature pair.
-    // Two discriminate — async and signature. The condition and catch pairs
-    // abstain on both halves, which is safe and useless, and each remains a
+    // Three of four. Async, signature and now condition discriminate; the catch
+    // pair abstains on both halves, which is safe and useless, and is the last
     // named target.
     expect(report.pairsTotal).toBe(4);
-    expect(report.pairsDiscriminated).toBe(2);
+    expect(report.pairsDiscriminated).toBe(3);
   });
 
   it("still filters the candidate the analyzer used to produce", () => {
@@ -124,20 +124,20 @@ describe("Verifier capability, on injected challenges", () => {
     // once would leave attribution worse, not better.
     expect(report.matrix).toEqual({
       should_verify: {
-        // 1 → 3: the stale caller and the changed-parameter-type case now
-        // verify. The two remaining inconclusive are condition and catch.
-        verified: 3,
+        // 3 → 4: the condition defect now verifies. The one remaining
+        // inconclusive is the empty catch.
+        verified: 4,
         rejected: 0,
-        inconclusive: 2,
+        inconclusive: 1,
         unavailable: 0,
       },
       should_reject: {
         verified: 0,
-        // 3 → 7: the migrated caller, the optional parameter, the default
-        // parameter and the shadowed callee. The optional and default cases are
-        // the ones that would pass an arity check and be wrong.
-        rejected: 7,
-        // Two: the condition lookalike, and the historical replay. The replay
+        // 7 → 10: the condition lookalike, the awaited condition and the
+        // shadowed condition callee. The awaited one is the case a
+        // declaration-based check gets wrong — `enabled` really is `async`.
+        rejected: 10,
+        // One: the historical replay. The replay
         // comes back `inconclusive` rather than `rejected` because the
         // verifier's own binding says the callee is synchronous while the
         // analyzer's supplied evidence says asynchronous, and it treats that as
@@ -148,15 +148,16 @@ describe("Verifier capability, on injected challenges", () => {
         // signature work untouched: it is verifier-capability debt, and fixing
         // it changes evidence-combination semantics, which deserves its own
         // checkpoint.
-        inconclusive: 2,
+        inconclusive: 1,
         unavailable: 0,
       },
       should_abstain: {
         verified: 0,
         rejected: 0,
-        // Five: the two unknowables, the absent location, the unbindable
-        // callee, and the reclassified population claim.
-        inconclusive: 5,
+        // Six: the two unknowables, the absent location, the unbindable async
+        // callee, the reclassified population claim, and the unbindable
+        // condition callee.
+        inconclusive: 6,
         unavailable: 0,
       },
     });
@@ -166,7 +167,7 @@ describe("Verifier capability, on injected challenges", () => {
     // Fail-closed: an empty matrix satisfies every zero above.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
     expect(report.outcomes).toHaveLength(VERIFIER_CHALLENGES.length);
-    expect(report.outcomes.length).toBeGreaterThanOrEqual(18);
+    expect(report.outcomes.length).toBeGreaterThanOrEqual(21);
     expect(report.provenance).toBe("injected");
     for (const gold of ["should_verify", "should_reject", "should_abstain"]) {
       expect(

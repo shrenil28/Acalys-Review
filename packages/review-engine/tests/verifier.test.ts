@@ -338,6 +338,39 @@ describe("Every reason code is reachable", () => {
       ),
     );
 
+    // The condition capability's two reasons, from real adjudications: an
+    // async callee in a branch, and the same branch with a synchronous one.
+    const condition = (declaration: string): VerificationAttempt =>
+      verify(
+        {
+          "src/gate.ts": [
+            declaration,
+            "export function run(): void {",
+            "  if (enabled()) {",
+            "    return;",
+            "  }",
+            "}",
+          ].join("\n"),
+        },
+        {
+          claim: {
+            statement:
+              "`enabled()` returns a promise and is used directly as a condition, so the guard never fails",
+            steps: [],
+            trigger: "the branch runs",
+            consequence: "the guard does nothing",
+          },
+          location: { path: "src/gate.ts", startLine: 5, endLine: 5 },
+        },
+      );
+
+    record(
+      condition(
+        "async function enabled(): Promise<boolean> {\n  return false;\n}",
+      ),
+    );
+    record(condition("function enabled(): boolean {\n  return false;\n}"));
+
     // `not_caused_by_change` is declared and this verifier cannot yet produce
     // it: the counterfactual is decided in the analyzer, and re-deciding it
     // here would need change data the verifier is not given. Named explicitly

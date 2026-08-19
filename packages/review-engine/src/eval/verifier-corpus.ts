@@ -252,6 +252,73 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
       "identical shape, synchronous declaration — teaching the condition mechanism against only the positive half would confirm this one too",
     pairedWith: "promise-in-condition-real",
   },
+  // ── condition value semantics: the rest of the pair set ────────────────
+  {
+    id: "condition-already-awaited",
+    gold: "should_reject",
+    files: {
+      "src/gate.ts": [
+        "async function enabled(): Promise<boolean> {",
+        "  return false;",
+        "}",
+        "export async function run(): Promise<void> {",
+        "  if (await enabled()) {",
+        "    return;",
+        "  }",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`enabled()` returns a promise and is used directly as a condition, so the guard never fails",
+      "src/gate.ts",
+      5,
+    ),
+    because:
+      "the value is unwrapped before the branch sees it, so the claimed mechanism cannot occur — and the declaration is still `async`, which is what makes this the case a declaration-based check gets wrong",
+  },
+  {
+    id: "condition-shadowed-callee",
+    gold: "should_reject",
+    files: {
+      "src/gate.ts": [
+        "async function ready(): Promise<boolean> {",
+        "  return false;",
+        "}",
+        "export function run(ready: () => boolean): void {",
+        "  if (ready()) {",
+        "    return;",
+        "  }",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`ready()` returns a promise and is used directly as a condition, so the guard never fails",
+      "src/gate.ts",
+      5,
+    ),
+    because:
+      "the epistemic lesson again, in a third capability: an async declaration of the same name is present, and exact binding must resolve the synchronous parameter instead",
+  },
+  {
+    id: "condition-callee-unresolvable",
+    gold: "should_abstain",
+    files: {
+      "src/gate.ts": [
+        "export function run(source: { ready: () => unknown }): void {",
+        '  if ((source as { ready: () => unknown })["ready"]()) {',
+        "    return;",
+        "  }",
+        "}",
+      ].join("\n"),
+    },
+    input: claim(
+      "the call returns a promise and is used directly as a condition, so the guard never fails",
+      "src/gate.ts",
+      2,
+    ),
+    because:
+      "nothing binds, so the decisive fact is unavailable — and the pressure on this capability will be to raise recall, which is exactly when guessed typing gets introduced",
+  },
   {
     id: "signature-callers-migrated",
     // ── A gold label corrected, and why that is not fitting-to-implementation
@@ -270,6 +337,16 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
     // The label changed because the SPECIFICATION was wrong, not because the
     // implementation was inconvenient. The distinction is testable: the
     // stale-call-site pair below is refutable and its gold did not move.
+    //
+    //     old gold  should_reject
+    //     new gold  should_abstain
+    //     reason    specification correction — the verifier cannot establish
+    //               closed-world consumer coverage for an exported callable
+    //     when      decided from the closed-world rule, before the capability
+    //               was evaluated against it, not in response to a failure
+    //
+    // Recorded in this shape so a later auditor can tell a legitimate gold
+    // correction from moved goalposts without reconstructing the argument.
     gold: "should_abstain",
     files: {
       "src/api.ts":

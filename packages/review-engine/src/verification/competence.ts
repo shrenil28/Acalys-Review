@@ -81,6 +81,17 @@ export const VERIFICATION_CAPABILITIES = [
    * world this verifier cannot establish.
    */
   "signature_compatibility",
+  /**
+   * Whether a branch tests the truthiness of a promise instead of the boolean
+   * the author intended.
+   *
+   * Deliberately not "control flow". `items.forEach(async …)` is an async
+   * defect and is **not** this proposition — it is about a callback contract
+   * and an iterator discarding the promise it is handed. Folding them together
+   * is the road back to one procedure that recognises many shapes and is
+   * eventually confident about a claim it never checked.
+   */
+  "condition_value_semantics",
 ] as const;
 
 export type VerificationCapability = (typeof VERIFICATION_CAPABILITIES)[number];
@@ -132,6 +143,12 @@ export type CompetenceAssessment =
 export const REASONS_BY_CAPABILITY: Readonly<
   Record<VerificationCapability, readonly VerificationReason[]>
 > = {
+  condition_value_semantics: [
+    "condition_branches_on_promise",
+    "condition_value_is_not_a_promise",
+    "insufficient_evidence",
+    "context_incomplete",
+  ],
   signature_compatibility: [
     "contract_violated_at_call_site",
     "call_site_satisfies_contract",
@@ -233,7 +250,32 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     ],
     // A claim about provider semantics that also mentions a promise is still a
     // claim about provider semantics.
-    dominates: ["async_value_use", "other_families", "signature_compatibility"],
+    dominates: [
+      "async_value_use",
+      "other_families",
+      "signature_compatibility",
+      "condition_value_semantics",
+    ],
+  },
+  {
+    id: "condition_value_semantics",
+    capability: "condition_value_semantics",
+    declines: undefined,
+    // The analyzer's exact phrasing — "`isReady()` returns a promise and is
+    // used directly as a condition", with a step reading "a Promise object is
+    // always truthy". Narrow on purpose: a claim merely mentioning a promise
+    // belongs to the async capability, and only a claim about the BRANCH
+    // belongs here.
+    patterns: [
+      /\bused directly as a condition\b/i,
+      /\balways truthy\b/i,
+      /\bguard never fails\b/i,
+      /\bbranch(?:es)? on\b/i,
+    ],
+    // A condition claim mentions a promise by construction, so it matches the
+    // async matcher too. Dominance says which proposition is actually being
+    // made, rather than leaving it to whichever matcher is written first.
+    dominates: ["async_value_use"],
   },
   {
     id: "async_value_use",
