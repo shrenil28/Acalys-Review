@@ -15,7 +15,9 @@ P1-H                  independent deterministic verifier        ✓
 P1-I                  durable trust funnel → publication        ✓
 P1-PUBLISH-SURFACES   design checkpoint                         recorded
 P1-VERIFY-CONCURRENCY design checkpoint                         recorded
-P1-J                  end-to-end review-quality baseline        next
+P1-J                  deterministic quality + execution baseline ✓
+P1-INFRA-POSTGRES     one container, database per suite         next
+P1-K                  frontend production boundary              planned
 ```
 
 `P1-VERIFY-CONCURRENCY` is recorded rather than built, for the same reason

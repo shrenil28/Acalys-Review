@@ -410,9 +410,17 @@ const MUTATIONS = [
   },
   {
     id: 47,
+    // Retargeted after P1-J.5 made `totalCostUsd` derive through the
+    // composition rules instead of being asserted. The third time a mutation
+    // pattern has gone stale on a refactor — the harness reports INVALID and
+    // exits non-zero, which is the whole reason that is a loud outcome rather
+    // than a quiet pass.
     name: "unmeasured total cost becomes $0.00",
     file: "packages/review-engine/src/telemetry/report.ts",
-    find: '    totalCostUsd: unmeasured(\n      "infrastructure cost is unmeasured, so no total exists",\n    ),',
+    find:
+      "    totalCostUsd: add(\n      measured(0),\n      unmeasured(\n" +
+      '        "CPU, container, database and storage cost are not accounted for",\n' +
+      "      ),\n    ),",
     replace: "    totalCostUsd: measured(0),",
     suite: "packages/review-engine/tests/telemetry.test.ts",
   },
