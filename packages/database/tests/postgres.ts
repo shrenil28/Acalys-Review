@@ -57,7 +57,20 @@ export const POSTGRES_REQUIRED = process.env["ACALYS_REQUIRE_POSTGRES"] === "1";
 
 export function dockerAvailable(): boolean {
   try {
-    execFileSync("docker", ["info"], { stdio: "ignore", timeout: 20_000 });
+    // `docker ps`, not `docker info`.
+    //
+    // A daemon whose backend VM has died still answers some metadata queries
+    // while every real operation fails. That is not hypothetical: a `test:ci`
+    // run exited non-zero with no reported test failure, and the captured
+    // diagnostics showed `Docker Desktop is unable to start / qemu: process
+    // terminated unexpectedly` behind a check that had reported Docker as
+    // available.
+    //
+    // The consequence of the weaker probe is the worst kind: suites start,
+    // fail at container creation, and the failure reads as a product bug.
+    // Listing containers requires the daemon to actually serve, so this fails
+    // where it should — loudly, and with the real reason attached.
+    execFileSync("docker", ["ps", "-q"], { stdio: "ignore", timeout: 20_000 });
     return true;
   } catch {
     if (POSTGRES_REQUIRED) {
@@ -100,6 +113,48 @@ export function dockerAvailable(): boolean {
  * never counted against it — the failure mode that once had one suite killing
  * another's database.
  */
+/**
+ * Limits how many Postgres containers are created at once.
+ *
+ * Not a timeout, and deliberately so. Two `test:ci` runs terminated non-zero
+ * with no reported test failure; the captured diagnostics showed
+ * `Docker Desktop is unable to start / qemu: process terminated unexpectedly`,
+ * with 45GB of disk and 9GB of memory free. The backend VM was crashing under
+ * the burst of nine suites creating containers simultaneously.
+ *
+ * Reducing vitest's own parallelism to two forks made every Postgres suite
+ * pass, which identified the trigger — so the gate is placed on the thing that
+ * actually causes the burst rather than on the whole test runner.
+ *
+ * This does not mask anything. A suite whose container fails still fails, and
+ * the readiness timeout is untouched: a longer wait would have converted a
+ * crashing VM into a slower flaky suite, and the diagnostics would have stopped
+ * being collected because the run would eventually have passed.
+ *
+ * The underlying instability is Docker Desktop's, not this repository's. This
+ * keeps the suite usable on a machine that has it.
+ */
+const MAX_CONCURRENT_STARTUPS = 2;
+
+let startupSlots = MAX_CONCURRENT_STARTUPS;
+const startupQueue: (() => void)[] = [];
+
+async function acquireStartupSlot(): Promise<() => void> {
+  if (startupSlots > 0) {
+    startupSlots -= 1;
+  } else {
+    await new Promise<void>((resolve) => startupQueue.push(resolve));
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const next = startupQueue.shift();
+    if (next === undefined) startupSlots += 1;
+    else next();
+  };
+}
+
 let volumeBaseline: ReadonlySet<string> | undefined;
 
 /** Volumes that existed before this process started creating any. */
@@ -326,111 +381,124 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
   // working. But an infrastructure leak that presents as a product test failure
   // costs an investigation every time, so the leak is closed at the source.
   await run("docker", ["rm", "-f", "-v", CONTAINER]).catch(() => undefined);
-  await run("docker", [
-    "run",
-    "-d",
-    "--name",
-    CONTAINER,
-    // Labels are what make an abandoned container findable later. A name alone
-    // only helps if the next run happens to use the same one.
-    "--label",
-    "acalys.test=true",
-    "--label",
-    `acalys.suite=${label}`,
-    // Run attribution, so stale reaping can target resources this machine's
-    // EARLIER runs left behind without touching the run in progress.
+
+  // Held across creation AND readiness, because the burst that crashes the
+  // backend VM is several containers *booting* at once, not several `docker
+  // run` calls returning at once.
+  const releaseSlot = await acquireStartupSlot();
+  try {
+    await run("docker", [
+      "run",
+      "-d",
+      "--name",
+      CONTAINER,
+      // Labels are what make an abandoned container findable later. A name alone
+      // only helps if the next run happens to use the same one.
+      "--label",
+      "acalys.test=true",
+      "--label",
+      `acalys.suite=${label}`,
+      // Run attribution, so stale reaping can target resources this machine's
+      // EARLIER runs left behind without touching the run in progress.
+      //
+      // The rule this enforces: test infrastructure may delete only what it can
+      // positively attribute to an Acalys test run. "Dangling" is Docker's
+      // ownership concept, not ours — a developer's stopped compose database is
+      // dangling, and a sweep that reclaims disk by deleting what it does not
+      // recognise is a hazard rather than a cleanup.
+      "--label",
+      `acalys.run=${RUN_ID}`,
+      "-e",
+      `POSTGRES_PASSWORD=${PASSWORD}`,
+      "-e",
+      `POSTGRES_DB=${DATABASE}`,
+      "-p",
+      // Docker picks the host port.
+      //
+      // This used to be derived from the label — `55_400 + charCodeSum % 90` —
+      // which is a 90-slot hash over arbitrary strings, so collisions were a
+      // matter of when. "hardening" collided with an existing suite and the
+      // container failed to start; vitest reported the ten tests inside as
+      // *skipped* while the suite itself failed, which is the exact shape of the
+      // three vacuous-test bugs this project has already shipped.
+      //
+      // Deterministic ports existed so a stale container could be found and
+      // removed. The container **name** already does that, and it is derived from
+      // the label too — so the port was buying nothing and costing a collision
+      // class. Letting Docker assign one removes the class rather than making it
+      // less likely.
+      "0:5432",
+      IMAGE,
+      // fsync off: this database is discarded, and durability of the *test*
+      // database is not what is under test. The transaction semantics that are
+      // under test are unaffected.
+      "-c",
+      "fsync=off",
+    ]);
+
+    // Reap containers abandoned by earlier runs, before starting a new one.
     //
-    // The rule this enforces: test infrastructure may delete only what it can
-    // positively attribute to an Acalys test run. "Dangling" is Docker's
-    // ownership concept, not ours — a developer's stopped compose database is
-    // dangling, and a sweep that reclaims disk by deleting what it does not
-    // recognise is a hazard rather than a cleanup.
-    "--label",
-    `acalys.run=${RUN_ID}`,
-    "-e",
-    `POSTGRES_PASSWORD=${PASSWORD}`,
-    "-e",
-    `POSTGRES_DB=${DATABASE}`,
-    "-p",
-    // Docker picks the host port.
+    // Process handlers cannot cover SIGKILL, a machine crash, or the daemon
+    // dying, so cleanup must not depend on this process getting a chance to run.
+    // Every container is labelled, and each run sweeps the ones a previous run
+    // left behind — which is what stops abandoned resources repeatedly inflating
+    // Docker's internal high-water mark.
     //
-    // This used to be derived from the label — `55_400 + charCodeSum % 90` —
-    // which is a 90-slot hash over arbitrary strings, so collisions were a
-    // matter of when. "hardening" collided with an existing suite and the
-    // container failed to start; vitest reported the ten tests inside as
-    // *skipped* while the suite itself failed, which is the exact shape of the
-    // three vacuous-test bugs this project has already shipped.
+    // Scoped to this suite's label so parallel vitest files cannot destroy each
+    // other's databases: the failure that would cause is a suite whose tables
+    // vanish mid-run, which reads as a product bug rather than a harness one.
+    await captureVolumeBaseline();
+    await run("docker", [
+      "rm",
+      "-f",
+      "-v",
+      "--",
+      ...(await staleContainers(label)),
+    ]).catch(() => undefined);
+
+    // NOT `docker volume prune`.
     //
-    // Deterministic ports existed so a stale container could be found and
-    // removed. The container **name** already does that, and it is derived from
-    // the label too — so the port was buying nothing and costing a collision
-    // class. Letting Docker assign one removes the class rather than making it
-    // less likely.
-    "0:5432",
-    IMAGE,
-    // fsync off: this database is discarded, and durability of the *test*
-    // database is not what is under test. The transaction semantics that are
-    // under test are unaffected.
-    "-c",
-    "fsync=off",
-  ]);
+    // That was here, and it was destructive: a developer's local compose database
+    // whose stack happens to be stopped is a dangling volume, and pruning would
+    // delete it. `acalys-local_acalys-postgres-data` sat one command away from
+    // being wiped by running the test suite.
+    //
+    // `rm -f -v` above already removes the anonymous volume belonging to each
+    // reaped container, which closes the leak at its source and touches nothing
+    // else. A sweep that reclaims disk by deleting whatever it does not recognise
+    // is not a cleanup, it is a hazard.
 
-  // Reap containers abandoned by earlier runs, before starting a new one.
-  //
-  // Process handlers cannot cover SIGKILL, a machine crash, or the daemon
-  // dying, so cleanup must not depend on this process getting a chance to run.
-  // Every container is labelled, and each run sweeps the ones a previous run
-  // left behind — which is what stops abandoned resources repeatedly inflating
-  // Docker's internal high-water mark.
-  //
-  // Scoped to this suite's label so parallel vitest files cannot destroy each
-  // other's databases: the failure that would cause is a suite whose tables
-  // vanish mid-run, which reads as a product bug rather than a harness one.
-  await captureVolumeBaseline();
-  await run("docker", [
-    "rm",
-    "-f",
-    "-v",
-    "--",
-    ...(await staleContainers(label)),
-  ]).catch(() => undefined);
+    // Removed on an abrupt exit too, not only on a clean `stop()`.
+    //
+    // An interrupted run — Ctrl-C, a crashed worker, a killed CI job — used to
+    // leave its container behind. Each one is small, but Docker Desktop's disk
+    // image only ever grows to its high-water mark, so the leak is permanent
+    // even after the container is gone. Dozens of aborted runs is how a test
+    // harness quietly consumes a third of a laptop.
+    const reap = (): void => {
+      try {
+        execFileSync("docker", ["rm", "-f", "-v", CONTAINER], {
+          stdio: "ignore",
+          timeout: 10_000,
+        });
+      } catch {
+        // Best effort: the process is already on its way out.
+      }
+    };
+    process.once("SIGINT", reap);
+    process.once("SIGTERM", reap);
+    process.once("exit", reap);
 
-  // NOT `docker volume prune`.
-  //
-  // That was here, and it was destructive: a developer's local compose database
-  // whose stack happens to be stopped is a dangling volume, and pruning would
-  // delete it. `acalys-local_acalys-postgres-data` sat one command away from
-  // being wiped by running the test suite.
-  //
-  // `rm -f -v` above already removes the anonymous volume belonging to each
-  // reaped container, which closes the leak at its source and touches nothing
-  // else. A sweep that reclaims disk by deleting whatever it does not recognise
-  // is not a cleanup, it is a hazard.
+    const PORT = await publishedPort(CONTAINER);
+    await waitForReady(CONTAINER, PORT);
+    return await connect(CONTAINER, PORT);
+  } finally {
+    releaseSlot();
+  }
+}
 
-  // Removed on an abrupt exit too, not only on a clean `stop()`.
-  //
-  // An interrupted run — Ctrl-C, a crashed worker, a killed CI job — used to
-  // leave its container behind. Each one is small, but Docker Desktop's disk
-  // image only ever grows to its high-water mark, so the leak is permanent
-  // even after the container is gone. Dozens of aborted runs is how a test
-  // harness quietly consumes a third of a laptop.
-  const reap = (): void => {
-    try {
-      execFileSync("docker", ["rm", "-f", "-v", CONTAINER], {
-        stdio: "ignore",
-        timeout: 10_000,
-      });
-    } catch {
-      // Best effort: the process is already on its way out.
-    }
-  };
-  process.once("SIGINT", reap);
-  process.once("SIGTERM", reap);
-  process.once("exit", reap);
-
-  const PORT = await publishedPort(CONTAINER);
-  await waitForReady(CONTAINER, PORT);
-
+/** Everything after the container is serving, outside the startup gate. */
+async function connect(CONTAINER: string, PORT: number): Promise<TestDatabase> {
   const pool = new pg.Pool({
     host: "127.0.0.1",
     port: PORT,

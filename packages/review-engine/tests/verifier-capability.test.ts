@@ -58,8 +58,11 @@ describe("Verifier capability, on injected challenges", () => {
     // about a POPULATION of callers against an exported declaration, and
     // refuting that needs a closed world the verifier cannot establish —
     // "findReferences returned four" is not "four consumers exist".
-    // Nine, with an untyped callback receiver whose contract cannot be read.
-    expect(abstentions).toHaveLength(9);
+    // Ten, with the claim that `map`'s result is discarded by the CALLER — a
+    // true statement about the code that no capability adjudicates. Abstaining
+    // names the gap; refuting it because `map` preserves promises would answer
+    // a question nobody asked.
+    expect(abstentions).toHaveLength(10);
     expect(abstentions.every((outcome) => outcome.correct)).toBe(true);
   });
 
@@ -75,7 +78,11 @@ describe("Verifier capability, on injected challenges", () => {
     // mechanism work, and the cost of leaving them is exactly the recall this
     // line reports.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
-    // Five of six. The new callback pair discriminates: `items.forEach(async …)`
+    // Six of seven. The `map` pair discriminates in the sharpest way available:
+    // byte-identical code, two claims, one refuted and one abstained. Proving a
+    // nearby language fact is not proving the claim that was made.
+    //
+    // The callback pair discriminates: `items.forEach(async …)`
     // verifies and `await queue.forEach(async …)` is refuted — the same syntax
     // and the same method name, separated only by the declared contract.
     //
@@ -87,8 +94,8 @@ describe("Verifier capability, on injected challenges", () => {
     // does NOT discriminate — deliberately. Both are `catch {}` with nothing
     // downstream, and nothing in either repository says which was meant. That
     // is the pair the capability is designed to abstain on.
-    expect(report.pairsTotal).toBe(6);
-    expect(report.pairsDiscriminated).toBe(5);
+    expect(report.pairsTotal).toBe(7);
+    expect(report.pairsDiscriminated).toBe(6);
   });
 
   it("still filters the candidate the analyzer used to produce", () => {
@@ -161,9 +168,10 @@ describe("Verifier capability, on injected challenges", () => {
       },
       should_reject: {
         verified: 0,
-        // 12 → 15: a receiver that awaits its callback, `map` propagating the
-        // promises out, and a synchronous callback with nothing to drop.
-        rejected: 15,
+        // 12 → 16: a receiver that awaits its callback, `map` propagating the
+        // promises out (twice, once in each half of the proposition pair), and
+        // a synchronous callback with nothing to drop.
+        rejected: 16,
         // One: the historical replay. The replay
         // comes back `inconclusive` rather than `rejected` because the
         // verifier's own binding says the callee is synchronous while the
@@ -181,10 +189,10 @@ describe("Verifier capability, on injected challenges", () => {
       should_abstain: {
         verified: 0,
         rejected: 0,
-        // Nine, adding the untyped callback receiver. Assuming an unreadable
-        // receiver drops the promise would be the name-keyed mistake by
-        // another route.
-        inconclusive: 9,
+        // Ten. The untyped callback receiver, and the caller-discards-the-array
+        // claim: the same code as the `map` refutation, a different
+        // proposition, and no capability for it.
+        inconclusive: 10,
         unavailable: 0,
       },
     });
@@ -194,7 +202,7 @@ describe("Verifier capability, on injected challenges", () => {
     // Fail-closed: an empty matrix satisfies every zero above.
     const report = evaluateChallenges(VERIFIER_CHALLENGES);
     expect(report.outcomes).toHaveLength(VERIFIER_CHALLENGES.length);
-    expect(report.outcomes.length).toBeGreaterThanOrEqual(31);
+    expect(report.outcomes.length).toBeGreaterThanOrEqual(33);
     expect(report.provenance).toBe("injected");
     for (const gold of ["should_verify", "should_reject", "should_abstain"]) {
       expect(

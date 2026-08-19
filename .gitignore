@@ -30,3 +30,4 @@ probe-transcript-*.json
 
 # Test report consumed by the no-skipped-tests gate
 .vitest-report.json
+.diagnostics/

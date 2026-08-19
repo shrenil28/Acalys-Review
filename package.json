@@ -23,7 +23,7 @@
     "schemas:check": "npm run schemas:check --workspace @acalys/contracts",
     "verify": "npm run typecheck && npm run lint && npm run format:check && npm run depcruise && node scripts/assert-project-references.mjs && npm run schemas:check && npm run build:clean && npm run test:ci",
     "build:clean": "node scripts/assert-clean-build.mjs",
-    "test:ci": "vitest run --reporter=json --outputFile=.vitest-report.json && node scripts/assert-no-skipped-tests.mjs .vitest-report.json"
+    "test:ci": "node scripts/test-ci.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

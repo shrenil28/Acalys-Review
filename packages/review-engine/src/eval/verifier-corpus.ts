@@ -338,6 +338,64 @@ export const VERIFIER_CHALLENGES: readonly VerifierChallenge[] = [
       "nothing is dropped: `map` hands the promises back and the caller awaits them — distinguishing this from `forEach` needs the declared contract, not the shape",
   },
   {
+    // ── The narrow proposition, and the one next to it ────────────────────
+    //
+    // `map` really does preserve the promises, so a claim that the RECEIVER
+    // discards them is false and is refuted. The caller then throws the array
+    // away, so the saves are genuinely not awaited before `markComplete()` —
+    // a real defect, and a different proposition.
+    //
+    // Refuting the first must not be mistaken for refuting the second. This is
+    // the competence rule one level out: proving a nearby language fact is not
+    // proving or disproving the claim that was made.
+    id: "map-receiver-does-not-discard",
+    gold: "should_reject",
+    files: {
+      "src/loop.ts": [
+        "async function save(item: number): Promise<void> {",
+        "  return;",
+        "}",
+        "export function run(items: number[]): void {",
+        "  items.map(async (item) => save(item));",
+        "  markComplete();",
+        "}",
+        "function markComplete(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "`map` discards the promise its async callback returns.",
+      "src/loop.ts",
+      5,
+    ),
+    because:
+      "`map` hands the promises back; the receiver discards nothing. The surrounding code is still wrong, and that is a different claim",
+    pairedWith: "map-result-discarded-by-caller",
+  },
+  {
+    id: "map-result-discarded-by-caller",
+    gold: "should_abstain",
+    files: {
+      "src/loop.ts": [
+        "async function save(item: number): Promise<void> {",
+        "  return;",
+        "}",
+        "export function run(items: number[]): void {",
+        "  items.map(async (item) => save(item));",
+        "  markComplete();",
+        "}",
+        "function markComplete(): void {}",
+      ].join("\n"),
+    },
+    input: claim(
+      "the saves are not settled before `markComplete()` runs",
+      "src/loop.ts",
+      5,
+    ),
+    because:
+      "byte-identical code, and this claim is TRUE — but it is about the caller discarding the returned array, which no capability adjudicates yet. Abstaining names a gap; refuting it because `map` preserves promises would answer a question nobody asked",
+    pairedWith: "map-receiver-does-not-discard",
+  },
+  {
     id: "callback-consumer-unresolvable",
     gold: "should_abstain",
     files: {
