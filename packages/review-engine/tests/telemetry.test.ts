@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   ANALYZER_CORPUS,
+  add,
+  assertConsistent,
   createRecorder,
   evaluateFunnel,
   measure,
@@ -10,9 +12,11 @@ import {
   notApplicable,
   ratio,
   render,
+  sum,
   summarize,
   unmeasured,
   NULL_RECORDER,
+  type ExecutionReport,
   type FunnelReport,
   type Recorder,
 } from "../src/eval/index.js";
@@ -107,6 +111,34 @@ describe("Telemetry cannot change what is reviewed", () => {
     });
   });
 
+  it("measures durations with a monotonic clock", async () => {
+    // `Date.now()` differences are wall-clock differences: one NTP correction
+    // during a stage yields a negative or wildly inflated duration, and at the
+    // millisecond scale these stages occupy that single adjustment would
+    // dominate every percentile in the report.
+    const recorder = createRecorder();
+    await measure(
+      recorder,
+      {
+        runId: "r",
+        stage: "verification",
+        invocationId: "i",
+        implementationKind: "deterministic",
+        procedureId: "p",
+        procedureVersion: "1",
+        attempt: 1,
+      },
+      () => new Promise((resolve) => setTimeout(resolve, 20)),
+    );
+
+    const [only] = recorder.measurements;
+    expect(only?.wallMs).toBeGreaterThan(0);
+    expect(Number.isFinite(only?.wallMs)).toBe(true);
+    // Sub-millisecond resolution: a whole-millisecond wall clock cannot
+    // produce a fractional duration, so this distinguishes the two sources.
+    expect(only?.startedAt).toBeGreaterThan(0);
+  });
+
   it("returns the work's result and rethrows its error unchanged", async () => {
     // A timing wrapper that swallows an exception turns a verifier failure
     // into a silent success — the exact class of defect the verification
@@ -162,6 +194,105 @@ describe("Telemetry cannot change what is reviewed", () => {
         () => "result",
       ),
     ).toBe("result");
+  });
+});
+
+describe("Quantities compose by stated rules", () => {
+  it("lets an unknown component absorb the total", () => {
+    // ── The rule that produces the honest cost number ─────────────────────
+    //
+    // `measured(0) + unmeasured` is unmeasured. An unknown component makes the
+    // sum unknown however small the known part is — which is exactly the case
+    // today: inference cost is a true zero, infrastructure cost is unaccounted
+    // for, and the total therefore does not exist as a number.
+    expect(add(measured(0), unmeasured("infra")).kind).toBe("unmeasured");
+    expect(add(unmeasured("infra"), measured(99)).kind).toBe("unmeasured");
+  });
+
+  it("treats an absent component as contributing nothing", () => {
+    // Permitted only because `notApplicable` means *this component does not
+    // exist within this aggregate*, which is a fact about the total — unlike
+    // `unmeasured`, which is an admission of not having looked.
+    expect(add(measured(5), notApplicable("no models ran"))).toEqual(
+      measured(5),
+    );
+    expect(add(notApplicable("a"), notApplicable("b")).kind).toBe(
+      "notApplicable",
+    );
+    expect(add(measured(2), measured(3))).toEqual(measured(5));
+  });
+
+  it("refuses to add a ratio into a scalar aggregate", () => {
+    // A denominator-less value routed into a sum is a category error, not a
+    // value to propagate. Without this the four-state type degenerates into a
+    // bag where any state can appear anywhere.
+    expect(add(measured(1), ratio(1, 0, "none")).kind).toBe("unmeasured");
+  });
+
+  it("sums an empty list to a measured zero", () => {
+    expect(sum([])).toEqual(measured(0));
+    expect(sum([measured(1), measured(2), notApplicable("x")])).toEqual(
+      measured(3),
+    );
+    expect(sum([measured(1), unmeasured("y")]).kind).toBe("unmeasured");
+  });
+});
+
+describe("A report cannot contradict itself", () => {
+  const base = {
+    runId: "r",
+    logicalInvocations: 1,
+    physicalAttempts: 1,
+    retryAmplification: measured(1),
+    contextTokenEstimate: 0,
+    contextItems: 0,
+    contextOmittedItems: 0,
+    modelCalls: 0,
+    providerInputTokens: notApplicable("none"),
+    providerOutputTokens: notApplicable("none"),
+    modelInferenceCostUsd: measured(0),
+    infrastructureCostUsd: unmeasured("not accounted"),
+    totalCostUsd: unmeasured("not accounted"),
+    latencyByStage: {},
+    work: {
+      candidatesTotal: 0,
+      competenceSupported: 0,
+      competenceUnsupported: 0,
+      deterministicallySettled: 0,
+      deepVerificationRequired: 0,
+    },
+  } satisfies ExecutionReport;
+
+  it("rejects provider usage without model calls", () => {
+    // Two defensible field values, one impossible report. The contradiction
+    // exists only between them, which is why it is checked between them.
+    expect(() =>
+      assertConsistent({ ...base, providerInputTokens: measured(800) }),
+    ).toThrow(/no model calls/);
+  });
+
+  it("rejects a billed inference cost without model calls", () => {
+    expect(() =>
+      assertConsistent({ ...base, modelInferenceCostUsd: measured(0.14) }),
+    ).toThrow(/measured zero/);
+  });
+
+  it("rejects fewer executions than units of work", () => {
+    // More physical than logical is retries and expected. Fewer is impossible:
+    // work that requires an execution cannot have had none.
+    expect(() =>
+      assertConsistent({ ...base, logicalInvocations: 5, physicalAttempts: 2 }),
+    ).toThrow(/physical attempts/);
+  });
+
+  it("rejects a measured total built on an unmeasured component", () => {
+    expect(() =>
+      assertConsistent({ ...base, totalCostUsd: measured(0) }),
+    ).toThrow(/component of it is unmeasured/);
+  });
+
+  it("accepts the report the pipeline actually produces", () => {
+    expect(() => assertConsistent(base)).not.toThrow();
   });
 });
 

@@ -7,6 +7,7 @@
  */
 
 import {
+  add,
   measured,
   notApplicable,
   ratio,
@@ -104,6 +105,56 @@ function latencyOf(durations: readonly number[]): LatencyProfile {
   };
 }
 
+/**
+ * Contradictions a report must not be able to state.
+ *
+ * Every field can be locally valid while the set describes nonsense —
+ * `modelCalls = 0` beside `providerInputTokens = measured(800)` is two
+ * defensible values and one impossible report. These are checked on the way
+ * out, where a future edit to any single field has to pass them all.
+ *
+ * Thrown rather than logged. A report is evidence; one that contradicts itself
+ * is worse than none, because it will be believed.
+ */
+export function assertConsistent(report: ExecutionReport): void {
+  const fail = (message: string): never => {
+    throw new Error(`Inconsistent execution report: ${message}`);
+  };
+
+  if (report.modelCalls === 0) {
+    if (report.providerInputTokens.kind !== "notApplicable") {
+      fail("no model calls, yet provider input tokens claim a measurement");
+    }
+    if (report.providerOutputTokens.kind !== "notApplicable") {
+      fail("no model calls, yet provider output tokens claim a measurement");
+    }
+    if (
+      report.modelInferenceCostUsd.kind !== "measured" ||
+      report.modelInferenceCostUsd.value !== 0
+    ) {
+      fail("no model calls, so inference cost is a measured zero or nothing");
+    }
+  }
+
+  // Work requiring at least one execution cannot have fewer executions than
+  // units of work. The reverse — more physical than logical — is retries, and
+  // is expected.
+  if (report.physicalAttempts < report.logicalInvocations) {
+    fail(
+      `${String(report.physicalAttempts)} physical attempts for ` +
+        `${String(report.logicalInvocations)} logical invocations`,
+    );
+  }
+
+  // A total containing an unmeasured component cannot itself be measured.
+  if (
+    report.infrastructureCostUsd.kind === "unmeasured" &&
+    report.totalCostUsd.kind === "measured"
+  ) {
+    fail("total cost is measured while a component of it is unmeasured");
+  }
+}
+
 export function summarize(
   runId: string,
   measurements: readonly InvocationMeasurement[],
@@ -139,7 +190,7 @@ export function summarize(
   const noModels =
     "no model-backed procedure ran; the pipeline is entirely deterministic";
 
-  return {
+  const report: ExecutionReport = {
     runId,
     logicalInvocations,
     physicalAttempts,
@@ -184,13 +235,23 @@ export function summarize(
     infrastructureCostUsd: unmeasured(
       "CPU, container, database and storage cost are not accounted for",
     ),
-    // Unrenderable while a component is unmeasured. Rendering it as $0 is how
-    // a future model-backed checkpoint gets compared against a number nobody
-    // ever measured.
-    totalCostUsd: unmeasured(
-      "infrastructure cost is unmeasured, so no total exists",
+    // Derived through the composition rules rather than asserted, so the
+    // "unknown absorbs" behaviour is exercised by the real report and not only
+    // by its unit tests. `measured(0) + unmeasured` is unmeasured: an unknown
+    // component makes the sum unknown, however small the known part is.
+    totalCostUsd: add(
+      measured(0),
+      unmeasured(
+        "CPU, container, database and storage cost are not accounted for",
+      ),
     ),
     latencyByStage: byStage,
     work,
   };
+
+  // Checked here rather than trusted. The fields are assembled a few lines
+  // apart and each looks right in isolation; the contradiction only exists
+  // between them.
+  assertConsistent(report);
+  return report;
 }

@@ -105,6 +105,25 @@ describe("The funnel baseline", () => {
     expect(report.falsePositiveRefutationRate).toBeUndefined();
   });
 
+  it("prices a clean review apart from a review that found something", async () => {
+    // Production traffic is mostly changes with no defect in them. A reviewer
+    // that is cheap when it finds bugs and expensive when it does not is not
+    // economical, and the per-finding figure cannot express that — its
+    // denominator is zero on exactly those reviews.
+    const report = await evaluateFunnel(ANALYZER_CORPUS);
+
+    expect(report.tokensPerCleanCase).toBeDefined();
+    expect(report.tokensPerPublishedFinding).toBeDefined();
+    // Distinct numbers, from distinct denominators. If they coincide, the
+    // clean figure is being computed over the whole corpus.
+    expect(report.tokensPerCleanCase).not.toBe(
+      report.tokensPerPublishedFinding,
+    );
+    expect(report.tokensPerCleanCase ?? 0).toBeLessThan(
+      report.tokensPerPublishedFinding ?? 0,
+    );
+  });
+
   it("an empty corpus yields undefined ratios, not flattering ones", async () => {
     // The degenerate case, kept separate from the live one above because they
     // fail for different reasons: this catches a harness that evaluated

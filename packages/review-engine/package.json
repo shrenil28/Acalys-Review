@@ -23,7 +23,8 @@
     "clean": "rm -rf dist",
     "eval:dashboard": "tsx scripts/dashboard.ts",
     "eval:funnel": "tsx scripts/funnel-dashboard.ts",
-    "eval:verifier": "tsx scripts/verifier-dashboard.ts"
+    "eval:verifier": "tsx scripts/verifier-dashboard.ts",
+    "eval:baseline": "tsx scripts/baseline-report.ts"
   },
   "dependencies": {
     "@acalys/code-intelligence": "*",

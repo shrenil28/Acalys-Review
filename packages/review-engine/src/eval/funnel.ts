@@ -209,6 +209,16 @@ export interface FunnelReport {
 
   /** Context tokens across analysis and verification, per published finding. */
   readonly tokensPerPublishedFinding: Ratio;
+  /**
+   * What it costs to correctly say nothing.
+   *
+   * Production traffic is mostly changes with no defect in them, and a reviewer
+   * that is cheap when it finds bugs and expensive when it does not is not
+   * economical. The per-finding figure cannot express that — its denominator is
+   * zero on exactly those reviews — so the two are reported side by side rather
+   * than one standing in for the other.
+   */
+  readonly tokensPerCleanCase: Ratio;
   readonly analysisTokens: number;
   readonly verificationTokens: number;
 
@@ -306,7 +316,22 @@ export async function runFunnelCase(
   readonly analysisTokens: number;
   readonly verificationTokens: number;
 }> {
-  const analysis = await runCase(testCase);
+  const analysis = await measure(
+    recorder,
+    {
+      runId: `eval:${testCase.id}`,
+      stage: "analysis",
+      // One logical analysis per case. The planner runs inside it today; when
+      // they separate, this splits rather than changing meaning.
+      invocationId: `analysis:${testCase.id}`,
+      implementationKind: "deterministic",
+      procedureId: "acalys.analyzer.correctness",
+      procedureVersion: "1",
+      attempt: 1,
+      inference: undefined,
+    },
+    () => runCase(testCase),
+  );
 
   const snapshot = {
     revisionId: `eval:${testCase.id}`,
@@ -402,16 +427,42 @@ export async function runFunnelCase(
     });
   }
 
-  const gate = promoteVerified(candidates);
+  const gate = await measure(
+    recorder,
+    {
+      runId: `eval:${testCase.id}`,
+      stage: "reconciliation",
+      invocationId: `promotion:${testCase.id}`,
+      implementationKind: "deterministic",
+      procedureId: "acalys.promotion",
+      procedureVersion: "1",
+      attempt: 1,
+      inference: undefined,
+    },
+    () => promoteVerified(candidates),
+  );
   const promotedFingerprints =
     gate.kind === "promoted"
       ? new Set(gate.findings.map((finding) => finding.fingerprint))
       : new Set<string>();
 
-  const plan =
-    gate.kind === "promoted"
-      ? planPublication(gate.findings, EVAL_PUBLICATION_CONFIG)
-      : { publish: [] as { fingerprint: string }[] };
+  const plan = await measure(
+    recorder,
+    {
+      runId: `eval:${testCase.id}`,
+      stage: "policy",
+      invocationId: `policy:${testCase.id}`,
+      implementationKind: "deterministic",
+      procedureId: "acalys.publication.policy",
+      procedureVersion: "1",
+      attempt: 1,
+      inference: undefined,
+    },
+    () =>
+      gate.kind === "promoted"
+        ? planPublication(gate.findings, EVAL_PUBLICATION_CONFIG)
+        : { publish: [] as { fingerprint: string }[] },
+  );
   const publishedFingerprints = new Set(
     plan.publish.map((finding) => finding.fingerprint),
   );
@@ -452,12 +503,18 @@ export async function evaluateFunnel(
   const journeys: CandidateJourney[] = [];
   let analysisTokens = 0;
   let verificationTokens = 0;
+  // Tokens spent on cases that contain no defect, tracked separately from the
+  // start rather than reconstructed: the split is the whole point.
+  let cleanTokens = 0;
 
   for (const testCase of cases) {
     const outcome = await runFunnelCase(testCase, recorder);
     journeys.push(...outcome.journeys);
     analysisTokens += outcome.analysisTokens;
     verificationTokens += outcome.verificationTokens;
+    if (testCase.expect.length === 0) {
+      cleanTokens += outcome.analysisTokens + outcome.verificationTokens;
+    }
   }
 
   const count = (predicate: (journey: CandidateJourney) => boolean): number =>
@@ -588,6 +645,10 @@ export async function evaluateFunnel(
     tokensPerPublishedFinding: ratio(
       analysisTokens + verificationTokens,
       published,
+    ),
+    tokensPerCleanCase: ratio(
+      cleanTokens,
+      cases.filter((testCase) => testCase.expect.length === 0).length,
     ),
     analysisTokens,
     verificationTokens,

@@ -75,6 +75,58 @@ export function ratio(
     : { kind: "measured", value: Number((numerator / denominator).toFixed(4)) };
 }
 
+/**
+ * Adding two quantities, with the rules stated rather than improvised.
+ *
+ * Individually correct fields can still compose into nonsense, and the
+ * combination is where that happens: two honest components summed by a naive
+ * `+` produce a confident total that neither supports.
+ *
+ * ```
+ * measured + measured        measured        both counted
+ * measured + notApplicable   measured        the absent part contributes nothing
+ * anything + unmeasured      unmeasured      one part is unknown, so the total is
+ * ```
+ *
+ * The third rule is the one that matters. `modelInferenceCost measured(0)` plus
+ * `infrastructureCost unmeasured` is **unmeasured**, never `measured(0)` — an
+ * unknown component makes the sum unknown, however small the known part is.
+ *
+ * `notApplicable` may only be treated as zero because it means *this component
+ * does not exist within this aggregate*, which is a fact about the total. That
+ * is different from not having looked.
+ */
+export function add(left: Quantity, right: Quantity): Quantity {
+  // Checked first: unknown is absorbing, whatever it is paired with.
+  if (left.kind === "unmeasured") return left;
+  if (right.kind === "unmeasured") return right;
+
+  // A ratio has no place in an additive aggregate. Reaching here means a
+  // denominator-less value was routed into a sum, which is a category error
+  // rather than a value to propagate.
+  if (left.kind === "undefinedRatio" || right.kind === "undefinedRatio") {
+    return unmeasured(
+      "a ratio was combined additively; ratios are not summable components",
+    );
+  }
+
+  if (left.kind === "notApplicable" && right.kind === "notApplicable") {
+    return left;
+  }
+  if (left.kind === "notApplicable") return right;
+  if (right.kind === "notApplicable") return left;
+
+  return measured(left.value + right.value);
+}
+
+/** Adds many, left to right. Empty sums to a measured zero. */
+export function sum(quantities: readonly Quantity[]): Quantity {
+  return quantities.reduce<Quantity>(
+    (total, next) => add(total, next),
+    measured(0),
+  );
+}
+
 /** Renders a quantity for a report, without inventing a number. */
 export function render(quantity: Quantity): string {
   switch (quantity.kind) {
@@ -151,6 +203,21 @@ export type MeasuredStage = (typeof MEASURED_STAGES)[number];
  * one candidate verified and two provider requests paid for, and a report that
  * cannot say both will hide reliability regressions inside a flat cost number.
  */
+/**
+ * Durations come from a monotonic clock.
+ *
+ * `Date.now()` differences are wall-clock differences: an NTP correction or a
+ * DST change during a long stage produces a negative or wildly inflated
+ * duration. At the millisecond scale these stages currently occupy, that is not
+ * a rounding concern — a single adjustment would dominate every percentile in
+ * the report.
+ *
+ * Epoch timestamps are still recorded, because ordering and correlation across
+ * processes need a shared reference that a monotonic clock cannot provide.
+ * They are for placing an invocation in time, never for measuring it.
+ */
+export const monotonicNow = (): number => performance.now();
+
 export interface InvocationMeasurement {
   readonly runId: string;
   readonly stage: MeasuredStage;

@@ -1,10 +1,13 @@
 export {
   IMPLEMENTATION_KINDS,
   MEASURED_STAGES,
+  add,
   measured,
+  monotonicNow,
   notApplicable,
   ratio,
   render,
+  sum,
   unmeasured,
   type ContextUsage,
   type ImplementationKind,
@@ -20,6 +23,7 @@ export {
   type Recorder,
 } from "./recorder.js";
 export {
+  assertConsistent,
   summarize,
   type ExecutionReport,
   type LatencyProfile,

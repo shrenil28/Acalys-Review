@@ -17,7 +17,7 @@
  * get its own path rather than quietly promoting this one.
  */
 
-import type { InvocationMeasurement } from "./measurement.js";
+import { monotonicNow, type InvocationMeasurement } from "./measurement.js";
 
 export interface Recorder {
   record(measurement: InvocationMeasurement): void;
@@ -71,14 +71,17 @@ export async function measure<T>(
   >,
   work: () => Promise<T> | T,
 ): Promise<T> {
+  // Two clocks, for two different jobs: the epoch pair places the invocation in
+  // time and correlates it across processes; the monotonic pair measures it.
   const startedAt = Date.now();
+  const from = monotonicNow();
   try {
     const result = await work();
     safelyRecord(recorder, {
       ...describe,
       startedAt,
       completedAt: Date.now(),
-      wallMs: Date.now() - startedAt,
+      wallMs: monotonicNow() - from,
       outcome: "succeeded",
     });
     return result;
@@ -90,7 +93,7 @@ export async function measure<T>(
       ...describe,
       startedAt,
       completedAt: Date.now(),
-      wallMs: Date.now() - startedAt,
+      wallMs: monotonicNow() - from,
       outcome: "failed",
     });
     throw error;
