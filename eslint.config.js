@@ -25,6 +25,10 @@ export default tseslint.config(
       // TypeScript project, so the type-aware rules have no program to resolve
       // them against; they are exercised by being run in CI rather than typed.
       "scripts/*.mjs",
+      // Test fixtures that exist to be SPAWNED as separate OS processes — the
+      // only way to prove a cross-process limit holds. Same reason as above:
+      // outside any TypeScript project, and exercised by being executed.
+      "**/tests/fixtures/*.mjs",
     ],
   },
 

@@ -31,6 +31,8 @@ import { fileURLToPath } from "node:url";
 
 import pg from "pg";
 
+import { withStartupSlot } from "./startup-limit.js";
+
 const run = promisify(execFile);
 
 /**
@@ -114,46 +116,26 @@ export function dockerAvailable(): boolean {
  * another's database.
  */
 /**
- * Limits how many Postgres containers are created at once.
+ * How many Postgres containers may be starting anywhere on this machine.
  *
  * Not a timeout, and deliberately so. Two `test:ci` runs terminated non-zero
  * with no reported test failure; the captured diagnostics showed
  * `Docker Desktop is unable to start / qemu: process terminated unexpectedly`,
  * with 45GB of disk and 9GB of memory free. The backend VM was crashing under
- * the burst of nine suites creating containers simultaneously.
+ * the burst of nine suites creating containers at once, and rerunning with
+ * vitest limited to two forks completed every one of them.
  *
- * Reducing vitest's own parallelism to two forks made every Postgres suite
- * pass, which identified the trigger — so the gate is placed on the thing that
- * actually causes the burst rather than on the whole test runner.
+ * The first implementation of this limit was a module-level counter, and it was
+ * worthless: vitest gives each test file its own fork, each fork runs one file
+ * at a time and calls `startPostgres` once, so the counter could never block.
+ * The limit has to be machine-wide or it is decoration — see
+ * {@link withStartupSlot}, and the probe that proves it.
  *
- * This does not mask anything. A suite whose container fails still fails, and
- * the readiness timeout is untouched: a longer wait would have converted a
- * crashing VM into a slower flaky suite, and the diagnostics would have stopped
- * being collected because the run would eventually have passed.
- *
- * The underlying instability is Docker Desktop's, not this repository's. This
- * keeps the suite usable on a machine that has it.
+ * Nothing is masked. The readiness timeout is untouched, a suite whose
+ * container fails still fails, and full test parallelism is unchanged for
+ * everything that is not booting a database.
  */
 const MAX_CONCURRENT_STARTUPS = 2;
-
-let startupSlots = MAX_CONCURRENT_STARTUPS;
-const startupQueue: (() => void)[] = [];
-
-async function acquireStartupSlot(): Promise<() => void> {
-  if (startupSlots > 0) {
-    startupSlots -= 1;
-  } else {
-    await new Promise<void>((resolve) => startupQueue.push(resolve));
-  }
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    const next = startupQueue.shift();
-    if (next === undefined) startupSlots += 1;
-    else next();
-  };
-}
 
 let volumeBaseline: ReadonlySet<string> | undefined;
 
@@ -385,8 +367,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
   // Held across creation AND readiness, because the burst that crashes the
   // backend VM is several containers *booting* at once, not several `docker
   // run` calls returning at once.
-  const releaseSlot = await acquireStartupSlot();
-  try {
+  return await withStartupSlot(MAX_CONCURRENT_STARTUPS, async () => {
     await run("docker", [
       "run",
       "-d",
@@ -492,9 +473,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     const PORT = await publishedPort(CONTAINER);
     await waitForReady(CONTAINER, PORT);
     return await connect(CONTAINER, PORT);
-  } finally {
-    releaseSlot();
-  }
+  });
 }
 
 /** Everything after the container is serving, outside the startup gate. */

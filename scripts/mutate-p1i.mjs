@@ -383,6 +383,23 @@ const MUTATIONS = [
     suite: "packages/review-engine/tests/callback.test.ts",
   },
   {
+    id: 44,
+    name: "the startup limiter admits every process at once",
+    file: "packages/database/tests/startup-limit.ts",
+    find: "  const deadline = Date.now() + STALE_AFTER_MS * 2;",
+    replace: "  const deadline = Date.now() - 1;",
+    suite: "packages/database/tests/startup-limit.test.ts",
+  },
+  {
+    id: 45,
+    name: "a slot is never released after the work throws",
+    file: "packages/database/tests/startup-limit.ts",
+    find: "    if (held !== undefined) rmSync(held, { recursive: true, force: true });",
+    replace:
+      '    if (false) rmSync(held ?? "", { recursive: true, force: true });',
+    suite: "packages/database/tests/startup-limit.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",
