@@ -57,10 +57,17 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 
   return {
     async get(path, schema, init) {
-      const token = options.authorization?.();
       let response: Response;
 
       try {
+        // Inside the `try`, with the fetch it belongs to. Obtaining a token is
+        // part of making the request and can fail like any other part of it —
+        // a provider that throws (expired session, refresh failure) outside
+        // this block rejected the promise instead of returning a result, and
+        // the caller's `.then` never ran: the page stayed on `loading`
+        // forever rather than reporting that nothing could be asked.
+        const token = options.authorization?.();
+
         response = await doFetch(`${options.baseUrl}${path}`, {
           method: "GET",
           headers: {

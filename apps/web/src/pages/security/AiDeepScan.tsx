@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ExternalLink, ShieldCheck } from "lucide-react";
 import { Badge, severityTone } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -12,7 +12,6 @@ import { Page, PageHeader } from "@/components/layout/PageHeader";
 import { ScanRepositoryButton } from "@/components/layout/SecurityBanner";
 import { TopBarActions } from "@/components/layout/TopBar";
 import {
-  deepScanFindings,
   findingCategories,
   findingStatuses,
   severities,
@@ -33,11 +32,16 @@ const statusTone = {
 /** Stable, so the row memo does not rerun on every render. */
 const EMPTY: readonly DeepScanFinding[] = [];
 
-export function AiDeepScanPage() {
+/** Refuses a state the union says cannot exist. */
+function assertNever(value: never): never {
+  throw new Error(`Unhandled deep-scan state: ${String(value)}`);
+}
+
+export function AiDeepScanPage({ reviewId }: { reviewId?: string }) {
   const simulatedLoad = usePageLoad();
   // Fetching lives in the hook so this component renders fixtures, real data
   // and test data identically, without knowing which it was given.
-  const source = useDeepScanFindings();
+  const source = useDeepScanFindings(reviewId);
   const findings = source.status === "ready" ? source.findings : EMPTY;
   const loading = simulatedLoad || source.status === "loading";
   const [query, setQuery] = useState("");
@@ -46,14 +50,28 @@ export function AiDeepScanPage() {
   const [category, setCategory] = useState<string[]>([]);
   const [status, setStatus] = useState<string[]>([]);
   const [selected, setSelected] = useState<DeepScanFinding | null>(null);
-  const [statuses, setStatuses] = useState<Record<string, FindingStatus>>(() =>
-    Object.fromEntries(deepScanFindings.map((f) => [f.id, f.status])),
-  );
+  // Local triage decisions only — an override on top of the status the finding
+  // arrived with. Seeding it from the fixture list meant every API finding had
+  // `undefined` here, which rendered an empty badge and made the Status filter
+  // exclude the entire table into "No vulnerabilities found".
+  const [statuses, setStatuses] = useState<Record<string, FindingStatus>>({});
+  const statusOf = (finding: DeepScanFinding): FindingStatus =>
+    statuses[finding.id] ?? finding.status;
+
+  // Whether anything the user chose is narrowing the list. An empty table with
+  // a filter applied is not a statement about the code, and must not borrow
+  // the clean-scan sentence.
+  const filtersActive =
+    query.trim() !== "" ||
+    repo.length > 0 ||
+    severity.length > 0 ||
+    category.length > 0 ||
+    status.length > 0;
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return findings.filter((finding) => {
-      const currentStatus = statuses[finding.id];
+      const currentStatus = statuses[finding.id] ?? finding.status;
       if (repo.length > 0 && !repo.includes(finding.repo)) return false;
       if (severity.length > 0 && !severity.includes(finding.severity)) return false;
       if (category.length > 0 && !category.includes(finding.category)) return false;
@@ -80,6 +98,69 @@ export function AiDeepScanPage() {
         <TableSkeleton filters={4} rows={8} columns={3} />
       </Page>
     );
+
+  // ── What an empty table means, decided once and exhaustively ────────────
+  //
+  // A ternary chain here branched on `failed` alone, so `misconfigured` fell
+  // through to "No vulnerabilities found in the analyzed scope" — a build that
+  // never asked anything reporting a clean scan, which is the exact failure
+  // the data-mode seam exists to prevent.
+  //
+  // A `switch` closed by `assertNever`, the discipline `lib/findings.ts` and
+  // `lib/premerge.ts` already use, makes the next state added to
+  // `DeepScanState` a compile error instead of a reassuring sentence.
+  //
+  // `null` means "there is something real to show"; every other branch is the
+  // same empty-state shell with a different sentence. No new visual element.
+  const emptyState: ReactNode = ((): ReactNode => {
+    switch (source.status) {
+      // `loading` is absent because the skeleton returned above and the
+      // compiler knows it: naming it here is a "not comparable" error, which
+      // is the exhaustiveness check working in the other direction.
+      case "failed":
+        // A failed request and a clean scan both produce zero rows. Saying
+        // "none found" here would report an outage as good news — the
+        // frontend restatement of a rule the backend already enforces, where
+        // a verifier outage must not read as a clean review.
+        return (
+          <TableEmpty colSpan={7}>
+            Findings could not be loaded, so this list is not a statement about
+            your code. {source.detail}.
+          </TableEmpty>
+        );
+      case "misconfigured":
+        // Nothing was requested, so nothing is known. Its own sentence rather
+        // than the failure one, because the remedy is a deployment variable
+        // and not a retry — and never the clean-scan one, which would present
+        // a missing configuration as a security result.
+        return (
+          <TableEmpty colSpan={7}>
+            This build is not configured to load findings, so this list is not
+            a statement about your code. {source.detail}.
+          </TableEmpty>
+        );
+      case "ready":
+        if (rows.length > 0) return null;
+        // Zero rows because the user narrowed the list is not zero findings.
+        // The Status, Category and Repository filters can each empty the
+        // table on their own, and the clean-scan copy would then describe the
+        // filter as a security posture.
+        return filtersActive ? (
+          <TableEmpty colSpan={7}>
+            No findings match the current filters. {findings.length} findings
+            are loaded; clear the filters to see them.
+          </TableEmpty>
+        ) : (
+          <TableEmpty colSpan={7}>
+            No vulnerabilities found in the analyzed scope. Coverage is
+            incomplete. {neverScanned} repositories have no completed AI Deep
+            Scan.
+          </TableEmpty>
+        );
+      default:
+        return assertNever(source);
+    }
+  })();
 
   return (
     <Page>
@@ -140,28 +221,7 @@ export function AiDeepScanPage() {
               </tr>
             </thead>
             <tbody>
-              {source.status === "failed" ? (
-                // ── Never "no vulnerabilities found" ──────────────────────
-                //
-                // A failed request and a clean scan both produce zero rows.
-                // Saying "none found" here would report an outage as good news
-                // — the frontend restatement of a rule the backend already
-                // enforces, where a verifier outage must not read as a clean
-                // review.
-                //
-                // The same empty-state shell, not a new visual element: what
-                // changed is the sentence, not the design.
-                <TableEmpty colSpan={7}>
-                  Findings could not be loaded, so this list is not a statement
-                  about your code. {source.detail}.
-                </TableEmpty>
-              ) : rows.length === 0 ? (
-                <TableEmpty colSpan={7}>
-                  No vulnerabilities found in the analyzed scope. Coverage is
-                  incomplete. {neverScanned} repositories have no completed AI Deep
-                  Scan.
-                </TableEmpty>
-              ) : (
+              {emptyState ?? (
                 rows.map((finding) => (
                   <Tr key={finding.id} onClick={() => setSelected(finding)}>
                     <Td>
@@ -173,8 +233,8 @@ export function AiDeepScanPage() {
                     <Td className="font-mono text-xs">{finding.repo}</Td>
                     <Td>{finding.subsystem}</Td>
                     <Td>
-                      <Badge tone={statusTone[statuses[finding.id]]}>
-                        {statuses[finding.id]}
+                      <Badge tone={statusTone[statusOf(finding)]}>
+                        {statusOf(finding)}
                       </Badge>
                     </Td>
                     <Td>
@@ -204,7 +264,7 @@ export function AiDeepScanPage() {
                                 (option) => (
                                   <MenuItem
                                     key={option}
-                                    selected={statuses[finding.id] === option}
+                                    selected={statusOf(finding) === option}
                                     onClick={() => {
                                       setStatusFor(finding.id, option);
                                       close();
@@ -235,8 +295,8 @@ export function AiDeepScanPage() {
             <div className="flex items-center gap-2">
               <Badge tone={severityTone[selected.severity]}>{selected.severity}</Badge>
               <span className="font-mono text-xs text-fg-subtle">{selected.id}</span>
-              <Badge tone={statusTone[statuses[selected.id]]}>
-                {statuses[selected.id]}
+              <Badge tone={statusTone[statusOf(selected)]}>
+                {statusOf(selected)}
               </Badge>
             </div>
           )

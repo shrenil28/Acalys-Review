@@ -86,8 +86,29 @@ export function useDeepScanFindings(reviewId?: string): DeepScanState {
       return;
     }
 
-    if (mode.kind === "fixtures" || reviewId === undefined) {
+    if (mode.kind === "fixtures") {
       setState({ status: "ready", findings: deepScanFindings });
+      return;
+    }
+
+    if (reviewId === undefined) {
+      // ── `api` mode with nothing to ask about ──────────────────────────
+      //
+      // This condition used to share a branch with `fixtures`, and the caller
+      // passes no `reviewId`: a correctly configured production build showed
+      // seven hand-written fabrications as the user's security posture. The
+      // two conditions are not the same fact. `fixtures` is a data source
+      // somebody selected; a missing review id in `api` mode means no request
+      // was made, and nothing was learned.
+      //
+      // So it reports not knowing, exactly as `useMergeGate` reports
+      // `unknown` for the same condition. Fixtures are a deliberately
+      // selected data source, never a fallback.
+      setState({
+        status: "misconfigured",
+        detail:
+          "an API is configured but this view was not given a review to load",
+      });
       return;
     }
 
@@ -112,7 +133,19 @@ export function useDeepScanFindings(reviewId?: string): DeepScanState {
             }
           : { status: "failed", detail: result.detail },
       );
-    });
+    })
+      .catch((error: unknown) => {
+        // A throw inside the `.then` — or one from the client before it ever
+        // returns a result — used to leave the page on the skeleton forever,
+        // which reads as "still working" rather than "this failed". An
+        // unfinished load must not be indistinguishable from a slow one.
+        if (controller.signal.aborted) return;
+        setState({
+          status: "failed",
+          detail:
+            error instanceof Error ? error.message : "the request failed",
+        });
+      });
 
     return () => {
       controller.abort();
