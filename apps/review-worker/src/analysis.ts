@@ -24,10 +24,16 @@ import { createHash } from "node:crypto";
 
 import {
   buildRepositoryIndex,
+  analyzeInstructionPrecedenceAndTrust,
+  classifyInstructionCandidate,
   discoverProjects,
+  discoverInstructionArtifacts,
+  evaluateInstructionScopes,
   extractFile,
   governanceFor,
   indexIdentity,
+  instructionFactsDigest,
+  isInstructionCoverageComplete,
   optionInheritance,
   projectReferences,
   readProjectConfigs,
@@ -36,9 +42,14 @@ import {
   updateRepositoryIndex,
   type AssembledContext,
   type IncrementalStats,
+  type InstructionApplicabilityResult,
+  type InstructionArtifactRead,
+  type InstructionDiscoveryResult,
+  type InstructionPrecedenceTrustAnalysis,
+  type InstructionTraversal,
   type RepositoryIndex,
 } from "@acalys/code-intelligence";
-import { gitObjectId } from "@acalys/contracts/domain";
+import { gitObjectId, isRepositoryPath } from "@acalys/contracts/domain";
 import type { CandidateFindingRow } from "@acalys/database";
 import {
   ALL_ANALYZER_IDS,
@@ -78,6 +89,19 @@ export interface ChangedFileSource {
   readonly changedLines: readonly number[];
 }
 
+export interface AnalysisInstructionObservation {
+  readonly listPaths: () => InstructionTraversal;
+  readonly readArtifact: (path: string) => InstructionArtifactRead;
+}
+
+export interface AnalysisSourceSnapshot {
+  readonly changed: readonly ChangedFileSource[];
+  /** path -> content for every successfully observed repository file. */
+  readonly repository: ReadonlyMap<string, string>;
+  /** Optional failure-aware instruction observation for this same revision. */
+  readonly instructionObservation?: AnalysisInstructionObservation | undefined;
+}
+
 /**
  * Where source comes from.
  *
@@ -90,11 +114,7 @@ export interface AnalysisSource {
   read(input: {
     readonly repositoryId: string;
     readonly headSha: string;
-  }): Promise<{
-    readonly changed: readonly ChangedFileSource[];
-    /** path → content, for everything the planner may consult. */
-    readonly repository: ReadonlyMap<string, string>;
-  }>;
+  }): Promise<AnalysisSourceSnapshot>;
 }
 
 export const REVIEW_PROCEDURE_VERSION = "1";
@@ -163,7 +183,6 @@ export function contextSnapshotDigest(
         (item) =>
           `${item.path}:${item.reason}:${item.representation}:${item.identity ?? ""}:${sha256(item.suppliedContent)}`,
       )
-      .sort()
       .join("\n"),
   );
 }
@@ -244,6 +263,16 @@ export interface RealAnalysisOutcome {
   readonly configFacts: ConfigFacts;
   readonly configFactsDigest: string;
   readonly configGovernance: readonly ConfigGovernanceResult[];
+  readonly instructionFacts: InstructionDiscoveryResult;
+  readonly instructionFactsDigest: string;
+  readonly instructionApplicability: readonly {
+    readonly targetPath: string;
+    readonly result: InstructionApplicabilityResult;
+  }[];
+  readonly instructionPrecedenceAndTrust: readonly {
+    readonly targetPath: string;
+    readonly analysis: InstructionPrecedenceTrustAnalysis;
+  }[];
   /**
    * How the index was obtained.
    *
@@ -265,9 +294,32 @@ export interface RealAnalysisOutcome {
 export async function runRealAnalysis(
   options: RealAnalysisOptions,
 ): Promise<RealAnalysisOutcome> {
-  const { changed, repository } = await options.source.read({
-    repositoryId: options.repositoryId,
-    headSha: options.headSha,
+  const { changed, repository, instructionObservation } =
+    await options.source.read({
+      repositoryId: options.repositoryId,
+      headSha: options.headSha,
+    });
+
+  assertCanonicalChangedPaths(changed);
+
+  const instructionFacts = discoverInstructionArtifacts({
+    revision: options.headSha,
+    ...(instructionObservation ?? repositoryInstructionObservation(repository)),
+  });
+  const instructionIdentity = instructionFactsDigest(instructionFacts);
+  const instructionTargets = changed.map((file) => {
+    const applicability = instructionApplicabilityResultFor(
+      instructionFacts,
+      file.path,
+    );
+    const precedenceAndTrust = analyzeInstructionPrecedenceAndTrust(
+      applicability.status === "applicable" ? applicability.relationships : [],
+    );
+    return {
+      targetPath: file.path,
+      applicability,
+      precedenceAndTrust,
+    };
   });
 
   const config = buildConfigFacts(
@@ -295,6 +347,11 @@ export async function runRealAnalysis(
       index,
       configFacts: config.facts,
       configFactsIdentity: config.digest,
+      instructionFacts: {
+        facts: instructionFacts,
+        factIdentity: instructionIdentity,
+        targets: instructionTargets,
+      },
     },
     options.contextTokenBudget ?? 60_000,
   );
@@ -342,7 +399,11 @@ export async function runRealAnalysis(
       identity:
         item.provenance?.source === "configuration_facts"
           ? item.provenance.factIdentity
-          : undefined,
+          : item.provenance?.source === "instruction_facts"
+            ? item.provenance.factIdentity
+            : item.provenance?.source === "repository_index"
+              ? `${item.provenance.indexIdentity}:${item.provenance.recordId}`
+              : undefined,
     })),
   );
   const cacheKey = analyzerCacheKey({
@@ -393,6 +454,16 @@ export async function runRealAnalysis(
     configFacts: config.facts,
     configFactsDigest: config.digest,
     configGovernance: config.governance,
+    instructionFacts,
+    instructionFactsDigest: instructionIdentity,
+    instructionApplicability: instructionTargets.map((target) => ({
+      targetPath: target.targetPath,
+      result: target.applicability,
+    })),
+    instructionPrecedenceAndTrust: instructionTargets.map((target) => ({
+      targetPath: target.targetPath,
+      analysis: target.precedenceAndTrust,
+    })),
     ...(indexStats === undefined ? {} : { indexStats }),
   };
 }
@@ -464,7 +535,87 @@ const TSCONFIG_PATH = /(^|\/)tsconfig(\.[\w.-]+)?\.json$/;
 function codeSnapshot(
   repository: ReadonlyMap<string, string>,
 ): ReadonlyMap<string, string> {
-  return new Map([...repository].filter(([path]) => !TSCONFIG_PATH.test(path)));
+  return new Map(
+    [...repository].filter(([path]) => {
+      if (TSCONFIG_PATH.test(path)) return false;
+      const instruction = classifyInstructionCandidate(path);
+      return (
+        instruction === undefined ||
+        instruction.instructionClass === "documentation"
+      );
+    }),
+  );
+}
+
+function assertCanonicalChangedPaths(
+  changed: readonly ChangedFileSource[],
+): void {
+  for (const file of changed) {
+    if (!isRepositoryPath(file.path)) {
+      throw new Error(`Changed source path is not canonical: ${file.path}`);
+    }
+  }
+}
+
+function repositoryInstructionObservation(
+  repository: ReadonlyMap<string, string>,
+): AnalysisInstructionObservation {
+  return {
+    listPaths: () => ({ status: "complete", paths: [...repository.keys()] }),
+    readArtifact: (path) => {
+      const content = repository.get(path);
+      return content === undefined
+        ? {
+            status: "unreadable",
+            detail: "artifact was listed but no readable content was observed",
+          }
+        : { status: "available", content };
+    },
+  };
+}
+
+function instructionApplicabilityResultFor(
+  facts: InstructionDiscoveryResult,
+  targetPath: string,
+): InstructionApplicabilityResult {
+  const scope = evaluateInstructionScopes(facts.artifacts, targetPath);
+  const coverage = {
+    discovery: facts.discovery,
+    evaluated: scope.evaluated,
+    unevaluable: scope.unevaluable,
+  };
+
+  if (scope.relationships.length > 0) {
+    return {
+      status: "applicable",
+      relationships: scope.relationships,
+      coverage,
+    };
+  }
+
+  if (isInstructionCoverageComplete(coverage)) {
+    return {
+      status: "no_applicable_instructions",
+      evidence: [
+        {
+          reason: "no_evaluated_artifact_applies",
+          detail: `No evaluated instruction artifact applies to ${targetPath}.`,
+        },
+      ],
+      coverage,
+    };
+  }
+
+  const gaps: string[] = [];
+  if (coverage.discovery.status === "incomplete") {
+    gaps.push(`instruction discovery is incomplete: ${coverage.discovery.why}`);
+  }
+  if (coverage.unevaluable.length > 0) {
+    gaps.push(
+      `${String(coverage.unevaluable.length)} applicable instruction artifact${coverage.unevaluable.length === 1 ? "" : "s"} could not be evaluated`,
+    );
+  }
+  return { status: "undetermined", coverage, why: gaps.join("; ") };
 }
 
 function buildConfigFacts(

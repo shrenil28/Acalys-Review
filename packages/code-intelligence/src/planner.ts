@@ -34,7 +34,15 @@ import type { ExtractedSymbol, FileIntelligence } from "./symbols.js";
 import { containingSymbol, isTestFor, referencingFiles } from "./symbols.js";
 import type {
   BindingEdge,
+  AvailableInstructionArtifact,
   DeclarationRecord,
+  InstructionApplicability,
+  InstructionApplicabilityResult,
+  InstructionFacts,
+  InstructionPrecedenceRelationship,
+  InstructionPrecedenceTrustAnalysis,
+  InstructionProvenance,
+  InstructionTrustRelationship,
   ReferenceRecord,
   RepositoryIndex,
   TestRelationship,
@@ -48,6 +56,7 @@ import {
   describeIdentity,
   citeTestRelationship,
   isUsable,
+  isInstructionArtifact,
   modulesReferencing,
   referencesIn,
   resolvedDeclarations,
@@ -59,12 +68,15 @@ import {
  * Where a piece of context came from, and how far it may be trusted.
  *
  * The vocabulary the prompt builder needs to keep instruction and data apart.
- * `platform_policy` is the only level that may direct the reviewer; everything
- * else is material to reason *about*.
+ * Platform, tenant, and authoritative repository instructions may direct the
+ * reviewer. Advisory instruction text remains material to reason about rather
+ * than authority, and its distinct level makes that boundary inspectable.
  */
 export const TRUST_LEVELS = [
   "platform_policy",
   "tenant_instruction",
+  "repository_instruction",
+  "advisory_instruction",
   "repository_source",
   "tool_output",
   "author_supplied",
@@ -75,7 +87,20 @@ export type TrustLevel = (typeof TRUST_LEVELS)[number];
 
 /** Whether a trust level may direct the reviewer's behaviour. */
 export function isInstruction(trust: TrustLevel): boolean {
-  return trust === "platform_policy" || trust === "tenant_instruction";
+  return (
+    trust === "platform_policy" ||
+    trust === "tenant_instruction" ||
+    trust === "repository_instruction"
+  );
+}
+
+/** Transparent mapping from factual instruction trust into prompt trust. */
+export function plannerTrustForInstruction(
+  trust: InstructionApplicability["trust"],
+): TrustLevel {
+  return trust === "authoritative"
+    ? "repository_instruction"
+    : "advisory_instruction";
 }
 
 /** Why an item was offered. Closed, so scoring cannot be ad hoc. */
@@ -131,6 +156,18 @@ export type ItemProvenance =
       readonly source: "configuration_facts";
       readonly factIdentity: string;
       readonly citation: string;
+    }
+  | {
+      readonly source: "instruction_facts";
+      readonly factIdentity: string;
+      readonly citation: string;
+      readonly artifactProvenance: InstructionProvenance;
+      readonly applicability: readonly InstructionApplicability[];
+      readonly analyses: readonly {
+        readonly targetPath: string;
+        readonly precedenceRelationships: readonly InstructionPrecedenceRelationship[];
+        readonly trustRelationships: readonly InstructionTrustRelationship[];
+      }[];
     }
   | {
       readonly source: "repository_index";
@@ -255,6 +292,19 @@ export interface ChangedFileInput {
   readonly changedLines: readonly number[];
 }
 
+export interface PlannerInstructionTarget {
+  readonly targetPath: string;
+  readonly applicability: InstructionApplicabilityResult;
+  readonly precedenceAndTrust: InstructionPrecedenceTrustAnalysis;
+}
+
+/** Revision-bound factual instruction state supplied to the planner. */
+export interface PlannerInstructionFacts {
+  readonly facts: InstructionFacts;
+  readonly factIdentity: string;
+  readonly targets: readonly PlannerInstructionTarget[];
+}
+
 export interface PlannerInput {
   readonly changed: readonly ChangedFileInput[];
   /** Every file the planner may draw on, including the changed ones. */
@@ -268,6 +318,8 @@ export interface PlannerInput {
   readonly pathInstructions?:
     | readonly { readonly glob: string; readonly instructions: string }[]
     | undefined;
+  /** Discovered facts and their retained per-target semantic analyses. */
+  readonly instructionFacts?: PlannerInstructionFacts | undefined;
   /**
    * Structural facts for the revision under review.
    *
@@ -433,6 +485,8 @@ export function generateCandidates(
       },
     });
   }
+
+  candidates.push(...factualInstructionCandidates(input.instructionFacts));
 
   for (const instruction of input.instructions ?? []) {
     candidates.push({
@@ -759,6 +813,133 @@ export function generateCandidates(
   return candidates;
 }
 
+function factualInstructionCandidates(
+  instructionInput: PlannerInstructionFacts | undefined,
+): readonly ContextCandidate[] {
+  if (instructionInput === undefined) return [];
+
+  const artifacts = new Map(
+    instructionInput.facts.artifacts.flatMap((artifact) =>
+      isAvailableInstructionArtifact(artifact) &&
+      isInstructionArtifact(artifact)
+        ? [[artifact.artifactPath, artifact] as const]
+        : [],
+    ),
+  );
+  const applications = new Map<string, InstructionApplicability[]>();
+
+  for (const target of instructionInput.targets) {
+    if (target.applicability.status !== "applicable") continue;
+    const analyzed = new Set(
+      target.precedenceAndTrust.facts.map(
+        (fact) =>
+          `${fact.applicability.artifactPath}\u0000${fact.applicability.targetPath}`,
+      ),
+    );
+    for (const applicability of target.applicability.relationships) {
+      const key = `${applicability.artifactPath}\u0000${applicability.targetPath}`;
+      if (!artifacts.has(applicability.artifactPath) || !analyzed.has(key)) {
+        continue;
+      }
+      const retained = applications.get(applicability.artifactPath) ?? [];
+      if (
+        !retained.some(
+          (item) =>
+            item.targetPath === applicability.targetPath &&
+            item.artifactPath === applicability.artifactPath,
+        )
+      ) {
+        retained.push(applicability);
+      }
+      applications.set(applicability.artifactPath, retained);
+    }
+  }
+
+  return [...applications]
+    .sort(([left], [right]) => compareText(left, right))
+    .flatMap(([artifactPath, retained]) => {
+      const artifact = artifacts.get(artifactPath);
+      if (artifact === undefined) return [];
+
+      const applicability = [...retained].sort(
+        (left, right) =>
+          compareText(left.targetPath, right.targetPath) ||
+          compareText(left.artifactPath, right.artifactPath),
+      );
+      const analyses = instructionInput.targets
+        .filter((target) =>
+          target.precedenceAndTrust.facts.some(
+            (fact) => fact.applicability.artifactPath === artifactPath,
+          ),
+        )
+        .sort((left, right) => compareText(left.targetPath, right.targetPath))
+        .map((target) => ({
+          targetPath: target.targetPath,
+          precedenceRelationships:
+            target.precedenceAndTrust.precedenceRelationships.filter(
+              (relationship) =>
+                precedenceRelationshipMentions(relationship, artifactPath),
+            ),
+          trustRelationships:
+            target.precedenceAndTrust.trustRelationships.filter(
+              (relationship) =>
+                trustRelationshipMentions(relationship, artifactPath),
+            ),
+        }));
+
+      return [
+        {
+          kind: "instruction" as const,
+          path: artifact.artifactPath,
+          reason:
+            artifact.instructionClass === "repository_policy"
+              ? ("repository_instruction" as const)
+              : ("path_instruction" as const),
+          trust: plannerTrustForInstruction(artifact.trust),
+          content: artifact.content,
+          provenance: {
+            source: "instruction_facts" as const,
+            factIdentity: instructionInput.factIdentity,
+            citation: `${artifact.artifactPath} applies to ${applicability.map((item) => item.targetPath).join(", ")}`,
+            artifactProvenance: artifact.provenance,
+            applicability,
+            analyses,
+          },
+        },
+      ];
+    });
+}
+
+function isAvailableInstructionArtifact(
+  artifact: InstructionFacts["artifacts"][number],
+): artifact is AvailableInstructionArtifact {
+  return artifact.availability.kind === "available";
+}
+
+function precedenceRelationshipMentions(
+  relationship: InstructionPrecedenceRelationship,
+  artifactPath: string,
+): boolean {
+  return relationship.relationship === "precedes"
+    ? relationship.higherPrecedenceArtifactPath === artifactPath ||
+        relationship.lowerPrecedenceArtifactPath === artifactPath
+    : relationship.artifactPaths.includes(artifactPath);
+}
+
+function trustRelationshipMentions(
+  relationship: InstructionTrustRelationship,
+  artifactPath: string,
+): boolean {
+  return relationship.relationship === "more_trusted"
+    ? relationship.higherTrustArtifactPath === artifactPath ||
+        relationship.lowerTrustArtifactPath === artifactPath
+    : relationship.artifactPaths.includes(artifactPath);
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 /** Extracts an inclusive 1-based line range. */
 function sliceLines(source: string, start: number, end: number): string {
   return source
@@ -820,6 +1001,7 @@ function resolveSpecifier(
  * Folding them together would let provenance quietly reorder the whole prompt.
  */
 function standing(candidate: ContextCandidate): number {
+  if (candidate.provenance?.source === "instruction_facts") return 2;
   return candidate.provenance?.source === "repository_index" ? 1 : 0;
 }
 

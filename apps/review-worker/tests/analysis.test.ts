@@ -166,10 +166,16 @@ describe("The context snapshot digest", () => {
     suppliedContent: "export const a = 1;",
   };
 
-  it("ignores the order items were assembled in", () => {
+  it("includes assembled prompt order", () => {
     const other = { ...item, path: "src/b.ts" };
-    expect(contextSnapshotDigest([item, other])).toBe(
+    expect(contextSnapshotDigest([item, other])).not.toBe(
       contextSnapshotDigest([other, item]),
+    );
+  });
+
+  it("includes factual context identity even when supplied text is unchanged", () => {
+    expect(contextSnapshotDigest([{ ...item, identity: "facts-a" }])).not.toBe(
+      contextSnapshotDigest([{ ...item, identity: "facts-b" }]),
     );
   });
 

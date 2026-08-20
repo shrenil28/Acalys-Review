@@ -160,6 +160,11 @@ export {
 } from "./instruction-precedence.js";
 
 export {
+  canonicalInstructionFactsSerialization,
+  instructionFactsDigest,
+} from "./instruction-digest.js";
+
+export {
   governanceFor,
   optionInheritance,
   projectReferences,

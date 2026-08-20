@@ -64,6 +64,8 @@ export {
   contextSnapshotDigest,
   runRealAnalysis,
   type AnalysisSource,
+  type AnalysisInstructionObservation,
+  type AnalysisSourceSnapshot,
   type ChangedFileSource,
   type RealAnalysisOptions,
   type RealAnalysisOutcome,
