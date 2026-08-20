@@ -24,8 +24,20 @@ P1-L.2                references, bindings, import-export         ✓
 P1-L.3                incremental invalidation + rebuild oracle   ✓
 P1-L.4.1              code-to-test, from bindings                ✓
 P1-L.4.2              code-to-config governance                   ✓
-P1-L.4.3              code-to-instruction                        next
+P1-L.4.3              code-to-instruction                        ✓
 ```
+
+`P1-L.4.3` is closed at source freeze `f50f7f4`. Exact `AGENTS.md` artifacts
+are discovered as revision-bound facts, applied with segment-aware plural
+scope, analyzed with independent precedence and trust, and carried through the
+production planner into context and analyzer identity. Incomplete discovery is
+explicit non-authoritative context rather than negative absence. Add, delete,
+same-selected-text, and partial-outage witnesses preserve independent
+`RepositoryIndex`, `ConfigFacts`, and `InstructionFacts` identities. Closing
+evidence: 2,164 tests executed with 0 skipped under Postgres-required `verify`;
+167/167 mutants detected, with 166 semantic assertion kills, the one
+pre-existing setup kill `#58`, 0 survivors, and 0 invalid. See
+[l4-3-instruction-governance.md](./l4-3-instruction-governance.md).
 
 `P1-L.4.2` is closed at `5b31de7`. TypeScript's project parser establishes
 membership; Acalys keeps source governance, option inheritance, and project
