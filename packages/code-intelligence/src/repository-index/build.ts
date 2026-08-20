@@ -91,6 +91,23 @@ export type RevisionSnapshot = ReadonlyMap<string, string>;
 export interface BuildOptions {
   readonly identity: RepositoryIndexIdentity;
   readonly snapshot: RevisionSnapshot;
+  /**
+   * Restricts reference and binding extraction to these modules.
+   *
+   * Declarations are always extracted for every module, because symbol
+   * identity is formed across the whole revision — a symbol declared in a
+   * module we skipped would be invisible to a binding in one we did not, and
+   * every cross-module reference would degrade to `external`.
+   *
+   * What this actually skips is the expensive half: one
+   * `checker.getSymbolAtLocation` per identifier, plus alias resolution. That
+   * is where an incremental update saves work, and naming the option after
+   * what it restricts rather than "incremental" keeps the builder honest about
+   * doing no merging itself.
+   *
+   * Absent means "every module", which is what a full rebuild wants.
+   */
+  readonly extractReferencesFor?: ReadonlySet<string> | undefined;
 }
 
 const digestOf = (material: string): string =>
@@ -530,6 +547,10 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
     // caller learns the difference.
     if (coverage !== "indexed") continue;
 
+    const referencesWanted =
+      options.extractReferencesFor === undefined ||
+      options.extractReferencesFor.has(path);
+
     const visit = (node: ts.Node): void => {
       const kind = kindOf(node);
       const name = nameOf(node);
@@ -557,7 +578,7 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
         });
       }
 
-      if (ts.isIdentifier(node)) {
+      if (ts.isIdentifier(node) && referencesWanted) {
         const referenceKind = referenceKindOf(node);
         if (referenceKind !== undefined) {
           const line =

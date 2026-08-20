@@ -888,6 +888,104 @@ const MUTATIONS = [
       "    for (const record of [] as ReturnType<typeof boundCallees>) {",
     suite: "apps/review-worker/tests/binding-wiring.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-L.3 — incremental invalidation.
+  //
+  // 101-109 target the plan and its execution; 110-111 target the production
+  // seam. Every one is an UNDER-invalidation: keeping a stale fact rather
+  // than losing one. That direction is the dangerous one — over-invalidating
+  // is slower and still correct, while under-invalidating produces a
+  // confident wrong answer with full provenance attached.
+  // ---------------------------------------------------------------------
+  {
+    id: 101,
+    name: "dependent modules are not invalidated",
+    file: "packages/code-intelligence/src/repository-index/incremental-plan.ts",
+    find: '          if (touched.has(dependency)) return "references_changed_module";',
+    replace:
+      '          if (false as boolean) return "references_changed_module";',
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 102,
+    name: "a modified module is treated as unchanged",
+    file: "packages/code-intelligence/src/repository-index/incremental-plan.ts",
+    find: '      if (manifest.modified.includes(module.moduleId)) return "modified";',
+    replace: '      if (false as boolean) return "modified";',
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 103,
+    name: "an unresolved reference stops forcing recomputation",
+    file: "packages/code-intelligence/src/repository-index/incremental-plan.ts",
+    find: "      if (universal.has(module.moduleId)) {",
+    replace: "      if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 104,
+    name: "a module that failed to parse at H1 is retained",
+    file: "packages/code-intelligence/src/repository-index/incremental-plan.ts",
+    find: '      if (module.coverage !== "indexed") return "not_indexed_previously";',
+    replace: '      if (false as boolean) return "not_indexed_previously";',
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 105,
+    name: "the change manifest reports nothing as modified",
+    file: "packages/code-intelligence/src/repository-index/incremental-plan.ts",
+    find: "    else if (known !== digestOf(content)) modified.push(path);",
+    replace: "    else if (false as boolean) modified.push(path);",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 106,
+    name: "a deleted module is counted as retained",
+    file: "packages/code-intelligence/src/repository-index/incremental-plan.ts",
+    find: "    if (removedSet.has(module.moduleId)) continue;",
+    replace: "    if (false as boolean) continue;",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 107,
+    name: "carried records keep their H1 revision stamp",
+    file: "packages/code-intelligence/src/repository-index/incremental.ts",
+    find: "      provenance: { ...reference.provenance, revision },",
+    replace: "      provenance: { ...reference.provenance },",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 108,
+    name: "a revision mismatch is accepted instead of refused",
+    file: "packages/code-intelligence/src/repository-index/incremental.ts",
+    find: "    manifest.previousRevision.value !== previous.identity.revision.value ||",
+    replace: "    (false as boolean) ||",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 109,
+    name: "an unusable previous index is used as a basis",
+    file: "packages/code-intelligence/src/repository-index/incremental.ts",
+    find: '  if (previous.availability.kind !== "built") {',
+    replace: "  if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 110,
+    name: "production ignores the previous index",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "    if (options.previousIndex !== undefined) {",
+    replace: "    if (false as boolean) {",
+    suite: "apps/review-worker/tests/incremental-wiring.test.ts",
+  },
+  {
+    id: 111,
+    name: "the incremental path reports no stats",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "      return { index: outcome.index, indexStats: outcome.stats };",
+    replace: "      return { index: outcome.index };",
+    suite: "apps/review-worker/tests/incremental-wiring.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",

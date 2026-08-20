@@ -28,7 +28,9 @@ import {
   indexIdentity,
   planContext,
   unavailableIndex,
+  updateRepositoryIndex,
   type AssembledContext,
+  type IncrementalStats,
   type RepositoryIndex,
 } from "@acalys/code-intelligence";
 import { gitObjectId } from "@acalys/contracts/domain";
@@ -188,6 +190,15 @@ export interface RealAnalysisOptions {
    */
   readonly tenantId?: string | undefined;
   readonly provider?: "github" | undefined;
+  /**
+   * The index from the previous revision of this pull request, if one is held.
+   *
+   * Optional, and its absence is not an error — a first review has no previous
+   * revision. When present the index is built incrementally and falls back to
+   * a full rebuild on any doubt, because incremental is an optimization and
+   * the full rebuild is the authority.
+   */
+  readonly previousIndex?: RepositoryIndex | undefined;
   readonly source: AnalysisSource;
   readonly contextTokenBudget?: number | undefined;
   readonly limits?: Partial<ExecutionLimits> | undefined;
@@ -215,6 +226,15 @@ export interface RealAnalysisOutcome {
    * between what was intended and what was sent.
    */
   readonly context: AssembledContext;
+  /**
+   * How the index was obtained.
+   *
+   * Absent when it was built from scratch. Present — and honest about
+   * fallbacks — when an incremental update was attempted, so a later
+   * economics report can ask whether incremental indexing actually saves work
+   * rather than assuming it does.
+   */
+  readonly indexStats?: IncrementalStats | undefined;
 }
 
 /**
@@ -235,7 +255,7 @@ export async function runRealAnalysis(
   // The structural facts for this exact revision, built before anything is
   // planned. Built rather than fetched: L.1 has no cache, so there is no
   // question of an index from a different revision answering for this one.
-  const index = buildIndexFor(options, repository);
+  const { index, indexStats } = buildIndexFor(options, repository);
 
   const context = planContext(
     {
@@ -326,7 +346,15 @@ export async function runRealAnalysis(
       } satisfies CandidateFindingRow;
     });
 
-  return { candidates, report, contextDigest, cacheKey, index, context };
+  return {
+    candidates,
+    report,
+    contextDigest,
+    cacheKey,
+    index,
+    context,
+    ...(indexStats === undefined ? {} : { indexStats }),
+  };
 }
 
 /**
@@ -341,7 +369,10 @@ export async function runRealAnalysis(
 function buildIndexFor(
   options: RealAnalysisOptions,
   repository: ReadonlyMap<string, string>,
-): RepositoryIndex {
+): {
+  readonly index: RepositoryIndex;
+  readonly indexStats?: IncrementalStats | undefined;
+} {
   const identity = indexIdentity({
     tenant:
       options.tenantId === undefined
@@ -359,11 +390,26 @@ function buildIndexFor(
   });
 
   try {
-    return buildRepositoryIndex({ identity, snapshot: repository });
+    // With a previous index, update rather than rebuild. `updateRepositoryIndex`
+    // decides for itself whether that is safe and falls back to a full rebuild
+    // otherwise — this call site does not get to choose, because a caller that
+    // could insist on the incremental path could insist on a stale one.
+    if (options.previousIndex !== undefined) {
+      const outcome = updateRepositoryIndex({
+        previous: options.previousIndex,
+        nextIdentity: identity,
+        snapshot: repository,
+      });
+      return { index: outcome.index, indexStats: outcome.stats };
+    }
+
+    return { index: buildRepositoryIndex({ identity, snapshot: repository }) };
   } catch (error) {
-    return unavailableIndex(identity, {
-      kind: "unavailable",
-      why: error instanceof Error ? error.message : "index build failed",
-    });
+    return {
+      index: unavailableIndex(identity, {
+        kind: "unavailable",
+        why: error instanceof Error ? error.message : "index build failed",
+      }),
+    };
   }
 }

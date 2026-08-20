@@ -64,6 +64,25 @@ export {
 export { canonicalSerialization, indexDigest } from "./digest.js";
 
 export {
+  RECOMPUTE_REASONS,
+  deriveChangeManifest,
+  planIncrementalUpdate,
+  type ChangeManifest,
+  type IncrementalIndexPlan,
+  type ModuleDecision,
+  type RecomputeReason,
+} from "./incremental-plan.js";
+
+export {
+  FALLBACK_REASONS,
+  updateFromSnapshot,
+  updateRepositoryIndex,
+  type FallbackReason,
+  type IncrementalOutcome,
+  type IncrementalStats,
+} from "./incremental.js";
+
+export {
   bindingOf,
   citeBinding,
   citeDeclaration,
