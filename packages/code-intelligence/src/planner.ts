@@ -628,9 +628,17 @@ export function generateCandidates(
         symbol.name,
         changed.path,
       )) {
-        if (indexedDependants.has(caller.path)) continue;
-        // The index spoke about this module and did not name it a dependant,
-        // so the syntactic guess is a name collision rather than a dependency.
+        // The index spoke about this module. Either it named it a dependant —
+        // in which case the indexed candidate above already covers it — or it
+        // did not, in which case the syntactic guess is a name collision
+        // rather than a dependency. Both are handled by the same condition.
+        //
+        // A separate `indexedDependants.has(caller.path)` check stood here and
+        // was dead: every module in that set is an indexed module, so this
+        // condition already subsumed it. A mutation removing it survived,
+        // which is how it was found. Dead defensive code reads as protection,
+        // so the next person adds a case rather than asking whether the branch
+        // is reachable.
         if (
           input.index !== undefined &&
           isUsable(input.index) &&

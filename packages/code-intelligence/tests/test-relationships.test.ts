@@ -31,10 +31,12 @@ import {
   buildRepositoryIndex,
   citeTestRelationship,
   indexIdentity,
+  modulesReferencing,
   symbolNamed,
   testCoverageEvidence,
   testRelationships,
   testsForSymbol,
+  unavailableIndex,
   type RepositoryIndex,
 } from "../src/index.js";
 
@@ -292,5 +294,96 @@ describe("the relationship set is canonical", () => {
         expect(relationship.targetModuleId).not.toBe(relationship.testModuleId);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The reverse lookup
+// ---------------------------------------------------------------------------
+
+describe("modulesReferencing reads binding edges backwards", () => {
+  const files = {
+    "src/a.ts": "export function save(): number {\n  return 1;\n}",
+    "src/b.ts": "export function save(): number {\n  return 2;\n}",
+    "src/uses-a.ts": [
+      'import { save } from "./a.js";',
+      "export function run(): number {",
+      "  return save();",
+      "}",
+    ].join("\n"),
+    "src/uses-b.ts": [
+      'import { save } from "./b.js";',
+      "export function run(): number {",
+      "  return save();",
+      "}",
+    ].join("\n"),
+  };
+
+  it("names only the modules that actually bind into the target", () => {
+    // Both dependants reference a symbol called `save`. A name-matching
+    // reverse lookup returns both for either target, and a reviewer changing
+    // src/a.ts would be told src/uses-b.ts depends on it.
+    const index = build(files);
+
+    expect(
+      modulesReferencing(index, "src/a.ts").map((entry) => entry.moduleId),
+    ).toEqual(["src/uses-a.ts"]);
+    expect(
+      modulesReferencing(index, "src/b.ts").map((entry) => entry.moduleId),
+    ).toEqual(["src/uses-b.ts"]);
+  });
+
+  it("returns one entry per module, not per call site", () => {
+    const index = build({
+      "src/a.ts": "export function save(): number {\n  return 1;\n}",
+      "src/many.ts": [
+        'import { save } from "./a.js";',
+        "export function run(): number {",
+        "  return save() + save() + save();",
+        "}",
+      ].join("\n"),
+    });
+
+    // "Who depends on this?" is a question about modules. Ten call sites in
+    // one file are one dependant.
+    expect(modulesReferencing(index, "src/a.ts")).toHaveLength(1);
+  });
+
+  it("refuses to answer from an index that is not usable", () => {
+    // Reachable only by a direct caller: the planner checks usability before
+    // calling this, so the guard is unreachable through production and a
+    // mutation removing it survived. `modulesReferencing` is exported, so a
+    // caller other than the planner can and eventually will pass an unusable
+    // index — and "no index" must never read as "nothing depends on this".
+    const unusable = unavailableIndex(
+      indexIdentity({
+        tenant: { kind: "tenant", tenantId: "tenant-1" },
+        provider: "github",
+        repositoryId: "repo-1",
+        revision: gitObjectId(REVISION),
+      }),
+      { kind: "unavailable", why: "clone failed" },
+    );
+
+    expect(modulesReferencing(unusable, "src/a.ts")).toEqual([]);
+  });
+
+  it("refuses even when the unusable index still carries records", () => {
+    // The version that can actually observe the guard. An index with records
+    // and `availability: invariant_failed` would otherwise answer from facts
+    // it has already declared untrustworthy — and an empty-record fixture
+    // cannot tell the guarded path from the unguarded one.
+    const populated = build(files);
+    expect(populated.bindings.length).toBeGreaterThan(0);
+
+    const failed: RepositoryIndex = {
+      ...populated,
+      availability: {
+        kind: "invariant_failed",
+        why: "binding edges referenced declarations not in the index",
+      },
+    };
+
+    expect(modulesReferencing(failed, "src/a.ts")).toEqual([]);
   });
 });

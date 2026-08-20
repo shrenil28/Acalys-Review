@@ -313,6 +313,39 @@ describe("the production path offers the test that actually imports the change",
     }
   });
 
+  it("does not offer a name-sharing module as a caller", async () => {
+    // The other half of the same defect, and the half the test assertions
+    // above cannot see. `modulesReferencing` reads binding edges backwards; a
+    // version that matched on names would report every module referencing any
+    // `save` as a dependant of src/a.ts, and the reviewer would be told
+    // src/b.ts's test depends on their change.
+    //
+    // A mutation making the reverse lookup unconditionally true survived until
+    // this existed, because every earlier assertion was about `associated_test`
+    // items and the over-broad answer leaked into `caller` items instead.
+    const outcome = await reviewA();
+
+    const callers = outcome.context.items
+      .filter((item) => item.reason === "caller")
+      .map((item) => item.path);
+
+    // Nothing in this fixture calls src/a.ts from production code, so the
+    // correct answer is none — and a name-matching lookup would say otherwise.
+    expect(callers).not.toContain("src/b.ts");
+    expect(callers).not.toContain("tests/b-checks.test.ts");
+  });
+
+  it("does not offer the b-test through ANY inclusion reason", async () => {
+    // Stated over every reason rather than one, so a future change that moves
+    // the wrong association from `associated_test` to `caller` — exactly what
+    // happened once already — fails here instead of slipping between two
+    // reason-scoped assertions.
+    const outcome = await reviewA();
+    const paths = outcome.context.items.map((item) => item.path);
+
+    expect(paths).not.toContain("tests/b-checks.test.ts");
+  });
+
   it("delivers the association to what the analyzer is handed", async () => {
     const outcome = await reviewA();
 

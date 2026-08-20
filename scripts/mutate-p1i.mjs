@@ -1184,8 +1184,8 @@ const MUTATIONS = [
     id: 132,
     name: "the name-matched fallback is offered beside the indexed answer",
     file: "packages/code-intelligence/src/planner.ts",
-    find: "        if (indexedDependants.has(caller.path)) continue;",
-    replace: "        if (false as boolean) continue;",
+    find: '              module.moduleId === caller.path && module.coverage === "indexed",',
+    replace: "              false as boolean,",
     suite: "apps/review-worker/tests/index-wiring.test.ts",
   },
   {
