@@ -1092,6 +1092,27 @@ const MUTATIONS = [
     replace: "      referencesRecomputed: recomputed.size,",
     suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
   },
+  // Statistics are observational, not load-bearing: these mutations leave the
+  // index identical and fail because the MEASUREMENT became false. That is
+  // legitimate here only because L.3 claims those numbers are true — a claim
+  // it would otherwise be making without evidence.
+  {
+    id: 123,
+    name: "the stats count result cardinality instead of work",
+    file: "packages/code-intelligence/src/repository-index/incremental.ts",
+    find: "      referencesRecomputed: fresh.references.length,",
+    replace:
+      "      referencesRecomputed:\n        fresh.references.length + carriedReferences.length,",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 124,
+    name: "binding extraction work is reported as zero",
+    file: "packages/code-intelligence/src/repository-index/incremental.ts",
+    find: "      bindingsRecomputed: fresh.bindings.length,",
+    replace: "      bindingsRecomputed: 0,",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",

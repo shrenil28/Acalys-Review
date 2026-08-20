@@ -715,6 +715,46 @@ describe("the statistics describe what executed", () => {
     expect(outcome.stats.bindingsRetained).toBe(h1.bindings.length);
   });
 
+  it("counts extraction work, not the module count or the result size", () => {
+    // The case the test above cannot make. There, every plausible wrong
+    // formula — recomputed module count, zero, the plan's length — is also 0,
+    // so a mutation swapping one for another survived it.
+    //
+    // Here the three numbers are pairwise different, which is what lets an
+    // assertion tell them apart at all.
+    const h1 = full(BASE, H1);
+    const outcome = updateFromSnapshot(
+      h1,
+      gitObjectId(H2),
+      new Map(
+        Object.entries({
+          ...BASE,
+          "store.ts": BASE["store.ts"].replace("value + 1", "value + 41"),
+        }),
+      ),
+    );
+
+    expect(outcome.stats.succeeded).toBe(true);
+
+    const recomputedModules = outcome.stats.modulesRecomputed;
+    const resultTotal = outcome.index.references.length;
+    const work = outcome.stats.referencesRecomputed;
+
+    // Work performed is neither "how many modules" nor "how many records
+    // exist". A counter reporting either would be lying about what the
+    // optimization saved, and the lie would read as a plausible number.
+    expect(work).toBeGreaterThan(0);
+    expect(work).not.toBe(recomputedModules);
+    expect(work).not.toBe(resultTotal);
+
+    // And the result is the sum of what was re-extracted and what was carried,
+    // which is the identity that makes `work` interpretable at all.
+    expect(work + outcome.stats.referencesRetained).toBe(resultTotal);
+    expect(
+      outcome.stats.bindingsRecomputed + outcome.stats.bindingsRetained,
+    ).toBe(outcome.index.bindings.length);
+  });
+
   it("reports no saving when it fell back", () => {
     const outcome = updateRepositoryIndex({
       previous: unavailableIndex(identityFor(H1), {
