@@ -20,6 +20,8 @@ export default tseslint.config(
       "**/node_modules/**",
       "**/generated/**",
       "**/*.tsbuildinfo",
+      // Agent worktrees are independent checkout state, not root sources.
+      ".claude/worktrees/**",
       // Screenshot tooling, not product code.
       //
       // Every one of these opens `http://127.0.0.1:9222/json/list` — the Chrome

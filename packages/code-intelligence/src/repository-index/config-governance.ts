@@ -76,6 +76,10 @@ export interface ProjectConfigFact {
   readonly namedInFiles: readonly string[];
   readonly extendsPath?: string | undefined;
   readonly referencedProjects: readonly string[];
+  readonly coverage?: {
+    readonly membership: "complete" | "incomplete";
+    readonly optionInheritance: "complete" | "incomplete";
+  };
   /**
    * Where this project's own config was read and parsed. Cited by every
    * edge this file derives from the project — see the module comment.
@@ -112,6 +116,13 @@ export function governanceFor(
   for (const project of projects) {
     if (project.availability.kind === "available") {
       evaluated.push(project.configPath);
+      if (project.coverage?.membership === "incomplete") {
+        unevaluable.push({
+          failure: "extends_unresolvable",
+          configPath: project.configPath,
+          detail: `${project.configPath} has incomplete membership because its base configuration could not be resolved`,
+        });
+      }
     } else {
       unevaluable.push({
         failure: project.availability.failure,

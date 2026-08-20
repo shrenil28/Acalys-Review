@@ -6,6 +6,7 @@ generated
 *.tsbuildinfo
 .vite
 package-lock.json
+.claude/worktrees/**
 
 # Inherited verbatim; not reformatted by Phase 0 tooling.
 apps/web

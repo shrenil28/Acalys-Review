@@ -54,8 +54,10 @@
  */
 
 import ts from "typescript";
+import { EXTRACTOR_VERSION } from "./identity.js";
 import type { GovernanceFailure } from "./config-model.js";
 import type { RevisionSnapshot } from "./build.js";
+import type { FactProvenance } from "./records.js";
 
 export interface ProjectConfigFact {
   readonly configPath: string;
@@ -73,6 +75,11 @@ export interface ProjectConfigFact {
   /** The project's OWN `extends`, not the whole chain. */
   readonly extendsPath?: string | undefined;
   readonly referencedProjects: readonly string[];
+  readonly coverage?: {
+    readonly membership: "complete" | "incomplete";
+    readonly optionInheritance: "complete" | "incomplete";
+  };
+  readonly provenance: FactProvenance;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +194,12 @@ type MatchFilesFn = (
 const matchFiles: MatchFilesFn = (ts as unknown as { matchFiles: MatchFilesFn })
   .matchFiles;
 
+if (matchFiles === undefined) {
+  throw new Error(
+    `TypeScript ${ts.version} does not expose ts.matchFiles; config parsing requires the compiler version used by ${EXTRACTOR_VERSION}.`,
+  );
+}
+
 function createParseConfigHost(
   snapshot: RevisionSnapshot,
   directoryIndex: ReadonlyMap<string, DirectoryEntries>,
@@ -289,6 +302,7 @@ function unavailableFact(
   configPath: string,
   failure: GovernanceFailure,
   detail: string,
+  revision: string,
 ): ProjectConfigFact {
   return {
     configPath,
@@ -296,6 +310,14 @@ function unavailableFact(
     admittedFiles: [],
     namedInFiles: [],
     referencedProjects: [],
+    provenance: {
+      source: "typescript_syntax",
+      path: configPath,
+      startLine: 1,
+      endLine: 1,
+      extractorVersion: EXTRACTOR_VERSION,
+      revision,
+    },
   };
 }
 
@@ -303,6 +325,7 @@ function readOneConfig(
   snapshot: RevisionSnapshot,
   host: ts.ParseConfigHost,
   configPath: string,
+  revision: string,
 ): ProjectConfigFact {
   const cleanPath = stripLeadingSlash(configPath);
 
@@ -315,6 +338,7 @@ function readOneConfig(
       cleanPath,
       "config_absent",
       `${cleanPath} is not present in the revision snapshot`,
+      revision,
     );
   }
 
@@ -327,6 +351,7 @@ function readOneConfig(
       cleanPath,
       "config_unparsable",
       `${cleanPath} does not parse as JSON`,
+      revision,
     );
   }
 
@@ -349,16 +374,6 @@ function readOneConfig(
   const extendsBroken = parsed.errors.some((diagnostic) =>
     EXTENDS_FAILURE_CODES.has(diagnostic.code),
   );
-  if (extendsBroken) {
-    return unavailableFact(
-      cleanPath,
-      "extends_unresolvable",
-      rawExtends === undefined
-        ? `${cleanPath} declares an "extends" the compiler could not resolve`
-        : `${cleanPath} extends "${rawExtends}", which the compiler could not resolve`,
-    );
-  }
-
   const admittedFiles = sortedUnique(parsed.fileNames.map(stripLeadingSlash));
 
   const namedInFiles = sortedUnique(
@@ -375,6 +390,21 @@ function readOneConfig(
     ),
   );
 
+  // An unresolved base may have supplied membership selectors, but an
+  // explicit child selector makes that dimension independently knowable.
+  // Keep the compiler's admitted set either way; only its completeness is
+  // qualified. Options remain incomplete because inherited values are not
+  // recoverable from this config alone.
+  const hasExplicitMembershipSelector =
+    (Array.isArray(rawFiles) && rawFiles.length > 0) ||
+    (isRecord(config) && Array.isArray(config["include"]));
+  const coverage = extendsBroken
+    ? ({
+        membership: hasExplicitMembershipSelector ? "complete" : "incomplete",
+        optionInheritance: "incomplete",
+      } as const)
+    : undefined;
+
   return {
     configPath: cleanPath,
     availability: { kind: "available" },
@@ -382,6 +412,15 @@ function readOneConfig(
     namedInFiles,
     ...(extendsPath === undefined ? {} : { extendsPath }),
     referencedProjects,
+    ...(coverage === undefined ? {} : { coverage }),
+    provenance: {
+      source: "typescript_syntax",
+      path: cleanPath,
+      startLine: 1,
+      endLine: 1,
+      extractorVersion: EXTRACTOR_VERSION,
+      revision,
+    },
   };
 }
 
@@ -395,10 +434,11 @@ function readOneConfig(
 export function readProjectConfigs(
   snapshot: RevisionSnapshot,
   configPaths: readonly string[],
+  revision: string,
 ): readonly ProjectConfigFact[] {
   const directoryIndex = buildDirectoryIndex(snapshot);
   const host = createParseConfigHost(snapshot, directoryIndex);
   return configPaths.map((configPath) =>
-    readOneConfig(snapshot, host, configPath),
+    readOneConfig(snapshot, host, configPath, revision),
   );
 }

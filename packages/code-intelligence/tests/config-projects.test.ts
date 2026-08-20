@@ -71,7 +71,7 @@ describe("readProjectConfigs — include/exclude membership", () => {
     expect(snapshot.has("pkg/src/excluded/skipped.ts")).toBe(true);
     expect(snapshot.has("pkg/other/outside.ts")).toBe(true);
 
-    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"]);
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
     expect(fact?.availability.kind).toBe("available");
     expect(fact?.admittedFiles).toContain("pkg/src/admitted.ts");
     expect(fact?.admittedFiles).not.toContain("pkg/src/excluded/skipped.ts");
@@ -89,7 +89,7 @@ describe("readProjectConfigs — files vs admittedFiles", () => {
   });
 
   it("reports namedInFiles exactly, resolved relative to the config", () => {
-    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"]);
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
     expect(fact?.availability.kind).toBe("available");
     expect(fact?.namedInFiles).toEqual(["pkg/src/a.ts", "pkg/src/b.ts"]);
     // files entries are always part of what the project admits — the two
@@ -107,7 +107,7 @@ describe("readProjectConfigs — a malformed config is unavailable, not empty", 
   });
 
   it("reports unavailable by discriminant, not by an empty admittedFiles", () => {
-    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"]);
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
     // The discriminant is the assertion that actually distinguishes this
     // from a working project admitting nothing. A broken implementation
     // that swallowed the parse failure and returned
@@ -125,7 +125,7 @@ describe("readProjectConfigs — a config absent from the snapshot", () => {
   const snapshot = snapshotOf({});
 
   it("reports unavailable with config_absent, distinct from a parse failure", () => {
-    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"]);
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
     expect(fact?.availability.kind).toBe("unavailable");
     if (fact?.availability.kind === "unavailable") {
       expect(fact.availability.failure).toBe("config_absent");
@@ -149,11 +149,11 @@ describe("readProjectConfigs — extends reports the direct parent only", () => 
   });
 
   it("for a two-level chain, extendsPath is base-a, never base-b", () => {
-    const facts = readProjectConfigs(snapshot, [
-      "pkg/tsconfig.json",
-      "base-a/tsconfig.json",
-      "base-b/tsconfig.json",
-    ]);
+    const facts = readProjectConfigs(
+      snapshot,
+      ["pkg/tsconfig.json", "base-a/tsconfig.json", "base-b/tsconfig.json"],
+      "rev",
+    );
 
     // Premise: both bases in the chain are themselves readable configs, so
     // "direct parent only" is a claim this test can actually distinguish
@@ -185,12 +185,68 @@ describe("readProjectConfigs — references are not extends", () => {
   });
 
   it("reports the reference and keeps it out of extendsPath", () => {
-    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"]);
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
     expect(fact?.availability.kind).toBe("available");
     expect(fact?.extendsPath).toBe("base/tsconfig.json");
     expect(fact?.referencedProjects).toEqual(["other/tsconfig.json"]);
     // The edge this checkpoint exists to keep separate: a project reference
     // must never be readable back out of the extends field, or vice versa.
     expect(fact?.referencedProjects).not.toContain(fact?.extendsPath);
+  });
+});
+
+describe("readProjectConfigs — unresolved extends preserves qualified membership", () => {
+  it("keeps explicit files membership while marking inherited options incomplete", () => {
+    const snapshot = snapshotOf({
+      "pkg/tsconfig.json": JSON.stringify({
+        extends: "./missing-base.json",
+        files: ["src/a.ts"],
+      }),
+      "pkg/src/a.ts": "export const a = 1;",
+    });
+
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
+
+    expect(fact?.availability.kind).toBe("available");
+    expect(fact?.admittedFiles).toContain("pkg/src/a.ts");
+    expect(fact?.coverage).toEqual({
+      membership: "complete",
+      optionInheritance: "incomplete",
+    });
+    expect(fact?.extendsPath).toBeUndefined();
+  });
+
+  it("keeps explicit include membership while marking inherited options incomplete", () => {
+    const snapshot = snapshotOf({
+      "pkg/tsconfig.json": JSON.stringify({
+        extends: "./missing-base.json",
+        include: ["src/**/*.ts"],
+      }),
+      "pkg/src/a.ts": "export const a = 1;",
+    });
+
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
+
+    expect(fact?.availability.kind).toBe("available");
+    expect(fact?.admittedFiles).toContain("pkg/src/a.ts");
+    expect(fact?.coverage?.membership).toBe("complete");
+    expect(fact?.coverage?.optionInheritance).toBe("incomplete");
+  });
+
+  it("does not claim complete membership when selectors may come from the missing base", () => {
+    const snapshot = snapshotOf({
+      "pkg/tsconfig.json": JSON.stringify({
+        extends: "./missing-base.json",
+      }),
+      "pkg/src/a.ts": "export const a = 1;",
+    });
+
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
+
+    expect(fact?.availability.kind).toBe("available");
+    expect(fact?.coverage).toEqual({
+      membership: "incomplete",
+      optionInheritance: "incomplete",
+    });
   });
 });

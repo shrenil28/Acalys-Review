@@ -49,6 +49,7 @@ interface AvailableProjectInput {
   readonly namedInFiles?: readonly string[];
   readonly extendsPath?: string;
   readonly referencedProjects?: readonly string[];
+  readonly coverage?: ProjectConfigFact["coverage"];
 }
 
 function availableProject(input: AvailableProjectInput): ProjectConfigFact {
@@ -61,6 +62,7 @@ function availableProject(input: AvailableProjectInput): ProjectConfigFact {
       ? {}
       : { extendsPath: input.extendsPath }),
     referencedProjects: input.referencedProjects ?? [],
+    ...(input.coverage === undefined ? {} : { coverage: input.coverage }),
     provenance: provenance(input.configPath),
   };
 }
@@ -197,6 +199,39 @@ describe("governanceFor — an outage cannot erase an established fact", () => {
 
     expect(result.status).toBe("governed");
     expect(result.status).not.toBe("undetermined");
+  });
+});
+
+describe("governanceFor — incomplete inherited membership", () => {
+  it("preserves a positive compiler fact but blocks a negative conclusion", () => {
+    const file = "pkg/src/index.ts";
+    const project = availableProject({
+      configPath: "pkg/tsconfig.json",
+      admittedFiles: [file],
+      coverage: {
+        membership: "incomplete",
+        optionInheritance: "incomplete",
+      },
+    });
+
+    const governed = governanceFor(
+      completeDiscovery([project.configPath]),
+      [project],
+      file,
+    );
+    expect(governed.status).toBe("governed");
+    if (governed.status !== "governed") throw new Error("unreachable");
+    expect(governed.coverage.unevaluable[0]?.failure).toBe(
+      "extends_unresolvable",
+    );
+
+    const absent = governanceFor(
+      completeDiscovery([project.configPath]),
+      [project],
+      "pkg/src/unknown.ts",
+    );
+    expect(absent.status).toBe("undetermined");
+    expect(absent.status).not.toBe("not_governed");
   });
 });
 

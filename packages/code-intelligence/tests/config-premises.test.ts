@@ -92,6 +92,12 @@ type MatchFiles = (
 const matchFiles = (ts as unknown as { readonly matchFiles: MatchFiles })
   .matchFiles;
 
+if (matchFiles === undefined) {
+  throw new Error(
+    `TypeScript ${ts.version} does not expose ts.matchFiles; the premise fixture requires the compiler version used by this checkpoint`,
+  );
+}
+
 const ROOT = "/repo";
 const abs = (relativePath: string): string => `${ROOT}/${relativePath}`;
 

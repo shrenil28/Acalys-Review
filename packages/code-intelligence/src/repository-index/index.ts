@@ -100,6 +100,21 @@ export {
   type IncrementalStats,
 } from "./incremental.js";
 
+export { discoverProjects, type ProjectDiscovery } from "./config-discovery.js";
+
+export {
+  readProjectConfigs,
+  type ProjectConfigFact,
+} from "./config-projects.js";
+
+export {
+  governanceFor,
+  optionInheritance,
+  projectReferences,
+  type ProjectDiscovery as ConfigGovernanceProjectDiscovery,
+  type ProjectConfigFact as ConfigGovernanceProjectConfigFact,
+} from "./config-governance.js";
+
 export {
   bindingOf,
   citeBinding,
