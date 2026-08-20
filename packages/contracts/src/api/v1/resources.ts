@@ -497,6 +497,16 @@ export function toConversationDto(
  * domain. A DTO that quietly mapped `failed` onto `"critical"` for the UI's
  * convenience would reintroduce the conflation at the boundary.
  */
+/**
+ * Whether a check DTO blocks the merge.
+ *
+ * Re-exported from the domain rule rather than restated, so a client and the
+ * server cannot disagree about what `status` and `blocking` mean together.
+ * The UI meets the backend at this layer, and this is the one piece of
+ * interpretation it needs.
+ */
+export { isMergeBlockingResult } from "../../domain/premerge/premerge.js";
+
 export interface PreMergeCheckDto {
   readonly id: string;
   readonly reviewRunId: string;

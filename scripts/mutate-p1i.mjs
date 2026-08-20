@@ -18,6 +18,7 @@
  * `src/src/`, and eighteen duplicated modules once reached a commit that way.
  */
 import { execFile, execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import {
   readFileSync,
   writeFileSync,
@@ -27,6 +28,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+
+import { acquireSession, releaseSession } from "./mutation-session.mjs";
 
 const run = promisify(execFile);
 const ROOT = process.cwd();
@@ -648,6 +651,30 @@ const MUTATIONS = [
     suite: "apps/web/tests/premerge.test.ts",
   },
   {
+    id: 74,
+    name: "production fixtures without demo authorization are allowed",
+    file: "apps/web/src/lib/api/config.ts",
+    find: "    if (isProduction && !demoAuthorized) {",
+    replace: "    if (false) {",
+    suite: "apps/web/tests/data-mode.test.ts",
+  },
+  {
+    id: 75,
+    name: "a dev API URL with no mode silently serves fixtures",
+    file: "apps/web/src/lib/api/config.ts",
+    find: "  if (baseUrl !== undefined) {",
+    replace: "  if (false) {",
+    suite: "apps/web/tests/data-mode.test.ts",
+  },
+  {
+    id: 76,
+    name: "the shared blocking rule ignores status",
+    file: "packages/contracts/src/domain/premerge/premerge.ts",
+    find: '  return check.blocking && check.status === "failed";',
+    replace: "  return check.blocking;",
+    suite: "apps/web/tests/premerge.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",
@@ -681,6 +708,10 @@ const backupDir = mkdtempSync(join(tmpdir(), "acalys-mutate-"));
  */
 const outstanding = new Map();
 
+// Held for the whole run, so a `test:ci` started in another terminal refuses
+// rather than testing whichever mutant happens to be on disk.
+const SESSION_NONCE = randomUUID();
+
 const restoreAll = () => {
   for (const [file, saved] of outstanding) {
     try {
@@ -694,13 +725,18 @@ const restoreAll = () => {
 
 process.once("SIGINT", () => {
   restoreAll();
+  releaseSession();
   process.exit(130);
 });
 process.once("SIGTERM", () => {
   restoreAll();
+  releaseSession();
   process.exit(143);
 });
-process.once("exit", restoreAll);
+process.once("exit", () => {
+  restoreAll();
+  releaseSession();
+});
 
 function backup(file) {
   const target = join(backupDir, file.replaceAll("/", "__"));
@@ -718,7 +754,13 @@ async function runSuite(suite) {
     const { stdout } = await run(
       "node",
       ["./node_modules/vitest/vitest.mjs", "run", suite, "--reporter=json"],
-      { cwd: ROOT, maxBuffer: 200 * 1024 * 1024, env: { ...process.env } },
+      {
+        cwd: ROOT,
+        maxBuffer: 200 * 1024 * 1024,
+        // The nonce marks this as the session's own child, so it is allowed
+        // through the interlock every other run is refused by.
+        env: { ...process.env, ACALYS_MUTATION_SESSION: SESSION_NONCE },
+      },
     );
     return { ok: true, stdout };
   } catch (error) {
@@ -768,6 +810,8 @@ function parseReport(stdout) {
     process.exit(2);
   }
 }
+
+acquireSession(SESSION_NONCE);
 
 const results = [];
 

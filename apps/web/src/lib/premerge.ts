@@ -39,6 +39,7 @@
  * the backend already decided it.
  */
 
+import { isMergeBlockingResult } from "@acalys/contracts/api/v1";
 import type { PreMergeCheckDto } from "@acalys/contracts/api/v1";
 
 function assertNever(value: never): never {
@@ -117,22 +118,20 @@ export function toCheckViews(
 /**
  * Whether these checks block the merge.
  *
- * The rule is the backend's, copied deliberately rather than reasoned out
- * again:
- *
- * ```
- * blocking && status === "failed"
- * ```
+ * The rule comes from the contract, not from here.
  *
  * The first version of this function blocked on `blocking` alone, which would
  * have stopped a merge on a check that PASSED while being configured to block.
- * Two implementations of one policy is one policy too many — this mirrors
- * `blocksMerge` in the review engine, and a divergence between them is a bug
- * in this file by definition.
+ * A test caught it — and the lesson was not "copy the rule more carefully". It
+ * was that two implementations of one policy do not drift loudly; they drift
+ * on a Tuesday when someone edits one of them.
  *
- * It consults nothing else. Not severity, not the number of findings, and it
- * does not treat "no checks" as permission — a review that evaluated nothing
- * has not approved anything.
+ * So `isMergeBlockingResult` is imported from `@acalys/contracts/api/v1`, and
+ * this file has no opinion about what `status` and `blocking` mean together.
+ *
+ * It consults nothing else either. Not severity, not the number of findings,
+ * and it does not treat "no checks" as permission — a review that evaluated
+ * nothing has not approved anything.
  */
 export function gateFrom(checks: readonly PreMergeCheckDto[]): MergeGate {
   const views = toCheckViews(checks);
@@ -157,9 +156,7 @@ export function gateFrom(checks: readonly PreMergeCheckDto[]): MergeGate {
     };
   }
 
-  return checks.some(
-    (check) => check.blocking && check.status === "failed",
-  )
+  return checks.some(isMergeBlockingResult)
     ? { kind: "blocked", checks: views }
     : { kind: "not_blocked", checks: views };
 }

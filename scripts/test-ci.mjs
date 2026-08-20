@@ -17,6 +17,12 @@
 import { randomUUID } from "node:crypto";
 import { execFileSync, spawn } from "node:child_process";
 import { captureDiagnostics } from "./failure-diagnostics.mjs";
+import { assertNoForeignSession } from "./mutation-session.mjs";
+
+// Before anything else. A tree under active mutation cannot produce a result
+// that means anything, and a failure from one looks exactly like a real
+// regression — which cost two investigations before this existed.
+assertNoForeignSession(process.env["ACALYS_MUTATION_SESSION"]);
 
 const started = Date.now();
 

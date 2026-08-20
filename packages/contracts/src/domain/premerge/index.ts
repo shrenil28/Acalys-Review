@@ -4,6 +4,7 @@ export {
   type PreMergeCheckStatus,
   aggregateCheckStatus,
   blocksMerge,
+  isMergeBlockingResult,
   isSettledCheck,
   preMergeCheckResultSchema,
   preMergeCheckStatusSchema,

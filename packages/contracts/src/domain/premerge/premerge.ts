@@ -175,7 +175,31 @@ export const preMergeCheckResultSchema = z
  * reinterpreting the status here.
  */
 export function blocksMerge(result: PreMergeCheckResult): boolean {
-  return result.blocking && result.status === "failed";
+  return isMergeBlockingResult(result);
+}
+
+/**
+ * The same rule, over just the two fields it needs.
+ *
+ * Structural so that every representation of a check — the domain result, the
+ * API DTO, whatever a client holds — can ask the question without converting
+ * first, and without writing the rule again.
+ *
+ * It exists because it was written twice. A frontend adapter reimplemented it
+ * as `blocking` alone, which would have stopped a merge on a check that
+ * PASSED while being configured to block. The mistake was caught by a test,
+ * but two implementations of one policy is one too many: they do not drift
+ * loudly, they drift on a Tuesday when someone edits one of them.
+ *
+ * This defines what the public fields MEAN together. It does not decide
+ * policy — the backend still produces `status` and `blocking`, and a tenant
+ * still configures which checks block.
+ */
+export function isMergeBlockingResult(check: {
+  readonly status: PreMergeCheckStatus;
+  readonly blocking: boolean;
+}): boolean {
+  return check.blocking && check.status === "failed";
 }
 
 /**

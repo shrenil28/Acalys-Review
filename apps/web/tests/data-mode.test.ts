@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveDataMode } from "../src/lib/api/config.js";
+import { resolveDataMode, type DataMode } from "../src/lib/api/config.js";
 
 /**
  * Fixtures are a choice, never a default and never a fallback.
@@ -31,11 +31,78 @@ describe("The data source is selected, not inferred", () => {
     expect(resolveDataMode({ PROD: false })).toEqual({ kind: "fixtures" });
   });
 
-  it("allows fixtures anywhere when they are explicitly chosen", () => {
-    // A demo build is legitimate — as a decision.
+  it("requires a second authorization for fixtures in production", () => {
+    // Choosing is not enough in production. A build serving fabricated
+    // security findings because one variable said `fixtures` should be more
+    // than a typo away, so it takes two — and the second exists for no other
+    // purpose.
     expect(
       resolveDataMode({ PROD: true, VITE_ACALYS_DATA_MODE: "fixtures" }),
+    ).toMatchObject({ kind: "misconfigured" });
+
+    expect(
+      resolveDataMode({
+        PROD: true,
+        VITE_ACALYS_DATA_MODE: "fixtures",
+        VITE_ACALYS_ALLOW_DEMO_DATA: "true",
+      }),
     ).toEqual({ kind: "fixtures" });
+  });
+
+  it("refuses to serve fixtures when a dev has configured an API", () => {
+    // A developer who set an API URL meant to use it. Silently serving
+    // fixtures costs an hour of wondering why backend changes do not appear,
+    // and the answer would be that the UI never asked.
+    expect(
+      resolveDataMode({
+        PROD: false,
+        VITE_ACALYS_API_URL: "http://localhost:8080",
+      }),
+    ).toMatchObject({ kind: "misconfigured" });
+  });
+
+  it("matches the full configuration table", () => {
+    // ── Every row, so a new branch has to be added here to pass ───────────
+    const table: [Record<string, unknown>, DataMode["kind"]][] = [
+      [{ PROD: true }, "misconfigured"],
+      [{ PROD: true, VITE_ACALYS_DATA_MODE: "api" }, "misconfigured"],
+      [
+        {
+          PROD: true,
+          VITE_ACALYS_DATA_MODE: "api",
+          VITE_ACALYS_API_URL: "https://a",
+        },
+        "api",
+      ],
+      [{ PROD: true, VITE_ACALYS_DATA_MODE: "fixtures" }, "misconfigured"],
+      [
+        {
+          PROD: true,
+          VITE_ACALYS_DATA_MODE: "fixtures",
+          VITE_ACALYS_ALLOW_DEMO_DATA: "true",
+        },
+        "fixtures",
+      ],
+      [{ PROD: false }, "fixtures"],
+      [
+        { PROD: false, VITE_ACALYS_API_URL: "http://localhost:8080" },
+        "misconfigured",
+      ],
+      [
+        {
+          PROD: false,
+          VITE_ACALYS_DATA_MODE: "api",
+          VITE_ACALYS_API_URL: "http://localhost:8080",
+        },
+        "api",
+      ],
+      [{ PROD: false, VITE_ACALYS_DATA_MODE: "api" }, "misconfigured"],
+      [{ PROD: false, VITE_ACALYS_DATA_MODE: "fixtures" }, "fixtures"],
+    ];
+
+    for (const [env, expected] of table) {
+      expect(resolveDataMode(env).kind, JSON.stringify(env)).toBe(expected);
+    }
   });
 
   it("reports api mode without a URL as misconfigured, not as fixtures", () => {
@@ -67,6 +134,8 @@ describe("The data source is selected, not inferred", () => {
       { PROD: true, VITE_ACALYS_DATA_MODE: "api" },
       { PROD: true, VITE_ACALYS_DATA_MODE: "typo" },
       { PROD: true, VITE_ACALYS_DATA_MODE: "api", VITE_ACALYS_API_URL: "" },
+      { PROD: true, VITE_ACALYS_DATA_MODE: "fixtures" },
+      { PROD: false, VITE_ACALYS_API_URL: "http://localhost:8080" },
     ];
     for (const env of incoherent) {
       expect(resolveDataMode(env).kind, JSON.stringify(env)).toBe(
