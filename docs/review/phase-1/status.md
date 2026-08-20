@@ -17,7 +17,7 @@ P1-PUBLISH-SURFACES   design checkpoint                         recorded
 P1-VERIFY-CONCURRENCY design checkpoint                         recorded
 P1-J                  deterministic quality + execution baseline ✓
 P1-INFRA-POSTGRES     one container, database per suite         next
-P1-K                  frontend production boundary              planned
+P1-K                  frontend production boundary              ✓
 ```
 
 `P1-VERIFY-CONCURRENCY` is recorded rather than built, for the same reason
