@@ -265,6 +265,20 @@ describe("the production path offers the test that actually imports the change",
       "  return save();",
       "}",
     ].join("\n"),
+    // A PRODUCTION module that binds into src/b.ts. Without it the caller
+    // assertions below are vacuous: `modulesReferencing` would return only
+    // test modules, which the planner skips, so there would never be a
+    // `caller` candidate for an over-broad lookup to get wrong.
+    //
+    // That was the state when a mutation making the reverse lookup
+    // unconditionally true survived — the assertions read as protection and
+    // defended nothing.
+    "src/consumes-b.ts": [
+      'import { save } from "./b.js";',
+      "export function useB(): number {",
+      "  return save();",
+      "}",
+    ].join("\n"),
   };
 
   const CHANGED_A = [{ path: "src/a.ts", changedLines: [2] }];
@@ -329,10 +343,17 @@ describe("the production path offers the test that actually imports the change",
       .filter((item) => item.reason === "caller")
       .map((item) => item.path);
 
-    // Nothing in this fixture calls src/a.ts from production code, so the
-    // correct answer is none — and a name-matching lookup would say otherwise.
+    // src/consumes-b.ts binds into src/b.ts, never into src/a.ts. A
+    // name-matching reverse lookup returns it for either target, because both
+    // modules export something called `save`.
+    //
+    // Premise first: the module exists and is a production module, so a wrong
+    // answer would actually surface here as a `caller`.
+    const paths = outcome.context.items.map((item) => item.path);
+    expect(paths).toContain("src/a.ts");
+
+    expect(callers).not.toContain("src/consumes-b.ts");
     expect(callers).not.toContain("src/b.ts");
-    expect(callers).not.toContain("tests/b-checks.test.ts");
   });
 
   it("does not offer the b-test through ANY inclusion reason", async () => {
@@ -341,9 +362,13 @@ describe("the production path offers the test that actually imports the change",
     // happened once already — fails here instead of slipping between two
     // reason-scoped assertions.
     const outcome = await reviewA();
-    const paths = outcome.context.items.map((item) => item.path);
+    // Stated over the set of offered MODULES rather than over reason labels,
+    // so narrowing or renaming the reason vocabulary cannot quietly reduce
+    // what this defends.
+    const offered = new Set(outcome.context.items.map((item) => item.path));
 
-    expect(paths).not.toContain("tests/b-checks.test.ts");
+    expect(offered.has("tests/b-checks.test.ts")).toBe(false);
+    expect(offered.has("src/consumes-b.ts")).toBe(false);
   });
 
   it("delivers the association to what the analyzer is handed", async () => {

@@ -260,3 +260,66 @@ killed mid-run left its edit in place, the next run snapshotted the corruption
 as its baseline, and the anchor was valid the whole time. Which is invariant 4
 again — a harness must restore its own snapshot, and restore-on-completion is
 not restore-on-signal.
+
+## 9. A mutation joins the manifest only after a targeted execution
+
+Invariant 8 validates that a mutation _applies_: unique anchor, real
+replacement, source actually changed. There is a failure it structurally
+cannot see:
+
+```
+anchor perfect
+replacement real
+declared suite valid
+BUT the suite never reaches the mutated behaviour
+```
+
+That is not weak evidence, it is none — and it reads as a pass. So a newly
+authored **or retargeted** mutation is not admitted to the full manifest until
+it has passed both:
+
+```
+preflight            unique target, source-changing, no duplicate id
+targeted execution   its DECLARED suite, run alone, with the mutant applied,
+                     and observed to fail
+```
+
+Both halves of the second line are load-bearing.
+
+**Its declared suite** — L.4.1 shipped three mutations that had never been
+executed at all, and two of them (`#131`, `#130`) pointed at suites that did
+not exercise the mutated line. One suite had zero occurrences of the function
+it mutated.
+
+**Run alone** — the probe for `#130` ran two suites together, saw one failure,
+and recorded a kill. The harness runs only the declared suite, where nothing
+failed. Running the union of suites hides exactly the attribution error the
+targeted execution exists to catch, so the probe must invoke what the harness
+will invoke and nothing more.
+
+## 10. An assertion that cannot fail is not protection
+
+Three times in one checkpoint, code or tests that read as defensive turned out
+to defend nothing reachable:
+
+```
+a multi-module symbol guard    the execution model already prevented the split
+an indexedDependants check     the condition below already subsumed it
+caller assertions in a witness the fixture had no production module that could
+                               become a wrong caller, so `not.toContain` was
+                               trivially true
+```
+
+The first two were dead code; the third was a dead _test_, written while
+fixing a dead-code finding. All three were found by a mutation surviving.
+
+The rule that follows: when adding a guard or an assertion, establish the state
+in which it fires. For a guard, that is a reachable input where guarded and
+unguarded behaviour differ (invariant 7). For a negative assertion —
+`not.toContain`, `toHaveLength(0)`, `toBeUndefined` — it is a fixture where the
+_wrong_ answer is available to be produced. A negative assertion over an empty
+possibility space is the cheapest way to look thorough while proving nothing.
+
+Prefer removing dead defensive code to manufacturing a test around it. Dead
+reassurance is worse than an absent guard, because it makes the next reader
+add a case rather than ask whether the branch is reachable.

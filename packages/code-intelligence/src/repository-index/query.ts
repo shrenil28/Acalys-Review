@@ -286,6 +286,14 @@ export function citeBinding(
  *
  * Returns nothing for an unusable index, so "no index" is never read as
  * "nothing depends on this".
+ *
+ * That check is an **exported-API contract**, not a second production defence.
+ * The planner already tests usability before calling here, so no production
+ * path reaches both — describing them as defence in depth would be the same
+ * dead-reassurance pattern this checkpoint has produced twice in code and once
+ * in a test. It is directly tested because this function is part of the
+ * index's public factual surface, which `review-engine` will consume, and an
+ * exported contract needs proof independent of today's only caller.
  */
 export function modulesReferencing(
   index: RepositoryIndex,
