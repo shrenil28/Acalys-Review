@@ -21,6 +21,7 @@ P1-K                  frontend production boundary              ✓
 P1-GATE-INTERLOCK     mutation session guards every gate        ✓
 P1-L.1                canonical repository index + live witness  ✓
 P1-L.2                references, bindings, import-export         ✓
+P1-L.3                incremental invalidation + rebuild oracle   next
 ```
 
 `P1-VERIFY-CONCURRENCY` is recorded rather than built, for the same reason

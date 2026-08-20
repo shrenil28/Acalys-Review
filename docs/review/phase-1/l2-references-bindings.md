@@ -1,13 +1,15 @@
 # P1-L.2 — references and bindings
 
-**Status: implementation complete, gates green, mutation evidence clean.**
+**Status: CLOSED at `264109b`.**
 
 The claim, stated narrowly:
 
-> For repository references within supported TypeScript/JavaScript coverage,
-> Acalys can represent the exact checker binding from a reference to its symbol
-> and declaration set, and explicitly represent cases where that binding cannot
-> be established.
+> For supported TypeScript/JavaScript references, the repository index records
+> checker-backed reference-to-symbol bindings and declaration relationships,
+> preserves the `unresolved` / `external` / index-coverage distinctions, and a
+> real production analysis path consumes those bindings.
+
+Explicitly **not** "Acalys now has a call graph". It does not.
 
 ---
 
@@ -189,6 +191,9 @@ Caught in 40ms. The **uniqueness** half of the check is what caught it; a
 ## What L.2 does NOT claim
 
 - full call graph
+- runtime dispatch resolution
+- dynamic property calls
+- reflection
 - type graph
 - barrel re-exports, namespace imports, default imports
 - path aliases
