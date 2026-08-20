@@ -1,13 +1,31 @@
 # P1-L.1 — canonical repository intelligence
 
-The central claim, stated narrowly on purpose:
+**Status: CLOSED at `1eca72f`.**
 
-> For a specific repository revision, Acalys can produce canonical,
-> provenance-bearing structural facts about production code, and at least one
-> real review path consumes those facts.
+The claim this checkpoint establishes, stated narrowly on purpose:
+
+> P1-L.1 establishes a deterministic, full-rebuild, revision-scoped,
+> checker-backed factual repository index with provenance and honest
+> coverage/resolution semantics. A production analysis path consumes indexed
+> facts, and bypassing that seam is detected by production-path witnesses. No
+> analyzer-quality improvement, persistence, incremental indexing, or
+> cross-revision reuse is claimed.
 
 Not "we have a code graph". Not "indexing is complete". The claim is small
 enough that the evidence below either establishes it or does not.
+
+**Carried forward, explicitly:**
+
+```
+TENANCY     unscoped index identities are non-persistable; real tenant
+            scope is required before shared persistence or caching.
+
+QUALITY     index participation is proven; review-quality effect remains
+            unmeasured until L.5.
+
+REPORTING   the overall suite includes one setup/startup detection (#58).
+            Do not describe all 92 as semantic assertion kills.
+```
 
 ---
 
@@ -358,14 +376,28 @@ produced by filtering malformed definitions out of the denominator.
 **Execution:**
 
 ```
-92 killed
- 0 survived
- 0 runtime-invalid
+92/92 mutants detected
+  91 semantic assertion kills
+   1 setup/startup kill
+   0 survived
+   0 invalid
 ```
 
-Of the 92 kills, **91 were killed by a failed semantic assertion** with
-`executed > 0` and `skipped 0`. One was not, and it is recorded rather than
-folded in:
+"92/92 killed" would be true and would say more than the evidence supports.
+The harness now reports four classes rather than two, because a reader
+deciding whether a checkpoint closes needs to know how many mutants an
+assertion caught rather than a suite falling over:
+
+```
+SEMANTIC_KILL   a relevant test ran, nothing skipped, the intended
+                assertion failed
+SETUP_KILL      the mutant applied and left the suite unable to establish
+                its preconditions, so nothing ran
+SURVIVED        relevant behaviour ran and the mutant escaped
+INVALID         the mutation was not meaningfully exercised
+```
+
+The one setup kill is recorded rather than folded in:
 
 ```
 #58  every suite shares one database name
@@ -373,18 +405,25 @@ folded in:
      verdict  KILLED — suite could not run
 ```
 
-That is a documented kill class, and it exists because the opposite was once a
-harness bug: Vitest reports a test whose `beforeAll` threw as "skipped", an
-earlier parser counted those as executed, and a mutation that broke setup
-outright read as SURVIVED. A mutation that makes its suite unable to start has
-been detected. But it is a **weaker** kill than an assertion failure — it
-proves the mutation is detectable, not that a specific expectation caught the
-specific wrong behaviour — so it is counted separately and not described as
-"0 skipped".
+Colliding database names stop `beforeAll` establishing isolated state, so the
+suite cannot run. That is a real consequence of the mutant — it is not hiding,
+and calling it `INVALID` would say less than the truth. But it is also not an
+assertion failing, and calling it a semantic kill would say more.
+
+It belongs to the older Postgres harness, not to L.1.
+
+**The fix for a setup kill is not to weaken the test until one assertion
+executes.** Forcing a suite past broken setup builds a test that no longer
+resembles production execution. Honest classification is the response.
+
+The class exists at all because the opposite was once a harness bug: Vitest
+reports a test whose `beforeAll` threw as "skipped", an earlier parser counted
+those as executed, and a mutation that broke setup outright read as SURVIVED.
 
 ### The seventeen L.1 mutations
 
-Every one killed on a failed assertion, `skipped 0`:
+Every one a **semantic assertion kill**, `executed > 0`, `skipped 0` — so the
+`#58` caveat touches none of the evidence L.1's closure rests on:
 
 ```
 77  index identity ignores the revision                        exec 46  fail 1

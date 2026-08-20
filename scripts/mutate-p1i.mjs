@@ -1135,6 +1135,33 @@ for (const mutation of MUTATIONS) {
   const skipped = tests.filter((test) => notRun.has(test.status)).length;
   const failed = tests.filter((test) => test.status === "failed");
 
+  // Four verdict classes, not two.
+  //
+  //   SEMANTIC_KILL   a relevant test ran, nothing was skipped, and the
+  //                   intended assertion failed. The strongest evidence: the
+  //                   specific wrong behaviour was caught by a specific
+  //                   expectation.
+  //
+  //   SETUP_KILL      the mutant applied and made the suite unable to
+  //                   establish its preconditions, so nothing ran. Real
+  //                   detection — the mutant is not hiding — but weaker: it
+  //                   proves the mutation is DETECTABLE, not that an
+  //                   expectation caught the specific wrong behaviour.
+  //
+  //   SURVIVED        relevant behaviour ran and the mutant escaped.
+  //
+  //   INVALID         the mutation was not meaningfully exercised.
+  //
+  // Collapsing the first two into "KILLED" says more than the evidence
+  // supports; calling a SETUP_KILL invalid says less. #58 ("every suite shares
+  // one database name") is the standing example: colliding database names stop
+  // `beforeAll` establishing isolated state, so the suite cannot run. That is
+  // a genuine consequence of the mutant, and it is not an assertion failing.
+  //
+  // The fix for a SETUP_KILL is NOT to weaken the test until one assertion
+  // executes. Forcing a suite past broken setup builds a test that no longer
+  // resembles production execution. Classify honestly instead.
+
   // A test FILE that failed to run at all.
   //
   // Counted as a kill, and separately from a failed assertion: a mutation that
@@ -1158,9 +1185,9 @@ for (const mutation of MUTATIONS) {
     brokenSuites,
     verdict:
       brokenSuites.length > 0 && failed.length === 0
-        ? "KILLED — suite could not run"
+        ? "SETUP_KILL — suite could not run"
         : executed > 0 && skipped === 0 && failed.length > 0
-          ? "KILLED"
+          ? "SEMANTIC_KILL"
           : executed === 0
             ? "INVALID — executed = 0"
             : skipped > 0
@@ -1184,10 +1211,34 @@ for (const result of results) {
   );
 }
 
-const killed = results.filter((r) => r.verdict.startsWith("KILLED")).length;
+const semantic = results.filter((r) => r.verdict === "SEMANTIC_KILL").length;
+const setup = results.filter((r) => r.verdict.startsWith("SETUP_KILL")).length;
 const survived = results.filter((r) => r.verdict === "SURVIVED").length;
 const invalid = results.filter((r) => r.verdict.startsWith("INVALID")).length;
+const detected = semantic + setup;
+
+// Detection and semantic detection are reported on separate lines on purpose.
+// "92/92 killed" is true and says more than the evidence supports; a reader
+// deciding whether a checkpoint closes needs to know how many mutants were
+// caught by an assertion rather than by a suite falling over.
 console.log(
-  `\n\nKILLED ${String(killed)} / SURVIVED ${String(survived)} / INVALID ${String(invalid)}  (of ${String(results.length)})`,
+  `\n\n${String(detected)}/${String(results.length)} mutants detected\n` +
+    `  ${String(semantic)} semantic assertion kills\n` +
+    `  ${String(setup)} setup/startup kills\n` +
+    `  ${String(survived)} survived\n` +
+    `  ${String(invalid)} invalid`,
 );
+
+if (setup > 0) {
+  console.log(
+    "\nSetup/startup kills are real detection and weaker evidence. They are " +
+      "listed here so a closure claim can cite the right number:",
+  );
+  for (const result of results.filter((r) =>
+    r.verdict.startsWith("SETUP_KILL"),
+  )) {
+    console.log(`  #${String(result.id)}  ${result.name}`);
+  }
+}
+
 process.exit(survived > 0 || invalid > 0 ? 1 : 0);
