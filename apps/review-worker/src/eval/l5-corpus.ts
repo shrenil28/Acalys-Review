@@ -257,12 +257,12 @@ const rawCases: readonly L5CorpusCase[] = [
     id: "structural-index-public-signature-declaration",
     category: "structural_index_positive",
     summary:
-      "A changed implementation diverges from an indexed public declaration.",
+      "A changed indexed public declaration adds a required parameter.",
     families: ["structural_index"],
     eligibility: {
       witness: "positive_gold_and_ablatable_exposure",
       because:
-        "the signature divergence is one distinct gold opportunity with an indexed-declaration witness",
+        "the public-signature break is one distinct gold opportunity with an indexed-declaration witness",
     },
     ...caseRevision(
       "l5/structural-index-public-signature-declaration/h1",
@@ -272,8 +272,6 @@ const rawCases: readonly L5CorpusCase[] = [
           "  return `${region}:${id}`;",
           "}",
         ),
-        "types/format.d.ts":
-          "export declare function format(id: string): string;",
         "generated/client.ts":
           "export const format = (...values: string[]): string => values.join(':');",
       },
@@ -302,9 +300,9 @@ const rawCases: readonly L5CorpusCase[] = [
           path: "src/format.ts",
           allowedAnchor: { startLine: 1, endLine: 1 },
           summary:
-            "The implementation now requires an argument absent from its public declaration.",
+            "The public format declaration now requires a new region argument.",
           because:
-            "the indexed public declaration still promises format(id), while the changed implementation requires region and therefore no longer implements that declared surface",
+            "the changed exported declaration turns a previously one-argument API into a two-argument API without a compatibility default",
         },
       ],
       requiredContext: [
@@ -312,15 +310,15 @@ const rawCases: readonly L5CorpusCase[] = [
           id: "public-format-indexed-declaration",
           family: "structural_index",
           reason: "declaration",
-          path: "types/format.d.ts",
-          selector: { kind: "line_range", startLine: 1, endLine: 1 },
+          path: "src/format.ts",
+          selector: { kind: "line_range", startLine: 1, endLine: 3 },
           because:
-            "the repository index records this indexed_declaration as the public format signature against which the implementation is checked",
+            "the repository index records the exact changed exported declaration and its complete source span",
           requiredExposure: {
             disappearsUnderAblation: "structural_index",
             factKind: "indexed_declaration",
             because:
-              "this indexed_declaration exposure comes from structural_index and does not require a call-site binding",
+              "this declaration exposure comes from structural_index and does not require a call-site binding",
           },
         },
       ],
@@ -332,7 +330,7 @@ const rawCases: readonly L5CorpusCase[] = [
           path: "generated/client.ts",
           selector: { kind: "whole_artifact" },
           because:
-            "this generated same-name value is not the indexed public declaration for the changed implementation",
+            "this generated same-name value is not the changed indexed declaration",
         },
       ],
     },
@@ -340,8 +338,7 @@ const rawCases: readonly L5CorpusCase[] = [
   {
     id: "structural-index-export-declaration-drift",
     category: "structural_index_positive",
-    summary:
-      "Renaming an implementation export contradicts its indexed declaration artifact.",
+    summary: "A changed indexed declaration removes a public export name.",
     families: ["structural_index"],
     eligibility: {
       witness: "positive_gold_and_ablatable_exposure",
@@ -357,8 +354,6 @@ const rawCases: readonly L5CorpusCase[] = [
           "}",
           "export { parse as parseInternal };",
         ),
-        "types/parser.d.ts":
-          "export declare function parse(raw: string): number;",
         "docs/parser.md": "The command line accepts numeric input.",
       },
       {
@@ -386,10 +381,9 @@ const rawCases: readonly L5CorpusCase[] = [
           correctnessFamily: "compatibility",
           path: "src/parser.ts",
           allowedAnchor: { startLine: 1, endLine: 4 },
-          summary:
-            "The implementation no longer provides the declared parse export.",
+          summary: "The changed declaration no longer exports parse.",
           because:
-            "the indexed declaration artifact promises an export named parse, while the changed implementation exports only parseInternal",
+            "the base declaration exported parse, while the changed declaration is private and exposes only the incompatible parseInternal alias",
         },
       ],
       requiredContext: [
@@ -397,15 +391,15 @@ const rawCases: readonly L5CorpusCase[] = [
           id: "public-parse-indexed-declaration",
           family: "structural_index",
           reason: "declaration",
-          path: "types/parser.d.ts",
-          selector: { kind: "line_range", startLine: 1, endLine: 1 },
+          path: "src/parser.ts",
+          selector: { kind: "line_range", startLine: 1, endLine: 3 },
           because:
-            "the repository index records this indexed_declaration as the public export surface for parser.ts",
+            "the repository index records the exact changed parse declaration, including that it is no longer exported",
           requiredExposure: {
             disappearsUnderAblation: "structural_index",
             factKind: "indexed_declaration",
             because:
-              "this indexed_declaration exposure belongs only to structural_index and does not depend on resolving a caller binding",
+              "this declaration exposure belongs only to structural_index and does not depend on resolving a caller binding",
           },
         },
       ],
