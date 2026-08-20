@@ -772,9 +772,9 @@ const MUTATIONS = [
     id: 88,
     name: "an index-derived context item claims direct-source provenance",
     file: "packages/code-intelligence/src/planner.ts",
-    find: '        provenance: {\n          source: "repository_index",',
+    find: '          source: "repository_index",\n          indexIdentity: describeIdentity(record.index.identity),\n          recordId: declaration.declarationId,',
     replace:
-      '        provenance: {\n          source: "direct_source" as "repository_index",',
+      '          source: "direct_source" as "repository_index",\n          indexIdentity: describeIdentity(record.index.identity),\n          recordId: declaration.declarationId,',
     suite: "apps/review-worker/tests/index-wiring.test.ts",
   },
   {
@@ -806,8 +806,9 @@ const MUTATIONS = [
     id: 92,
     name: "an unusable index still suppresses the syntactic fallback",
     file: "packages/code-intelligence/src/planner.ts",
-    find: "  if (index === undefined || !isUsable(index)) return [];",
-    replace: "  if (index === undefined) return [];",
+    find: "  if (index === undefined || !isUsable(index)) return [];\n\n  const found = new Map<string, DeclarationRecord>();",
+    replace:
+      "  if (index === undefined) return [];\n\n  const found = new Map<string, DeclarationRecord>();",
     suite: "packages/code-intelligence/tests/repository-index.test.ts",
   },
   {
