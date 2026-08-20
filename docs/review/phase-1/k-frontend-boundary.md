@@ -260,17 +260,17 @@ fixed.
 
 ## Gates `apps/web` participates in, and the ones it does not
 
-| Gate               | Participates       | Evidence                                                                                                                                                                                                                                                                                              |
-| ------------------ | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| typecheck          | yes                | `apps/web`'s project builds clean under `tsc -b --noEmit` (re-verified directly, 2026-08-20); part of the repo-wide `typecheck` step in `verify`                                                                                                                                                      |
-| lint               | yes, since K.1     | `eslint .` clean over `apps/web` (re-verified via `npm run lint`, 2026-08-20); enumerated ignore covers only the 12 CDP scripts and 2 build-config files, not product code                                                                                                                            |
-| format             | yes                | `prettier --check .` covers `apps/web`; clean there (re-verified via `npm run format:check`, 2026-08-20) — pre-existing warnings elsewhere in the tree live only under `.superpowers/sdd/`, outside this checkpoint's files                                                                           |
-| build              | yes                | `tsc -b && vite build`, inside `build:clean`                                                                                                                                                                                                                                                          |
-| depcruise          | yes                | 293 modules cruised, 0 violations (re-verified via `npm run depcruise`, 2026-08-20); three web-specific rules — `no-unreachable-in-web` (K.2), `pages-must-not-import-the-transport`, `pages-must-not-import-api-contracts` (K.5a) — each planted, watched to fail, then cleaned before being trusted |
-| export conformance | yes, since K.5a    | `assert-export-conformance.mjs`, wired into `verify`; compares the dev-time source alias for `@acalys/contracts/api/v1` against the published `dist/` export map across all 4 subpaths                                                                                                                |
-| tests              | yes, since K.1     | 52 tests across 6 files (re-verified via `npx vitest run apps/web/tests`, 2026-08-20); folded into the repo-wide `test:ci`. All 52 exercise `lib/` functions directly; none render a page or a hook — see below                                                                                       |
-| mutation           | partial, since K.4 | 15 cases in `scripts/mutate-p1i.mjs` target `lib/findings.ts`, `lib/premerge.ts`, `lib/api/client.ts`, `lib/api/config.ts`, and the shared contract rule they depend on. Run by a separate harness (`node scripts/mutate-p1i.mjs`), not by `verify`, and not re-run for this document per instruction |
-| schemas            | n/a                | `apps/web` carries no schema files; the 49-file schema gate belongs to `packages/contracts`                                                                                                                                                                                                           |
+| Gate               | Participates       | Evidence                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------ | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| typecheck          | yes                | `apps/web`'s project builds clean under `tsc -b --noEmit` (re-verified directly, 2026-08-20); part of the repo-wide `typecheck` step in `verify`                                                                                                                                                                                                                |
+| lint               | yes, since K.1     | `eslint .` clean over `apps/web` (re-verified via `npm run lint`, 2026-08-20); enumerated ignore covers only the 12 CDP scripts and 2 build-config files, not product code                                                                                                                                                                                      |
+| format             | yes                | `prettier --check .` covers `apps/web`; clean there (re-verified via `npm run format:check`, 2026-08-20) — pre-existing warnings elsewhere in the tree live only under `.superpowers/sdd/`, outside this checkpoint's files                                                                                                                                     |
+| build              | yes                | `tsc -b && vite build`, inside `build:clean`                                                                                                                                                                                                                                                                                                                    |
+| depcruise          | yes                | 293 modules cruised, 0 violations (re-verified via `npm run depcruise`, 2026-08-20); three web-specific rules — `no-unreachable-in-web` (K.2), `pages-must-not-import-the-transport`, `pages-must-not-import-api-contracts` (K.5a) — each planted, watched to fail, then cleaned before being trusted                                                           |
+| export conformance | yes, since K.5a    | `assert-export-conformance.mjs`, wired into `verify`; compares the dev-time source alias for `@acalys/contracts/api/v1` against the published `dist/` export map across all 4 subpaths                                                                                                                                                                          |
+| tests              | yes, since K.1     | 52 tests across 6 files (re-verified via `npx vitest run apps/web/tests`, 2026-08-20); folded into the repo-wide `test:ci`. All 52 exercise `lib/` functions directly; none render a page or a hook — see below                                                                                                                                                 |
+| mutation           | partial, since K.4 | 15 cases in `scripts/mutate-p1i.mjs` target `lib/findings.ts`, `lib/premerge.ts`, `lib/api/client.ts`, `lib/api/config.ts`, and the shared contract rule they depend on. Run by a separate harness (`node scripts/mutate-p1i.mjs`), not by `verify`. Re-run in full at closure: 75 planted, 75 killed, 0 survived, 0 invalid — see "Closing verification" below |
+| schemas            | n/a                | `apps/web` carries no schema files; the 49-file schema gate belongs to `packages/contracts`                                                                                                                                                                                                                                                                     |
 
 What that table understates, and did until the whole-branch review: mutation
 coverage is scoped to five `lib/` files, and every one of the 52 tests
@@ -416,3 +416,48 @@ Not carried forward from earlier phases into this document: P1-J's open
 items (`P1-VERIFY-CONCURRENCY`, the historical shadowing replay, the
 unexplained funnel-suite startup failure) are unrelated to the frontend and
 remain recorded where P1-J left them.
+
+---
+
+## Closing verification
+
+Recorded because the numbers above are per-checkpoint and scoped to
+`apps/web`. These are the whole-repository results from the run that closed
+P1-K, on `236d2dc`, with a clean tree:
+
+```
+tests        1,846 executed, 0 skipped   (ACALYS_REQUIRE_POSTGRES=1)
+mutations    75 planted, 75 killed, 0 survived, 0 invalid
+depcruise    293 modules, 0 violations
+
+typecheck             green
+lint                  green
+format                green
+references            green
+schemas               green
+clean build           green
+export conformance    green
+```
+
+Two properties of that run matter more than the totals.
+
+**0 skipped is an assertion, not an observation.** `ACALYS_REQUIRE_POSTGRES=1`
+makes a missing Docker daemon a hard failure rather than a quiet skip, so
+"1,846 executed" means 1,846 tests ran — not 1,846 tests were collected. The
+distinction is invariant 1 in [invariants.md](../../testing/invariants.md),
+and it exists because a green suite that silently skipped its integration
+half is the most expensive kind of false evidence this project has produced.
+
+**0 invalid is what makes 75/75 meaningful.** An `INVALID` verdict means the
+mutation no longer applies — its target moved or was refactored away — and a
+harness carrying invalid patterns reports a smaller denominator each time
+without saying so. Four patterns rotted this way during P1-J and were
+retargeted at stable constants rather than call sites; one (id 69) was
+retired outright in `ebc74f4` when K.5c moved the blocking rule into the
+contract, so one policy stays proven by one mutation instead of two that can
+drift apart.
+
+Neither number is claimed as coverage of the page/hook layer. As the gate
+table above states, all 52 `apps/web` tests and all 15 web mutations target
+`lib/`, and the 79 files under `pages/` and `components/` carry neither.
+That gap is the checkpoint's central lesson, not a footnote to it.

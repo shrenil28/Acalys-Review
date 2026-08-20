@@ -131,3 +131,53 @@ a limiter admitting everyone            peak-overlap probe
 
 Where a control cannot be shown to fail, say so explicitly rather than counting
 it.
+
+## 6. A mechanism test does not prove a production seam
+
+Proving a function correct proves the function. It says nothing about whether
+any production path reaches it, or reaches it with the arguments the test
+used. Every claimed live path requires a **production-path witness**: a test
+that enters where production enters and observes the fact at the far end.
+
+P1-K demonstrated the gap at full size:
+
+```
+lib/ correctness           52 tests + 15 mutations    excellent
+page/hook wiring           no production-path proof   central claim FALSE
+```
+
+All four live defects the whole-branch review found — a fixtures disjunction
+that made `api` mode render fabrications, a `misconfigured` state falling
+through to "No vulnerabilities found", two seams that no call site reached,
+and three filters emptying into a clean-scan message — sat in the layer that
+_calls_ the well-tested `lib/` functions. Every `lib/` module was sound. The
+review that certified the checkpoint, the review of that review, and the
+closure document's own review all passed while agreeing on something false,
+because all three were reading mechanism evidence and none asked for a
+witness.
+
+What the witness must traverse, stated as a chain rather than a checkbox:
+
+```
+production entry point
+  → the code under test, reached by production's own call
+  → the fact it returns
+  → the consumer that acts on that fact
+```
+
+Two consequences bind future checkpoints:
+
+**"Integrated" is a claim about a path, not about a component.** A
+subsystem with excellent tests on `Thing.query(...)` is not integrated. The
+claim requires at least one witness running the real chain — for the
+repository index that P1-L builds, `production review entry → context
+planner → RepositoryIndex → returned fact → analyzer/verifier consumption`.
+
+**Wiring evidence is due with the first commit, not at the final audit.**
+P1-K found its wiring defects in a whole-branch review after closure had
+already been declared once. That ordering is what made the failure
+expensive: the checkpoint had to be reopened, its closure document rewritten
+to record the falsification rather than quietly corrected, and four rounds
+of fixes applied to code that had already been reviewed twice. A checkpoint
+that produces mechanism evidence and wiring evidence together cannot close
+on a false central claim, because the claim has a witness from the start.
