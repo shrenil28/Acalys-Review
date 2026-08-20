@@ -92,7 +92,7 @@ export function analyzeSwallowedErrors(
   for (const item of input.context.items) {
     const changed = subjectByPath.get(item.path);
     if (changed === undefined || item.representation !== "full") continue;
-    if (item.kind === "instruction") continue;
+    if (item.kind === "instruction" || item.kind === "coverage") continue;
 
     const source = ts.createSourceFile(
       item.path,

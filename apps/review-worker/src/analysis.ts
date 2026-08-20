@@ -401,9 +401,11 @@ export async function runRealAnalysis(
           ? item.provenance.factIdentity
           : item.provenance?.source === "instruction_facts"
             ? item.provenance.factIdentity
-            : item.provenance?.source === "repository_index"
-              ? `${item.provenance.indexIdentity}:${item.provenance.recordId}`
-              : undefined,
+            : item.provenance?.source === "instruction_coverage"
+              ? item.provenance.factIdentity
+              : item.provenance?.source === "repository_index"
+                ? `${item.provenance.indexIdentity}:${item.provenance.recordId}`
+                : undefined,
     })),
   );
   const cacheKey = analyzerCacheKey({
@@ -561,7 +563,11 @@ function repositoryInstructionObservation(
   repository: ReadonlyMap<string, string>,
 ): AnalysisInstructionObservation {
   return {
-    listPaths: () => ({ status: "complete", paths: [...repository.keys()] }),
+    listPaths: () => ({
+      status: "incomplete",
+      paths: [...repository.keys()],
+      why: "the repository map contains readable files but no explicit traversal-completeness evidence",
+    }),
     readArtifact: (path) => {
       const content = repository.get(path);
       return content === undefined

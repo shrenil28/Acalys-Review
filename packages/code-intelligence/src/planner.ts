@@ -38,6 +38,7 @@ import type {
   DeclarationRecord,
   InstructionApplicability,
   InstructionApplicabilityResult,
+  InstructionCoverage,
   InstructionFacts,
   InstructionPrecedenceRelationship,
   InstructionPrecedenceTrustAnalysis,
@@ -57,6 +58,7 @@ import {
   citeTestRelationship,
   isUsable,
   isInstructionArtifact,
+  isInstructionCoverageComplete,
   modulesReferencing,
   referencesIn,
   resolvedDeclarations,
@@ -118,6 +120,7 @@ export const INCLUSION_REASONS = [
   "associated_test",
   "repository_instruction",
   "path_instruction",
+  "instruction_coverage",
   "configuration",
   "prior_finding",
   "git_history",
@@ -130,6 +133,7 @@ export const CONTEXT_ITEM_KINDS = [
   "source_excerpt",
   "symbol",
   "instruction",
+  "coverage",
   "test",
   "configuration",
   "finding",
@@ -170,6 +174,17 @@ export type ItemProvenance =
       }[];
     }
   | {
+      readonly source: "instruction_coverage";
+      readonly factIdentity: string;
+      readonly citation: string;
+      readonly targetPath: string;
+      readonly applicabilityStatus: Exclude<
+        InstructionApplicabilityResult["status"],
+        "not_indexed"
+      >;
+      readonly coverage: InstructionCoverage;
+    }
+  | {
       readonly source: "repository_index";
       /** {@link describeIdentity} — revision and extractor included. */
       readonly indexIdentity: string;
@@ -193,6 +208,8 @@ export interface ContextCandidate {
   readonly endLine?: number | undefined;
   /** Defaults to `direct_source` when the planner had no index. */
   readonly provenance?: ItemProvenance | undefined;
+  /** Overrides span-based deduplication for factual metadata at the same path. */
+  readonly deduplicationKey?: string | undefined;
 }
 
 /**
@@ -215,6 +232,7 @@ export interface ContextCandidate {
 export const REASON_WEIGHT: Readonly<Record<InclusionReason, number>> = {
   repository_instruction: 1_000,
   path_instruction: 950,
+  instruction_coverage: 940,
   changed_hunk: 900,
   containing_symbol: 880,
   // Just above the syntactic equivalent: same material, better standing.
@@ -855,7 +873,7 @@ function factualInstructionCandidates(
     }
   }
 
-  return [...applications]
+  const applicableCandidates = [...applications]
     .sort(([left], [right]) => compareText(left, right))
     .flatMap(([artifactPath, retained]) => {
       const artifact = artifacts.get(artifactPath);
@@ -908,6 +926,65 @@ function factualInstructionCandidates(
         },
       ];
     });
+
+  return [
+    ...applicableCandidates,
+    ...instructionCoverageCandidates(instructionInput),
+  ];
+}
+
+function instructionCoverageCandidates(
+  instructionInput: PlannerInstructionFacts,
+): readonly ContextCandidate[] {
+  return instructionInput.targets.flatMap((target) => {
+    if (
+      target.applicability.status === "not_indexed" ||
+      isInstructionCoverageComplete(target.applicability.coverage)
+    ) {
+      return [];
+    }
+
+    const coverage = target.applicability.coverage;
+    const discovery =
+      coverage.discovery.status === "complete"
+        ? "complete"
+        : `incomplete: ${coverage.discovery.why}`;
+    const gaps = coverage.unevaluable.map(
+      (artifact) =>
+        `${artifact.artifactPath}: ${artifact.availability.failure} (${artifact.availability.detail})`,
+    );
+    const content = [
+      `Instruction coverage for ${target.targetPath} is incomplete.`,
+      `Applicability status: ${target.applicability.status}.`,
+      `Discovery: ${discovery}.`,
+      ...(gaps.length === 0
+        ? []
+        : [
+            "Relevant unevaluable candidates:",
+            ...gaps.map((gap) => `- ${gap}`),
+          ]),
+      "Do not interpret incomplete coverage as evidence that no instruction applies.",
+    ].join("\n");
+
+    return [
+      {
+        kind: "coverage" as const,
+        path: target.targetPath,
+        reason: "instruction_coverage" as const,
+        trust: "tool_output" as const,
+        content,
+        deduplicationKey: `instruction-coverage|${target.targetPath}`,
+        provenance: {
+          source: "instruction_coverage" as const,
+          factIdentity: instructionInput.factIdentity,
+          citation: `Instruction coverage for ${target.targetPath}`,
+          targetPath: target.targetPath,
+          applicabilityStatus: target.applicability.status,
+          coverage,
+        },
+      },
+    ];
+  });
 }
 
 function isAvailableInstructionArtifact(
@@ -1033,7 +1110,9 @@ export function scoreCandidates(
   for (const candidate of byStanding) {
     // Identity is path plus span: the same file offered as both a caller and a
     // test is one item, but a symbol and its whole file are not.
-    const identity = `${candidate.path}|${String(candidate.startLine ?? 0)}|${String(candidate.endLine ?? 0)}`;
+    const identity =
+      candidate.deduplicationKey ??
+      `${candidate.path}|${String(candidate.startLine ?? 0)}|${String(candidate.endLine ?? 0)}`;
     if (seen.has(identity)) continue;
     seen.add(identity);
 
@@ -1050,9 +1129,52 @@ export function scoreCandidates(
   }
 
   return scored.sort((left, right) => {
+    const instructionPrecedence = compareFactualInstructionPrecedence(
+      left,
+      right,
+    );
+    if (instructionPrecedence !== 0) return instructionPrecedence;
     if (right.score !== left.score) return right.score - left.score;
     return left.path < right.path ? -1 : left.path > right.path ? 1 : 0;
   });
+}
+
+function compareFactualInstructionPrecedence(
+  left: ScoredCandidate,
+  right: ScoredCandidate,
+): number {
+  if (
+    left.provenance?.source !== "instruction_facts" ||
+    right.provenance?.source !== "instruction_facts"
+  ) {
+    return 0;
+  }
+
+  let leftPrecedes = false;
+  let rightPrecedes = false;
+  for (const analysis of [
+    ...left.provenance.analyses,
+    ...right.provenance.analyses,
+  ]) {
+    for (const relationship of analysis.precedenceRelationships) {
+      if (relationship.relationship !== "precedes") continue;
+      if (
+        relationship.higherPrecedenceArtifactPath === left.path &&
+        relationship.lowerPrecedenceArtifactPath === right.path
+      ) {
+        leftPrecedes = true;
+      }
+      if (
+        relationship.higherPrecedenceArtifactPath === right.path &&
+        relationship.lowerPrecedenceArtifactPath === left.path
+      ) {
+        rightPrecedes = true;
+      }
+    }
+  }
+
+  if (leftPrecedes === rightPrecedes) return 0;
+  return leftPrecedes ? -1 : 1;
 }
 
 /**

@@ -155,7 +155,10 @@ export function buildClusters(
   for (const path of subjectPaths) {
     const source = byPath
       .get(path)
-      ?.find((item) => item.representation === "full")?.suppliedContent;
+      ?.find(
+        (item) =>
+          item.reason === "changed_hunk" && item.representation === "full",
+      )?.suppliedContent;
     if (source === undefined) {
       dependencies.set(path, new Set());
       continue;

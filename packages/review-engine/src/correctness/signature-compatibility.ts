@@ -121,7 +121,7 @@ export function analyzeSignatureCompatibility(
   for (const item of input.context.items) {
     const changed = subjectByPath.get(item.path);
     if (changed === undefined || item.representation !== "full") continue;
-    if (item.kind === "instruction") continue;
+    if (item.kind === "instruction" || item.kind === "coverage") continue;
 
     const source = parse(item.path, item.suppliedContent);
 
@@ -168,7 +168,13 @@ export function analyzeSignatureCompatibility(
   // 2. Callers that were supplied but NOT changed.
   for (const item of input.context.items) {
     if (subjectByPath.has(item.path)) continue;
-    if (item.representation !== "full" || item.kind === "instruction") continue;
+    if (
+      item.representation !== "full" ||
+      item.kind === "instruction" ||
+      item.kind === "coverage"
+    ) {
+      continue;
+    }
 
     const source = parse(item.path, item.suppliedContent);
 

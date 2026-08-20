@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractFile,
   planContext,
+  type AssembledItem,
   type PlannerInput,
 } from "@acalys/code-intelligence";
 
@@ -124,6 +125,44 @@ describe("Risk clusters are semantic units, not files", () => {
         true,
       );
     }
+  });
+
+  it("keeps coverage visible without treating it as changed source", () => {
+    const files = {
+      "src/caller.ts":
+        'import { save } from "./store.js";\nexport function run(): void {\n  save();\n}',
+      "src/store.ts": "export function save(): void {}",
+    };
+    const subject = [
+      { path: "src/caller.ts", changedLines: [3] },
+      { path: "src/store.ts", changedLines: [1] },
+    ];
+    const context = plan(files, subject);
+    const changed = context.items.find(
+      (item) => item.path === "src/caller.ts" && item.reason === "changed_hunk",
+    );
+    if (changed === undefined) throw new Error("changed context missing");
+    const coverage: AssembledItem = {
+      ...changed,
+      kind: "coverage",
+      reason: "instruction_coverage",
+      trust: "tool_output",
+      content: "Instruction coverage is incomplete.",
+      suppliedContent: "Instruction coverage is incomplete.",
+      deduplicationKey: "instruction-coverage|src/caller.ts",
+    };
+
+    // Coverage deliberately comes first: insertion order must not make prose
+    // become the source used to establish imports between changed files.
+    const clusters = buildClusters(subject, [coverage, ...context.items]);
+
+    expect(clusters).toHaveLength(1);
+    expect(
+      clusters[0]?.context.some(
+        (item) =>
+          item.kind === "coverage" && item.reason === "instruction_coverage",
+      ),
+    ).toBe(true);
   });
 });
 

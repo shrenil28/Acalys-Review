@@ -123,10 +123,8 @@ export function collectAsyncDeclarations(
 
   for (const item of input.context.items) {
     if (item.representation === "metadata") continue;
-    // Instructions are prose. Parsing them as TypeScript would be reading
-    // tenant text as code, which is the confusion the trust levels exist to
-    // prevent.
-    if (item.kind === "instruction") continue;
+    // Instructions and factual coverage are prose, not source code.
+    if (item.kind === "instruction" || item.kind === "coverage") continue;
 
     const source = parse(item.path, item.suppliedContent);
     const line = (node: ts.Node): number =>
@@ -313,6 +311,7 @@ export function analyzeAsyncCompletion(
     const changed = subjectByPath.get(item.path);
     if (changed === undefined) continue;
     if (item.representation !== "full") continue;
+    if (item.kind === "coverage") continue;
 
     const source = parse(item.path, item.suppliedContent);
 

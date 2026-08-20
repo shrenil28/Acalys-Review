@@ -116,7 +116,10 @@ export function computeSignals(cluster: RiskCluster): RiskSignals {
 
   const changedText = cluster.context
     .filter(
-      (item) => subjectPaths.has(item.path) && item.representation === "full",
+      (item) =>
+        subjectPaths.has(item.path) &&
+        item.representation === "full" &&
+        item.kind !== "coverage",
     )
     .map((item) => item.suppliedContent)
     .join("\n");

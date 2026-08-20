@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   canonicalSerialization,
   indexDigest,
+  isInstruction,
   type InstructionArtifactRead,
   type InstructionTraversal,
 } from "@acalys/code-intelligence";
@@ -124,8 +125,8 @@ describe("P1-L.4.3 Wave 2 production instruction witness", () => {
     );
     expect(h1.configFactsDigest).toBe(h2.configFactsDigest);
     expect(instructions(h1).map((item) => item.path)).toEqual([
-      "AGENTS.md",
       "packages/api/AGENTS.md",
+      "AGENTS.md",
     ]);
     expect(instructions(h2).map((item) => item.path)).toEqual(["AGENTS.md"]);
     expect(h2.context.items).not.toEqual(
@@ -202,8 +203,8 @@ describe("P1-L.4.3 Wave 2 production instruction witness", () => {
       },
     ]);
     expect(instructions(outcome).map((item) => item.path)).toEqual([
-      "AGENTS.md",
       "packages/api/AGENTS.md",
+      "AGENTS.md",
     ]);
     const nested = instructions(outcome).find(
       (item) => item.path === "packages/api/AGENTS.md",
@@ -267,22 +268,61 @@ describe("P1-L.4.3 Wave 2 production instruction witness", () => {
     ]);
   });
 
-  it("returns undetermined when traversal is incomplete and establishes no facts", async () => {
-    const outcome = await run(BASE, {
-      instructionObservation: observation({
-        files: BASE,
-        traversal: {
-          status: "incomplete",
-          paths: [],
-          why: "tree walk interrupted",
-        },
+  it("makes map-only incomplete observation analyzer-visible and distinct from complete absence", async () => {
+    const [complete, incomplete] = await Promise.all([
+      run(BASE, {
+        instructionObservation: observation({
+          files: BASE,
+          traversal: { status: "complete", paths: Object.keys(BASE) },
+        }),
       }),
-    });
+      run(BASE),
+    ]);
 
-    expect(outcome.instructionApplicability[0]?.result.status).toBe(
+    expect(complete.instructionApplicability[0]?.result.status).toBe(
+      "no_applicable_instructions",
+    );
+    expect(incomplete.instructionApplicability[0]?.result.status).toBe(
       "undetermined",
     );
-    expect(instructions(outcome)).toEqual([]);
+    expect(incomplete.instructionFacts.discovery).toEqual({
+      status: "incomplete",
+      why: "the repository map contains readable files but no explicit traversal-completeness evidence",
+    });
+
+    const completeCoverage = complete.context.items.filter(
+      (item) => item.reason === "instruction_coverage",
+    );
+    const incompleteCoverage = incomplete.context.items.filter(
+      (item) => item.reason === "instruction_coverage",
+    );
+    expect(completeCoverage).toEqual([]);
+    expect(incompleteCoverage).toEqual([
+      expect.objectContaining({
+        kind: "coverage",
+        path: TARGET,
+        trust: "tool_output",
+        suppliedContent: expect.stringContaining(
+          "Do not interpret incomplete coverage as evidence that no instruction applies.",
+        ),
+        provenance: expect.objectContaining({
+          source: "instruction_coverage",
+          factIdentity: incomplete.instructionFactsDigest,
+          targetPath: TARGET,
+          applicabilityStatus: "undetermined",
+        }),
+      }),
+    ]);
+    expect(isInstruction(incompleteCoverage[0]?.trust ?? "tool_output")).toBe(
+      false,
+    );
+    expect(instructions(complete)).toEqual([]);
+    expect(instructions(incomplete)).toEqual([]);
+    expect(complete.instructionFactsDigest).not.toBe(
+      incomplete.instructionFactsDigest,
+    );
+    expect(complete.contextDigest).not.toBe(incomplete.contextDigest);
+    expect(complete.cacheKey).not.toBe(incomplete.cacheKey);
   });
 
   it("does not let an unreadable sibling degrade the API target", async () => {
