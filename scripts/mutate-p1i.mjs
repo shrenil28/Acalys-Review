@@ -524,10 +524,15 @@ const MUTATIONS = [
   },
   {
     id: 60,
+    // Aimed at the constant, not the call site. The previous pattern matched
+    // the `withStartupSlot(...)` invocation and went stale the moment that call
+    // gained a third argument and prettier wrapped it — the fourth pattern in
+    // this file to rot on a reformat. A value is harder to reformat than a
+    // call.
     name: "the shared server boots without single-flight coordination",
     file: "packages/database/tests/postgres.ts",
-    find: "  return await withStartupSlot(MAX_CONCURRENT_STARTUPS, async () => {",
-    replace: "  return await (async () => {",
+    find: "const MAX_CONCURRENT_STARTUPS = 1;",
+    replace: "const MAX_CONCURRENT_STARTUPS = 99;",
     suite: "packages/database/tests/shared-server.test.ts",
   },
   {
