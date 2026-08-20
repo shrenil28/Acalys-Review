@@ -10,6 +10,7 @@ import { useToast } from "@/components/ui/Toast";
 import { defaultOrgConfig, type OrgConfig } from "@/data/orgSettings";
 import { cn } from "@/lib/utils";
 import { ReviewPreview } from "./ReviewPreview";
+import { copyToClipboard } from "@/lib/clipboard";
 import {
   AllSettingsPanel,
   type AllSettingsSection,
@@ -393,8 +394,13 @@ function GlobalOverrides() {
             variant="secondary"
             icon={<Copy className="h-3.5 w-3.5" />}
             onClick={() => {
-              navigator.clipboard?.writeText(SCHEMA_LINE);
-              toast({ title: "YAML copied" });
+              void copyToClipboard(SCHEMA_LINE).then((copied) => {
+                toast(
+                  copied
+                    ? { title: "YAML copied" }
+                    : { title: "Could not copy YAML", tone: "error" },
+                );
+              });
             }}
           >
             Copy YAML

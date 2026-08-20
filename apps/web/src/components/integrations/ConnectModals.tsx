@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
+import { copyToClipboard } from "@/lib/clipboard";
 
 export function CircleCiModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
@@ -75,8 +76,13 @@ export function JiraInstallModal({ open, onClose }: { open: boolean; onClose: ()
           <Input value={secret} readOnly className="font-mono text-xs" wrapperClassName="flex-1" />
           <Button size="icon" variant="outline" aria-label="Copy installation secret"
             onClick={() => {
-              navigator.clipboard?.writeText(secret);
-              toast({ title: "Secret copied" });
+              void copyToClipboard(secret).then((copied) => {
+                toast(
+                  copied
+                    ? { title: "Secret copied" }
+                    : { title: "Could not copy secret", tone: "error" },
+                );
+              });
             }}>
             <Copy className="h-3.5 w-3.5" />
           </Button>

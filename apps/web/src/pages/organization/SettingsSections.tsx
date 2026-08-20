@@ -619,7 +619,7 @@ function PostMergeSection({ config, update }: SectionProps) {
                     "postMergeActions",
                     config.postMergeActions.map((entry) =>
                       entry.id === action.id ? { ...entry, enabled } : entry,
-                    ) as OrgConfig["postMergeActions"],
+                    ),
                   )
                 }
                 label={action.name}
@@ -633,7 +633,7 @@ function PostMergeSection({ config, update }: SectionProps) {
                     "postMergeActions",
                     config.postMergeActions.filter(
                       (entry) => entry.id !== action.id,
-                    ) as OrgConfig["postMergeActions"],
+                    ),
                   )
                 }
               >

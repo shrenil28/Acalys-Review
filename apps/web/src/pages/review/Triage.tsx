@@ -7,6 +7,7 @@ import { Avatar } from "@/components/ui/Misc";
 import { TopBarActions } from "@/components/layout/TopBar";
 import { priorityOrder, triagePrs, type Priority, type TriagePr } from "@/data/review";
 import { cn } from "@/lib/utils";
+import { compare } from "./ordering";
 import {
   DisplayMenu,
   FilterMenu,
@@ -78,31 +79,6 @@ function groupOrderFor(key: GroupKey, rows: TriagePr[]): string[] {
     return ["Needs review", "Changes requested", "Approved", "Draft"];
   if (key === "risk") return ["High", "Medium", "Low"];
   return [...new Set(rows.map((pr) => groupValue(pr, key)))].sort();
-}
-
-const priorityRank: Record<Priority, number> = {
-  P1: 0,
-  P2: 1,
-  P3: 2,
-  "Safe to close": 3,
-  "No priority": 4,
-};
-const riskRank = { High: 0, Medium: 1, Low: 2 };
-
-function compare(a: TriagePr, b: TriagePr, display: DisplayState) {
-  const sign = display.direction === "asc" ? 1 : -1;
-  switch (display.ordering) {
-    case "priority":
-      return (priorityRank[a.priority] - priorityRank[b.priority]) * sign;
-    case "reviewEffort":
-      return (a.reviewEffort - b.reviewEffort) * sign;
-    case "blastRadius":
-      return (a.blastRadius - b.blastRadius) * sign;
-    case "risk":
-      return (riskRank[a.risk] - riskRank[b.risk]) * sign;
-    default:
-      return a.updatedAt.localeCompare(b.updatedAt) * sign;
-  }
 }
 
 /** Illustration the app shows for an empty group. */
@@ -202,7 +178,7 @@ export function TriagePage() {
   const [collapsed, setCollapsed] = useState<string[]>([]);
 
   const view = (views.find((entry) => entry.slug === params.get("view"))?.slug ??
-    "authored_by_me") as ViewSlug;
+    "authored_by_me");
   const query = params.get("q") ?? "";
 
   const setParam = (key: string, value: string | null) => {
@@ -218,13 +194,13 @@ export function TriagePage() {
         repo: [...new Set(triagePrs.map((pr) => pr.repo))].sort(),
         author: [...new Set(triagePrs.map((pr) => pr.author))].sort(),
         reviewers: [...new Set(triagePrs.flatMap((pr) => pr.reviewers))].sort(),
-        priority: priorityOrder as unknown as string[],
+        priority: priorityOrder,
         reviewGuidance: ["Has guidance", "No guidance"],
         risk: ["High", "Medium", "Low"],
         securityRisk: ["High", "Medium", "Low"],
         reviewState: ["Needs review", "Changes requested", "Approved", "Draft"],
         changeType: [...new Set(triagePrs.map((pr) => pr.changeType))].sort(),
-      }) as Record<FacetKey, string[]>,
+      }),
     [],
   );
 

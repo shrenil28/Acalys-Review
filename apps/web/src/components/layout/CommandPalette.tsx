@@ -98,7 +98,7 @@ const pageCommands: Command[] = navigation.flatMap((entry) => {
   return entry.group.items.map((item) => ({
     id: `page-${item.to}`,
     label: `Go to ${item.label}`,
-    group: "More Navigation" as Group,
+    group: "More Navigation",
     context: entry.group.label,
     to: item.to,
   }));

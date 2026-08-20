@@ -29,7 +29,7 @@ export function SettingsPage() {
       criticalFinding: true,
       weeklyDigest: false,
       productUpdates: false,
-    } as Record<NotificationKey, boolean>,
+    },
   });
 
   return (

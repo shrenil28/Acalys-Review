@@ -75,7 +75,7 @@ export function PrFindingsPage() {
         <FilterSelect
           label="Severity"
           value={severity}
-          options={severities as string[]}
+          options={severities}
           onChange={setSeverity}
         />
       </div>

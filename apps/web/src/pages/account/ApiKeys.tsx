@@ -12,6 +12,7 @@ import { TableSkeleton, usePageLoad } from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
 import { apiKeys as seed, type ApiKey } from "@/data/account";
 import { currentUser } from "@/lib/session";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const availableScopes = [
   "reviews:read",
@@ -246,7 +247,19 @@ export function ApiKeysPage() {
             size="icon-sm"
             variant="ghost"
             aria-label="Copy key"
-            onClick={() => issued && navigator.clipboard?.writeText(issued)}
+            onClick={() => {
+              // `issued` is null until a key is generated. The original
+              // `issued && …` guard covered that too; this keeps the guard and
+              // narrows the type for the helper.
+              if (issued === null || issued === "") return;
+              void copyToClipboard(issued).then((copied) => {
+                toast(
+                  copied
+                    ? { title: "Key copied" }
+                    : { title: "Could not copy key", tone: "error" },
+                );
+              });
+            }}
           >
             <Copy className="h-3.5 w-3.5" />
           </Button>

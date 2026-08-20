@@ -20,7 +20,20 @@ export default tseslint.config(
       "**/node_modules/**",
       "**/generated/**",
       "**/*.tsbuildinfo",
-      "apps/web/**",
+      // Screenshot tooling, not product code.
+      //
+      // Every one of these opens `http://127.0.0.1:9222/json/list` — the Chrome
+      // DevTools Protocol — and drives the browser to capture images. Verified
+      // individually to be imported by zero production modules rather than
+      // assumed from their extension.
+      //
+      // Enumerated rather than `apps/web/**`, which is what used to be here: a
+      // glob that wide silently exempts every file added under it afterwards,
+      // and it was hiding four real correctness defects in product code.
+      "apps/web/*.mjs",
+      "apps/web/src/*.mjs",
+      "apps/web/postcss.config.js",
+      "apps/web/tailwind.config.js",
       // Repository-level CI helpers. Plain Node scripts outside any package's
       // TypeScript project, so the type-aware rules have no program to resolve
       // them against; they are exercised by being run in CI rather than typed.

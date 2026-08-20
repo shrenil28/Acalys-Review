@@ -74,7 +74,7 @@ export function IntegrationsPage() {
   const [circleOpen, setCircleOpen] = useState(false);
 
   const tab = (tabs.find((entry) => entry.slug === params.get("tab"))?.slug ??
-    "mcp") as TabSlug;
+    "mcp");
 
   const setTab = (slug: TabSlug) => {
     const next = new URLSearchParams(params);

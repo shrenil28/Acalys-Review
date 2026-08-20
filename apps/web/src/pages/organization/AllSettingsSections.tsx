@@ -241,7 +241,7 @@ export function AllSettingsPanel({
                   onChange={(mode) =>
                     update("preMergeChecks", {
                       [key]: mode,
-                    } as Partial<OrgConfig["preMergeChecks"]>)
+                    })
                   }
                   options={[
                     { value: "off", label: "Off" },
@@ -284,7 +284,7 @@ export function AllSettingsPanel({
                           "postMergeActions",
                           config.postMergeActions.map((entry) =>
                             entry.id === action.id ? { ...entry, enabled } : entry,
-                          ) as OrgConfig["postMergeActions"],
+                          ),
                         )
                       }
                       label={action.name}
@@ -318,7 +318,7 @@ export function AllSettingsPanel({
                     onChange={(value) =>
                       update("tools", {
                         [name]: value,
-                      } as Partial<OrgConfig["tools"]>)
+                      })
                     }
                     label={name}
                   />

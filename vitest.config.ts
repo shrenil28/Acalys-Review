@@ -53,8 +53,11 @@ export default defineConfig({
     ],
   },
   test: {
-    // Only workspace packages authored in Phase 0 and later. apps/web is
-    // inherited verbatim and carries no tests.
+    // Workspace packages, and apps/web's logic tests.
+    //
+    // apps/web was inherited verbatim and carried no tests. It now has some —
+    // for the clipboard contract and the triage ordering — matched by the
+    // existing `apps/*/tests/**` pattern rather than a new one.
     include: [
       "packages/*/tests/**/*.test.ts",
       "packages/providers/*/tests/**/*.test.ts",
