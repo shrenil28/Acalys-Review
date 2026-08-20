@@ -610,14 +610,6 @@ const MUTATIONS = [
     suite: "apps/web/tests/findings.test.ts",
   },
   {
-    id: 69,
-    name: "enforcement blocks on `blocking` regardless of status",
-    file: "apps/web/src/lib/premerge.ts",
-    find: '    (check) => check.blocking && check.status === "failed",',
-    replace: "    (check) => check.blocking,",
-    suite: "apps/web/tests/premerge.test.ts",
-  },
-  {
     id: 70,
     name: "an unfinished blocking check reads as permission",
     file: "apps/web/src/lib/premerge.ts",
@@ -667,6 +659,10 @@ const MUTATIONS = [
     suite: "apps/web/tests/data-mode.test.ts",
   },
   {
+    // Replaces a frontend twin that went INVALID when the rule moved into the
+    // contract. One policy, one mutation: retargeting the old one at the same
+    // line would have been two mutations proving one thing, and the second
+    // would rot the next time either file moved.
     id: 76,
     name: "the shared blocking rule ignores status",
     file: "packages/contracts/src/domain/premerge/premerge.ts",
