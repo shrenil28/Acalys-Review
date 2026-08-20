@@ -133,6 +133,33 @@ export {
 } from "./instruction-model.js";
 
 export {
+  classifyInstructionCandidate,
+  discoverInstructionArtifacts,
+  type DiscoveredInstructionArtifact,
+  type DiscoveredUnavailableInstructionArtifact,
+  type InstructionArtifactRead,
+  type InstructionCandidateClassification,
+  type InstructionDiscoveryResult,
+  type InstructionEvaluationCoverage,
+  type InstructionRevisionSnapshot,
+  type InstructionTraversal,
+} from "./instruction-discovery.js";
+
+export {
+  evaluateInstructionScopes,
+  type InstructionScopeEvaluation,
+} from "./instruction-applicability.js";
+
+export {
+  analyzeInstructionPrecedenceAndTrust,
+  type ApplicableInstructionClass,
+  type InstructionPrecedenceRelationship,
+  type InstructionPrecedenceTrustAnalysis,
+  type InstructionPrecedenceTrustFact,
+  type InstructionTrustRelationship,
+} from "./instruction-precedence.js";
+
+export {
   governanceFor,
   optionInheritance,
   projectReferences,
