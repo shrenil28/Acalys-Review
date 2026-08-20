@@ -1248,8 +1248,7 @@ const ALL_MUTATIONS = [
     id: 139,
     name: "unresolved extends leaves inherited options complete",
     file: "packages/code-intelligence/src/repository-index/config-projects.ts",
-    find:
-      '    extendsBroken || compilerOptionsInvalid ? "incomplete" : "complete";',
+    find: '    extendsBroken || compilerOptionsInvalid ? "incomplete" : "complete";',
     replace: '    compilerOptionsInvalid ? "incomplete" : "complete";',
     suite: "packages/code-intelligence/tests/config-projects.test.ts",
   },
@@ -1299,8 +1298,7 @@ const ALL_MUTATIONS = [
     id: 145,
     name: "invalid files is treated as usable membership",
     file: "packages/code-intelligence/src/repository-index/config-projects.ts",
-    find:
-      '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid\n    ? "unusable"',
+    find: '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid\n    ? "unusable"',
     replace:
       '  let membership: FactCompleteness["membership"] =\n    membershipSelectorInvalid && record["files"] === undefined\n      ? "unusable"',
     suite: "packages/code-intelligence/tests/config-projects.test.ts",
@@ -1309,8 +1307,7 @@ const ALL_MUTATIONS = [
     id: 146,
     name: "invalid include is treated as usable membership",
     file: "packages/code-intelligence/src/repository-index/config-projects.ts",
-    find:
-      '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid\n    ? "unusable"',
+    find: '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid\n    ? "unusable"',
     replace:
       '  let membership: FactCompleteness["membership"] =\n    membershipSelectorInvalid && record["include"] === undefined\n      ? "unusable"',
     suite: "packages/code-intelligence/tests/config-projects.test.ts",
@@ -1343,8 +1340,7 @@ const ALL_MUTATIONS = [
     id: 150,
     name: "malformed references report reference facts complete",
     file: "packages/code-intelligence/src/repository-index/config-projects.ts",
-    find:
-      '    referenceSelectorInvalid ? "incomplete" : "complete";',
+    find: '    referenceSelectorInvalid ? "incomplete" : "complete";',
     replace: '    "complete";',
     suite: "packages/code-intelligence/tests/config-projects.test.ts",
   },
@@ -1352,8 +1348,7 @@ const ALL_MUTATIONS = [
     id: 151,
     name: "a reference diagnostic makes source membership unusable",
     file: "packages/code-intelligence/src/repository-index/config-projects.ts",
-    find:
-      '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid',
+    find: '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid',
     replace:
       '  let membership: FactCompleteness["membership"] =\n    referenceSelectorInvalid || membershipSelectorInvalid',
     suite: "packages/code-intelligence/tests/config-projects.test.ts",
@@ -1370,8 +1365,7 @@ const ALL_MUTATIONS = [
     id: 153,
     name: "invalid reference entries leave project discovery complete",
     file: "packages/code-intelligence/src/repository-index/config-discovery.ts",
-    find:
-      '      ? { gap: `${configPath} has one or more invalid project references` }\n      : {}),',
+    find: "      ? { gap: `${configPath} has one or more invalid project references` }\n      : {}),",
     replace: "      ? {}\n      : {}),",
     suite: "packages/code-intelligence/tests/config-discovery.test.ts",
   },
