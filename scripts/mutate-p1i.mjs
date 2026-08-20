@@ -1545,6 +1545,127 @@ const ALL_MUTATIONS = [
       '  if (candidate.provenance?.source === "instruction_facts") return 0;',
     suite: "packages/code-intelligence/tests/instruction-planner.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-L.5 — pre-registered quality and economics measurement.
+  //
+  // These mutants attack the measurement claims themselves. They are kept
+  // separate from L.1-L.4 capability mutants because L.5 must be able to say
+  // "no benefit" without weakening the facts it measures.
+  // ---------------------------------------------------------------------
+  {
+    id: 169,
+    name: "quality matching accepts a candidate extending past the gold anchor",
+    file: "apps/review-worker/src/eval/l5-quality.ts",
+    find: "    candidate.endLine <= allowed.endLine",
+    replace: "    true",
+    suite: "apps/review-worker/tests/l5-quality.test.ts",
+  },
+  {
+    id: 170,
+    name: "one candidate can satisfy multiple gold findings",
+    file: "apps/review-worker/src/eval/l5-quality.ts",
+    find: "      used.add(indexed.ordinal);",
+    replace: "      used.delete(indexed.ordinal);",
+    suite: "apps/review-worker/tests/l5-quality.test.ts",
+  },
+  {
+    id: 171,
+    name: "structural index is omitted from causal attribution",
+    file: "apps/review-worker/src/eval/l5-quality.ts",
+    find:
+      'export const L5_FACT_FAMILIES = [\n  "structural_index",\n  "binding",',
+    replace: 'export const L5_FACT_FAMILIES = [\n  "binding",',
+    suite: "apps/review-worker/tests/l5-quality.test.ts",
+  },
+  {
+    id: 172,
+    name: "inequivalent control and treatment inputs are scored",
+    file: "apps/review-worker/src/eval/l5-run.ts",
+    find: "  if (controlEquivalence.hash !== treatmentEquivalence.hash) {",
+    replace: "  if (false) {",
+    suite: "apps/review-worker/tests/l5-run.test.ts",
+  },
+  {
+    id: 173,
+    name: "recorder substantive interference is ignored",
+    file: "apps/review-worker/src/eval/l5-run.ts",
+    find: "  if (differences.length > 0) {",
+    replace: "  if (false) {",
+    suite: "apps/review-worker/tests/l5-run.test.ts",
+  },
+  {
+    id: 174,
+    name: "disabled-family provenance can survive attestation",
+    file: "apps/review-worker/src/eval/l5-run.ts",
+    find: "      if (!mode.families[family] && count !== 0) {",
+    replace: "      if (false) {",
+    suite: "apps/review-worker/tests/l5-run.test.ts",
+  },
+  {
+    id: 175,
+    name: "unknown production context reasons are silently accepted",
+    file: "packages/code-intelligence/src/eval/l5-context.ts",
+    find: "  if (!PRODUCTION_REASON_SET.has(reason)) {",
+    replace: "  if (false) {",
+    suite: "packages/code-intelligence/tests/l5-context.test.ts",
+  },
+  {
+    id: 176,
+    name: "context duplicate suppression is always reported as zero",
+    file: "packages/code-intelligence/src/eval/l5-context.ts",
+    find: "    duplicatesSuppressed: input.offered.length - scored.size,",
+    replace: "    duplicatesSuppressed: 0,",
+    suite: "packages/code-intelligence/tests/l5-context.test.ts",
+  },
+  {
+    id: 177,
+    name: "incremental primary timing excludes failed attempts",
+    file: "packages/code-intelligence/src/eval/l5-incremental.ts",
+    find: "  const primary = distributionsFor(rows);",
+    replace:
+      "  const primary = distributionsFor(\n" +
+      "    rows.filter((row) => row.incrementalStats.succeeded),\n" +
+      "  );",
+    suite: "packages/code-intelligence/tests/l5-incremental.test.ts",
+  },
+  {
+    id: 178,
+    name: "incremental economics passes when only one stop condition holds",
+    file: "packages/code-intelligence/src/eval/l5-incremental.ts",
+    find:
+      "      successRate >= L5_MINIMUM_INCREMENTAL_SUCCESS_RATE &&\n" +
+      "      primary.pairedSpeedup.median >= L5_MINIMUM_MEDIAN_PAIRED_SPEEDUP,",
+    replace:
+      "      successRate >= L5_MINIMUM_INCREMENTAL_SUCCESS_RATE ||\n" +
+      "      primary.pairedSpeedup.median >= L5_MINIMUM_MEDIAN_PAIRED_SPEEDUP,",
+    suite: "packages/code-intelligence/tests/l5-incremental.test.ts",
+  },
+  {
+    id: 179,
+    name: "dangerous false cache reuse is called correct invalidation",
+    file: "apps/review-worker/src/eval/l5-identity.ts",
+    find:
+      '  return disposition === "key_changed"\n' +
+      '    ? "correct_invalidation"\n' +
+      '    : "dangerous_false_reuse";',
+    replace: '  return "correct_invalidation";',
+    suite: "apps/review-worker/tests/l5-identity.test.ts",
+  },
+  {
+    id: 180,
+    name: "binding facts remain offered when their planner family is disabled",
+    file: "packages/code-intelligence/src/planner.ts",
+    find:
+      '    if (\n      factFamilyEnabled(input, "binding") &&\n' +
+      "      input.index !== undefined &&\n" +
+      "      isUsable(input.index)\n" +
+      "    ) {\n" +
+      "      for (const dependant of modulesReferencing(input.index, changed.path)) {",
+    replace:
+      "    if (input.index !== undefined && isUsable(input.index)) {\n" +
+      "      for (const dependant of modulesReferencing(input.index, changed.path)) {",
+    suite: "packages/code-intelligence/tests/l5-planner-seam.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
