@@ -1,0 +1,10 @@
+{
+  "extends": "../tsconfig.base.json",
+  "docs": "The gate scripts are plain Node .mjs — outside any TypeScript project, exercised by being run. Their tests are not: the interlock is real logic with a refusal path that must not rot, so it is written in TypeScript and typechecked like product code.",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "allowJs": false
+  },
+  "include": ["tests"]
+}

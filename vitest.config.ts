@@ -71,6 +71,10 @@ export default defineConfig({
       "packages/providers/*/tests/**/*.test.ts",
       "apps/*/tests/**/*.test.ts",
       "packages/*/src/**/*.test.ts",
+      // Repository infrastructure. The gate interlock decides whether a
+      // correctness gate may run at all, so it is the one piece of
+      // scripts/ that is real logic rather than a CI helper.
+      "scripts/tests/**/*.test.ts",
     ],
     environment: "node",
     // Phase 0 is pure contract code: no I/O, no timers, no network. A test

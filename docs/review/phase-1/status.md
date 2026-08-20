@@ -18,7 +18,7 @@ P1-VERIFY-CONCURRENCY design checkpoint                         recorded
 P1-J                  deterministic quality + execution baseline ✓
 P1-INFRA-POSTGRES     one container, database per suite         ✓
 P1-K                  frontend production boundary              ✓
-P1-GATE-INTERLOCK     mutation session guards every gate        recorded
+P1-GATE-INTERLOCK     mutation session guards every gate        ✓
 ```
 
 `P1-VERIFY-CONCURRENCY` is recorded rather than built, for the same reason
@@ -38,7 +38,7 @@ immutable `PublicationEffect` is not a mutable `PublicationSurface` — and it i
 written down before anything depends on conflating them. Additive, like
 P1-CONTEXT. See [publication-surfaces.md](./publication-surfaces.md).
 
-`P1-GATE-INTERLOCK` is recorded rather than built, and it closes a hole the
+`P1-GATE-INTERLOCK` is built. It closed a hole the
 P1-K fix wave exposed. `.git/acalys-mutation-session` (K.5c) makes a foreign
 `test:ci` refuse to start against a tree a mutation harness is actively
 mutating. It guards exactly one gate. Every other repo-wide gate —
@@ -49,12 +49,14 @@ mutation rather than by the code. That produces a false failure, and the
 worse case is the inverse: a gate that passes _because_ it ran against a
 mutated tree, recorded as evidence the tree is clean.
 
-The rule to build: while a mutation session is active, only
-mutation-harness-owned child commands (nonce-authorized, as `test:ci`
-already is) may inspect the worktree; every independently launched
-repo-wide gate refuses with the session's identity in the message. The
-nonce mechanism already exists and already covers one gate — this extends
-it to the other seven rather than inventing anything.
+The rule, now enforced: while a mutation session is active, only
+mutation-harness-owned child commands (nonce-authorized) may inspect the
+worktree; every independently launched repo-wide gate refuses with the
+session's identity in the message. All nine gates route through one door,
+`scripts/run-gate.mjs`, and a structural test asserts `verify` runs
+protected gates and nothing else. Stale locks are reclaimed only on
+positive ownership proof — reboot, absent pid, or recycled pid — never on
+age. See [gate-interlock.md](./gate-interlock.md).
 
 P1-F.2 lands before the analyzer on purpose. Without planner metrics, a P1-G regression
 can be seen but not attributed: "the reviewer missed the bug" and "the reviewer was never
