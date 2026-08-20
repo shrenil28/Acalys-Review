@@ -13,11 +13,11 @@ import { dto } from "./fixtures/findings.js";
  * flattened.
  */
 describe("Backend meanings survive the trip to the screen", () => {
-  it("does not present a verified-but-unpublished finding as open", () => {
-    // A finding can be true and deliberately withheld: the publication policy
-    // exists so that a real defect need not interrupt anyone. Rendering it as
-    // `Open` would present a decision the product made as a demand on the
-    // reader.
+  it("shows a verified-but-unpublished finding as 'In review' on the internal review surface", () => {
+    // A finding can be true and deliberately withheld from the PR/developer
+    // publication surface: the publication policy exists so that a real defect
+    // need not interrupt anyone. But it remains visible on the internal review
+    // surface as "In review", not absent.
     expect(present("verified")).toEqual({
       visibility: "visible",
       status: "In review",

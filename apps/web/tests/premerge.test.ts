@@ -152,19 +152,20 @@ describe("Not knowing is never permission", () => {
 });
 
 describe("Attention and enforcement are independent, all the way to the screen", () => {
-  it("suppresses the comment and still blocks the merge", () => {
+  it("withholds from the PR/developer publication surface and still blocks the merge", () => {
     // ── The load-bearing case ─────────────────────────────────────────────
     //
     //     finding    verified, publication WITHHELD
     //     premerge   failed, blocking
     //
-    // The developer is told nothing, and the merge is stopped. If the UI
-    // derived enforcement from what it displays, this state is unreachable —
-    // and the P1-I separation would end at the API boundary.
+    // The developer sees nothing on the PR/developer publication surface, and
+    // the merge is stopped by enforcement visible only on the internal review
+    // surface. If the UI derived enforcement from what it displays, this state
+    // is unreachable — and the P1-I separation would end at the API boundary.
     const withheld = toFindingViews([dto({ lifecycle: "verified" })]);
     const gate = gateFrom([check({ status: "failed", blocking: true })]);
 
-    // Verified is not published: it reads as "In review", not "Open".
+    // On the internal review surface, verified but unpublished reads as "In review", not "Open".
     expect(withheld[0]?.status).toBe("In review");
     expect(withheld[0]?.status).not.toBe("Open");
     // And the merge is blocked regardless.
