@@ -22,7 +22,9 @@ P1-GATE-INTERLOCK     mutation session guards every gate        ✓
 P1-L.1                canonical repository index + live witness  ✓
 P1-L.2                references, bindings, import-export         ✓
 P1-L.3                incremental invalidation + rebuild oracle   ✓
-P1-L.4                test/config/instruction relationships     next
+P1-L.4.1              code-to-test, from bindings                ✓
+P1-L.4.2              code-to-config governance                 next
+P1-L.4.3              code-to-instruction                        planned
 ```
 
 `P1-VERIFY-CONCURRENCY` is recorded rather than built, for the same reason
