@@ -141,6 +141,47 @@ describe("discoverProjects — reference graph", () => {
     expect(result.discovered).toEqual(["tsconfig.json"]);
     expect(result.coverage).toEqual({ status: "complete" });
   });
+
+  it("marks discovery incomplete when references is not an array", () => {
+    const result = discoverProjects(
+      snapshot({
+        "tsconfig.json": JSON.stringify({ references: 42 }),
+      }),
+    );
+
+    expect(result.discovered).toEqual(["tsconfig.json"]);
+    expect(result.coverage).toMatchObject({
+      status: "incomplete",
+      why: expect.stringContaining("invalid references field"),
+    });
+  });
+
+  it("preserves a valid reference beside an invalid entry and marks the graph incomplete", () => {
+    const result = discoverProjects(
+      snapshot({
+        "tsconfig.json": JSON.stringify({
+          references: [{ path: "./custom.json" }, { path: 42 }],
+        }),
+        "custom.json": JSON.stringify({ files: [] }),
+      }),
+    );
+
+    expect(result.discovered).toEqual(["custom.json", "tsconfig.json"]);
+    expect(result.coverage).toMatchObject({
+      status: "incomplete",
+      why: expect.stringContaining("invalid project references"),
+    });
+  });
+
+  it("marks discovery incomplete when a reference entry has no path", () => {
+    const result = discoverProjects(
+      snapshot({
+        "tsconfig.json": JSON.stringify({ references: [{}] }),
+      }),
+    );
+
+    expect(result.coverage.status).toBe("incomplete");
+  });
 });
 
 describe("discoverProjects — determinism", () => {

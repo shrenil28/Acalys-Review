@@ -77,8 +77,10 @@ export interface ProjectConfigFact {
   readonly extendsPath?: string | undefined;
   readonly referencedProjects: readonly string[];
   readonly coverage?: {
-    readonly membership: "complete" | "incomplete";
+    readonly membership: "complete" | "incomplete" | "unusable";
     readonly optionInheritance: "complete" | "incomplete";
+    readonly referenceDiscovery: "complete" | "incomplete";
+    readonly reasons: readonly string[];
   };
   /**
    * Where this project's own config was read and parsed. Cited by every
@@ -116,11 +118,19 @@ export function governanceFor(
   for (const project of projects) {
     if (project.availability.kind === "available") {
       evaluated.push(project.configPath);
-      if (project.coverage?.membership === "incomplete") {
+      if (
+        project.coverage !== undefined &&
+        project.coverage.membership !== "complete"
+      ) {
+        const extendsUnresolvable = project.coverage.reasons.includes(
+          "extends_unresolvable",
+        );
         unevaluable.push({
-          failure: "extends_unresolvable",
+          failure: extendsUnresolvable
+            ? "extends_unresolvable"
+            : "config_semantically_invalid",
           configPath: project.configPath,
-          detail: `${project.configPath} has incomplete membership because its base configuration could not be resolved`,
+          detail: `${project.configPath} has incomplete membership: ${project.coverage.reasons.join(", ")}`,
         });
       }
     } else {
@@ -136,6 +146,7 @@ export function governanceFor(
   const relationships: SourceGovernance[] = [];
   for (const project of projects) {
     if (project.availability.kind !== "available") continue;
+    if (project.coverage?.membership === "unusable") continue;
     if (!project.admittedFiles.includes(sourcePath)) continue;
 
     const reason: GovernanceReason = project.namedInFiles.includes(sourcePath)

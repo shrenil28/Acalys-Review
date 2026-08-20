@@ -290,3 +290,95 @@ describe("what TypeScript itself says about project membership", () => {
     // downstream parse of its recovery value happens to admit.
   });
 });
+
+describe("what TypeScript recovers from semantically invalid config fields", () => {
+  const SOURCE = abs("invalid/src/a.ts");
+
+  function parseInvalid(config: unknown): ts.ParsedCommandLine {
+    const configPath = abs("invalid/tsconfig.json");
+    return parseProject(
+      new Map([
+        [configPath, JSON.stringify(config)],
+        [SOURCE, "export const a = 1;\n"],
+        [abs("valid-project/tsconfig.json"), JSON.stringify({ files: [] })],
+      ]),
+      configPath,
+    ).parsed;
+  }
+
+  it("malformed files emits a semantic diagnostic and recovers an empty membership set", () => {
+    const parsed = parseInvalid({ files: [42] });
+
+    expect(parsed.errors.map((diagnostic) => diagnostic.code)).toContain(5024);
+    expect(
+      parsed.errors.map((diagnostic) =>
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+      ),
+    ).toEqual(
+      expect.arrayContaining([expect.stringMatching(/files.*string/i)]),
+    );
+    expect(parsed.fileNames).toEqual([]);
+  });
+
+  it("malformed include emits a semantic diagnostic but recovers tempting positive membership", () => {
+    const parsed = parseInvalid({ include: 42 });
+
+    expect(parsed.errors.map((diagnostic) => diagnostic.code)).toContain(5024);
+    expect(
+      parsed.errors.map((diagnostic) =>
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+      ),
+    ).toEqual(
+      expect.arrayContaining([expect.stringMatching(/include.*array/i)]),
+    );
+    expect(parsed.fileNames).toContain(SOURCE);
+  });
+
+  it("an invalid compiler option leaves recovered membership intact", () => {
+    const parsed = parseInvalid({
+      include: ["src/**/*.ts"],
+      compilerOptions: { notARealOption: true },
+    });
+
+    expect(parsed.errors.map((diagnostic) => diagnostic.code)).toContain(5023);
+    expect(parsed.fileNames).toContain(SOURCE);
+  });
+
+  it("an unclassified top-level semantic diagnostic also leaves tempting recovered membership", () => {
+    const parsed = parseInvalid({
+      include: ["src/**/*.ts"],
+      compileOnSave: 42,
+    });
+
+    expect(parsed.errors.map((diagnostic) => diagnostic.code)).toContain(5024);
+    expect(parsed.fileNames).toContain(SOURCE);
+  });
+
+  it.each([
+    ["non-array references", { references: 42 }, []],
+    [
+      "mixed valid and invalid reference paths",
+      {
+        references: [{ path: "../valid-project" }, { path: 42 }],
+      },
+      [abs("valid-project")],
+    ],
+    ["missing reference path", { references: [{}] }, []],
+  ])(
+    "%s preserves membership while making references diagnosable",
+    (_name, config, expectedReferences) => {
+      const parsed = parseInvalid({
+        include: ["src/**/*.ts"],
+        ...config,
+      });
+
+      expect(parsed.errors.map((diagnostic) => diagnostic.code)).toContain(
+        5024,
+      );
+      expect(parsed.fileNames).toContain(SOURCE);
+      expect(
+        (parsed.projectReferences ?? []).map((reference) => reference.path),
+      ).toEqual(expectedReferences);
+    },
+  );
+});

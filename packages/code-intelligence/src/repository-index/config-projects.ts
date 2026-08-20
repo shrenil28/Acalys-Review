@@ -76,8 +76,10 @@ export interface ProjectConfigFact {
   readonly extendsPath?: string | undefined;
   readonly referencedProjects: readonly string[];
   readonly coverage?: {
-    readonly membership: "complete" | "incomplete";
+    readonly membership: "complete" | "incomplete" | "unusable";
     readonly optionInheritance: "complete" | "incomplete";
+    readonly referenceDiscovery: "complete" | "incomplete";
+    readonly reasons: readonly string[];
   };
   readonly provenance: FactProvenance;
 }
@@ -243,6 +245,11 @@ const EXTENDS_FAILURE_CODES = new Set<number>([
   18000, // Circularity_detected_while_resolving_configuration
 ]);
 
+const COMPLETE_EMPTY_MEMBERSHIP_CODES = new Set<number>([
+  18002, // The files list in config file is empty
+  18003, // No inputs were found in config file
+]);
+
 function firstString(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) {
@@ -254,6 +261,102 @@ function firstString(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) && value.every((entry) => typeof entry === "string")
+  );
+}
+
+function referencesAreValid(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Array.isArray(value) &&
+      value.every(
+        (entry) => isRecord(entry) && typeof entry["path"] === "string",
+      ))
+  );
+}
+
+type FactCompleteness = NonNullable<ProjectConfigFact["coverage"]>;
+
+function classifyConfigDiagnostics(
+  config: unknown,
+  errors: readonly ts.Diagnostic[],
+): FactCompleteness | undefined {
+  if (errors.length === 0) return undefined;
+
+  const record = isRecord(config) ? config : {};
+  const membershipSelectorInvalid =
+    (record["files"] !== undefined && !isStringArray(record["files"])) ||
+    (record["include"] !== undefined && !isStringArray(record["include"])) ||
+    (record["exclude"] !== undefined && !isStringArray(record["exclude"]));
+  const referenceSelectorInvalid = !referencesAreValid(record["references"]);
+  const rawCompilerOptions = record["compilerOptions"];
+  const compilerOptionsShapeInvalid =
+    rawCompilerOptions !== undefined && !isRecord(rawCompilerOptions);
+  const compilerOptionDiagnosticCodes = new Set(
+    isRecord(rawCompilerOptions)
+      ? ts
+          .convertCompilerOptionsFromJson(rawCompilerOptions, "")
+          .errors.map((diagnostic) => diagnostic.code)
+      : [],
+  );
+  const compilerOptionsInvalid =
+    compilerOptionsShapeInvalid || compilerOptionDiagnosticCodes.size > 0;
+  const extendsBroken = errors.some((diagnostic) =>
+    EXTENDS_FAILURE_CODES.has(diagnostic.code),
+  );
+  const hasExplicitMembershipSelector =
+    isStringArray(record["files"]) || isStringArray(record["include"]);
+
+  let membership: FactCompleteness["membership"] = membershipSelectorInvalid
+    ? "unusable"
+    : extendsBroken && !hasExplicitMembershipSelector
+      ? "incomplete"
+      : "complete";
+  let optionInheritance: FactCompleteness["optionInheritance"] =
+    extendsBroken || compilerOptionsInvalid ? "incomplete" : "complete";
+  let referenceDiscovery: FactCompleteness["referenceDiscovery"] =
+    referenceSelectorInvalid ? "incomplete" : "complete";
+  const reasons: string[] = [];
+
+  if (membershipSelectorInvalid) reasons.push("membership_selector_invalid");
+  if (extendsBroken) reasons.push("extends_unresolvable");
+  if (compilerOptionsInvalid) reasons.push("compiler_options_invalid");
+  if (referenceSelectorInvalid) reasons.push("references_invalid");
+
+  const knownShapeFailure =
+    membershipSelectorInvalid || referenceSelectorInvalid;
+  const unknownCodes = errors
+    .filter(
+      (diagnostic) =>
+        !EXTENDS_FAILURE_CODES.has(diagnostic.code) &&
+        !COMPLETE_EMPTY_MEMBERSHIP_CODES.has(diagnostic.code) &&
+        !(diagnostic.code === 5024 && knownShapeFailure) &&
+        !compilerOptionDiagnosticCodes.has(diagnostic.code) &&
+        !(diagnostic.code === 5024 && compilerOptionsShapeInvalid),
+    )
+    .map((diagnostic) => diagnostic.code);
+  if (unknownCodes.length > 0) {
+    membership = "unusable";
+    optionInheritance = "incomplete";
+    referenceDiscovery = "incomplete";
+    reasons.push(
+      `unknown_config_diagnostic:${sortedUnique(unknownCodes.map(String)).join(",")}`,
+    );
+  }
+
+  if (
+    membership === "complete" &&
+    optionInheritance === "complete" &&
+    referenceDiscovery === "complete"
+  ) {
+    return undefined;
+  }
+
+  return { membership, optionInheritance, referenceDiscovery, reasons };
 }
 
 /**
@@ -371,10 +474,11 @@ function readOneConfig(
     rooted,
   );
 
-  const extendsBroken = parsed.errors.some((diagnostic) =>
-    EXTENDS_FAILURE_CODES.has(diagnostic.code),
-  );
-  const admittedFiles = sortedUnique(parsed.fileNames.map(stripLeadingSlash));
+  const coverage = classifyConfigDiagnostics(config, parsed.errors);
+  const admittedFiles =
+    coverage?.membership === "unusable"
+      ? []
+      : sortedUnique(parsed.fileNames.map(stripLeadingSlash));
 
   const namedInFiles = sortedUnique(
     (Array.isArray(rawFiles) ? rawFiles : [])
@@ -389,21 +493,6 @@ function readOneConfig(
       stripLeadingSlash(ts.resolveProjectReferencePath(reference)),
     ),
   );
-
-  // An unresolved base may have supplied membership selectors, but an
-  // explicit child selector makes that dimension independently knowable.
-  // Keep the compiler's admitted set either way; only its completeness is
-  // qualified. Options remain incomplete because inherited values are not
-  // recoverable from this config alone.
-  const hasExplicitMembershipSelector =
-    (Array.isArray(rawFiles) && rawFiles.length > 0) ||
-    (isRecord(config) && Array.isArray(config["include"]));
-  const coverage = extendsBroken
-    ? ({
-        membership: hasExplicitMembershipSelector ? "complete" : "incomplete",
-        optionInheritance: "incomplete",
-      } as const)
-    : undefined;
 
   return {
     configPath: cleanPath,

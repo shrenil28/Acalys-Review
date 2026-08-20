@@ -1232,25 +1232,25 @@ const ALL_MUTATIONS = [
     id: 137,
     name: "an unavailable config is treated as an empty available project",
     file: "packages/code-intelligence/src/repository-index/config-projects.ts",
-    find: "    admittedFiles: [],\n    namedInFiles: [],\n    referencedProjects: [],",
-    replace:
-      '    admittedFiles: ["__unavailable__"],\n    namedInFiles: [],\n    referencedProjects: [],',
+    find: '    availability: { kind: "unavailable", failure, detail },',
+    replace: '    availability: { kind: "available" },',
     suite: "packages/code-intelligence/tests/config-projects.test.ts",
   },
   {
     id: 138,
     name: "unresolved extends destroys explicit membership qualification",
     file: "packages/code-intelligence/src/repository-index/config-projects.ts",
-    find: '        membership: hasExplicitMembershipSelector ? "complete" : "incomplete",',
-    replace: '        membership: "incomplete",',
+    find: "    : extendsBroken && !hasExplicitMembershipSelector",
+    replace: "    : extendsBroken",
     suite: "packages/code-intelligence/tests/config-projects.test.ts",
   },
   {
     id: 139,
     name: "unresolved extends leaves inherited options complete",
     file: "packages/code-intelligence/src/repository-index/config-projects.ts",
-    find: '        optionInheritance: "incomplete",',
-    replace: '        optionInheritance: "complete",',
+    find:
+      '    extendsBroken || compilerOptionsInvalid ? "incomplete" : "complete";',
+    replace: '    compilerOptionsInvalid ? "incomplete" : "complete";',
     suite: "packages/code-intelligence/tests/config-projects.test.ts",
   },
   {
@@ -1266,9 +1266,9 @@ const ALL_MUTATIONS = [
     id: 141,
     name: "project references leak into SourceGovernance",
     file: "packages/code-intelligence/src/repository-index/config-governance.ts",
-    find: "        projectPath: project.configPath,\n        referencesProject,",
+    find: "      projectPath: project.configPath,\n      reason,",
     replace:
-      "        projectPath: referencesProject,\n        referencesProject,",
+      "      projectPath: project.referencedProjects[0] ?? project.configPath,\n      reason,",
     suite: "packages/code-intelligence/tests/config-governance.test.ts",
   },
   {
@@ -1294,6 +1294,86 @@ const ALL_MUTATIONS = [
     find: "    configFactsDigest: config.digest,",
     replace: '    configFactsDigest: "ignored",',
     suite: "apps/review-worker/tests/config-wiring.test.ts",
+  },
+  {
+    id: 145,
+    name: "invalid files is treated as usable membership",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find:
+      '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid\n    ? "unusable"',
+    replace:
+      '  let membership: FactCompleteness["membership"] =\n    membershipSelectorInvalid && record["files"] === undefined\n      ? "unusable"',
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 146,
+    name: "invalid include is treated as usable membership",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find:
+      '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid\n    ? "unusable"',
+    replace:
+      '  let membership: FactCompleteness["membership"] =\n    membershipSelectorInvalid && record["include"] === undefined\n      ? "unusable"',
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 147,
+    name: "malformed membership exposes recovered compiler file names",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find: '    coverage?.membership === "unusable"',
+    replace: "    false",
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 148,
+    name: "malformed membership permits not_governed",
+    file: "packages/code-intelligence/src/repository-index/config-governance.ts",
+    find: '        project.coverage.membership !== "complete"',
+    replace: '        project.coverage.membership === "incomplete"',
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 149,
+    name: "malformed membership erases governance from a valid project",
+    file: "packages/code-intelligence/src/repository-index/config-governance.ts",
+    find: "  if (relationships.length > 0) {",
+    replace: "  if (relationships.length > 0 && unevaluable.length === 0) {",
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 150,
+    name: "malformed references report reference facts complete",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find:
+      '    referenceSelectorInvalid ? "incomplete" : "complete";',
+    replace: '    "complete";',
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 151,
+    name: "a reference diagnostic makes source membership unusable",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find:
+      '  let membership: FactCompleteness["membership"] = membershipSelectorInvalid',
+    replace:
+      '  let membership: FactCompleteness["membership"] =\n    referenceSelectorInvalid || membershipSelectorInvalid',
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 152,
+    name: "an unknown semantic config diagnostic is treated as harmless",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find: "  if (unknownCodes.length > 0) {",
+    replace: "  if (false) {",
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 153,
+    name: "invalid reference entries leave project discovery complete",
+    file: "packages/code-intelligence/src/repository-index/config-discovery.ts",
+    find:
+      '      ? { gap: `${configPath} has one or more invalid project references` }\n      : {}),',
+    replace: "      ? {}\n      : {}),",
+    suite: "packages/code-intelligence/tests/config-discovery.test.ts",
   },
   {
     id: 17,
@@ -1416,7 +1496,7 @@ function parseReport(stdout) {
 // noticing on the way in — an outstanding mutation would otherwise be measured
 // as the baseline, and every verdict in the run would be against the wrong
 // code.
-{
+if (!process.argv.includes("--preflight-only")) {
   const targets = [...new Set(MUTATIONS.map((mutation) => mutation.file))];
   const dirty = execFileSync(
     "git",

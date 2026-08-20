@@ -36,6 +36,8 @@ import {
   readProjectConfigs,
   type ProjectConfigFact,
 } from "../src/repository-index/config-projects.js";
+import { discoverProjects } from "../src/repository-index/config-discovery.js";
+import { governanceFor } from "../src/repository-index/config-governance.js";
 import type { RevisionSnapshot } from "../src/repository-index/build.js";
 
 function snapshotOf(files: Record<string, string>): RevisionSnapshot {
@@ -212,6 +214,8 @@ describe("readProjectConfigs — unresolved extends preserves qualified membersh
     expect(fact?.coverage).toEqual({
       membership: "complete",
       optionInheritance: "incomplete",
+      referenceDiscovery: "complete",
+      reasons: ["extends_unresolvable"],
     });
     expect(fact?.extendsPath).toBeUndefined();
   });
@@ -247,6 +251,146 @@ describe("readProjectConfigs — unresolved extends preserves qualified membersh
     expect(fact?.coverage).toEqual({
       membership: "incomplete",
       optionInheritance: "incomplete",
+      referenceDiscovery: "complete",
+      reasons: ["extends_unresolvable"],
     });
+  });
+});
+
+describe("readProjectConfigs — semantic diagnostics are fact-specific", () => {
+  it("does not trust malformed files as complete empty membership", () => {
+    const snapshot = snapshotOf({
+      "pkg/tsconfig.json": JSON.stringify({ files: [42] }),
+      "pkg/src/a.ts": "export const a = 1;",
+    });
+
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
+
+    expect(fact?.availability.kind).toBe("available");
+    expect(fact?.admittedFiles).toEqual([]);
+    expect(fact?.coverage).toMatchObject({
+      membership: "unusable",
+      optionInheritance: "complete",
+      referenceDiscovery: "complete",
+      reasons: ["membership_selector_invalid"],
+    });
+  });
+
+  it("discards tempting recovered membership from malformed include", () => {
+    const snapshot = snapshotOf({
+      "pkg/tsconfig.json": JSON.stringify({ include: 42 }),
+      "pkg/src/a.ts": "export const a = 1;",
+    });
+
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
+
+    expect(fact?.coverage?.membership).toBe("unusable");
+    expect(fact?.admittedFiles).not.toContain("pkg/src/a.ts");
+  });
+
+  it("preserves valid membership and reference edges beside an invalid reference", () => {
+    const snapshot = snapshotOf({
+      "pkg/tsconfig.json": JSON.stringify({
+        include: ["src/**/*.ts"],
+        references: [{ path: "../other" }, { path: 42 }],
+      }),
+      "pkg/src/a.ts": "export const a = 1;",
+      "other/tsconfig.json": JSON.stringify({ files: [] }),
+    });
+
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
+
+    expect(fact?.admittedFiles).toContain("pkg/src/a.ts");
+    expect(fact?.referencedProjects).toEqual(["other/tsconfig.json"]);
+    expect(fact?.coverage).toMatchObject({
+      membership: "complete",
+      optionInheritance: "complete",
+      referenceDiscovery: "incomplete",
+      reasons: ["references_invalid"],
+    });
+  });
+
+  it("limits compiler-option diagnostics to option completeness", () => {
+    const snapshot = snapshotOf({
+      "pkg/tsconfig.json": JSON.stringify({
+        include: ["src/**/*.ts"],
+        compilerOptions: { notARealOption: true },
+      }),
+      "pkg/src/a.ts": "export const a = 1;",
+    });
+
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
+
+    expect(fact?.admittedFiles).toContain("pkg/src/a.ts");
+    expect(fact?.coverage).toMatchObject({
+      membership: "complete",
+      optionInheritance: "incomplete",
+      referenceDiscovery: "complete",
+      reasons: ["compiler_options_invalid"],
+    });
+  });
+
+  it("does not silently trust an unclassified semantic diagnostic", () => {
+    const snapshot = snapshotOf({
+      "pkg/tsconfig.json": JSON.stringify({
+        include: ["src/**/*.ts"],
+        compileOnSave: 42,
+      }),
+      "pkg/src/a.ts": "export const a = 1;",
+    });
+
+    const [fact] = readProjectConfigs(snapshot, ["pkg/tsconfig.json"], "rev");
+
+    expect(fact?.admittedFiles).toEqual([]);
+    expect(fact?.coverage).toMatchObject({
+      membership: "unusable",
+      optionInheritance: "incomplete",
+      referenceDiscovery: "incomplete",
+      reasons: ["unknown_config_diagnostic:5024"],
+    });
+  });
+
+  it("preserves valid governance beside malformed membership without trusting its recovery", () => {
+    const file = "pkg/src/a.ts";
+    const snapshot = snapshotOf({
+      "tsconfig.json": JSON.stringify({ include: 42 }),
+      "pkg/tsconfig.json": JSON.stringify({ include: ["src/**/*.ts"] }),
+      [file]: "export const a = 1;",
+    });
+    const discovery = discoverProjects(snapshot);
+    const facts = readProjectConfigs(snapshot, discovery.discovered, "rev");
+
+    const result = governanceFor(discovery, facts, file);
+
+    expect(result.status).toBe("governed");
+    if (result.status !== "governed") throw new Error("unreachable");
+    expect(result.relationships.map((item) => item.projectPath)).toEqual([
+      "pkg/tsconfig.json",
+    ]);
+    expect(result.coverage.unevaluable).toEqual([
+      expect.objectContaining({
+        configPath: "tsconfig.json",
+        failure: "config_semantically_invalid",
+      }),
+    ]);
+  });
+
+  it.each([
+    ["files", { files: [42] }],
+    ["include", { include: 42 }],
+  ])("reports undetermined for an invalid %s selector", (_field, config) => {
+    const file = "src/a.ts";
+    const snapshot = snapshotOf({
+      "tsconfig.json": JSON.stringify(config),
+      [file]: "export const a = 1;",
+    });
+    const discovery = discoverProjects(snapshot);
+    const facts = readProjectConfigs(snapshot, discovery.discovered, "rev");
+
+    const result = governanceFor(discovery, facts, file);
+
+    expect(result.status).toBe("undetermined");
+    expect(result.status).not.toBe("governed");
+    expect(result.status).not.toBe("not_governed");
   });
 });

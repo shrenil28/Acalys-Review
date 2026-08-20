@@ -89,6 +89,11 @@ interface ReferenceEdge {
   readonly resolvedTarget: string;
 }
 
+interface ReferenceRead {
+  readonly edges: readonly ReferenceEdge[];
+  readonly gap?: string | undefined;
+}
+
 /**
  * A config's own `references`, resolved to snapshot-relative paths.
  *
@@ -107,20 +112,38 @@ interface ReferenceEdge {
 function ownReferences(
   configPath: string,
   snapshot: RevisionSnapshot,
-): readonly ReferenceEdge[] {
+): ReferenceRead {
   const read = ts.readConfigFile(configPath, (path) => snapshot.get(path));
-  if (read.error !== undefined) return [];
+  if (read.error !== undefined) {
+    return {
+      edges: [],
+      gap: `${configPath} could not be parsed, so its project references are unknown`,
+    };
+  }
 
   const references: unknown = (read.config as { references?: unknown })
     .references;
-  if (!Array.isArray(references)) return [];
+  if (references === undefined) return { edges: [] };
+  if (!Array.isArray(references)) {
+    return {
+      edges: [],
+      gap: `${configPath} has an invalid references field`,
+    };
+  }
 
   const dir = posixPath.dirname(configPath);
   const edges: ReferenceEdge[] = [];
+  let invalidEntry = false;
   for (const entry of references) {
-    if (typeof entry !== "object" || entry === null) continue;
+    if (typeof entry !== "object" || entry === null) {
+      invalidEntry = true;
+      continue;
+    }
     const rawPath = (entry as { path?: unknown }).path;
-    if (typeof rawPath !== "string") continue;
+    if (typeof rawPath !== "string") {
+      invalidEntry = true;
+      continue;
+    }
 
     // `resolveProjectReferencePath` is the compiler's own rule for turning a
     // reference into a config file name (appending `tsconfig.json` when the
@@ -131,7 +154,12 @@ function ownReferences(
     const resolvedTarget = posixPath.normalize(posixPath.join(dir, named));
     edges.push({ from: configPath, rawPath, resolvedTarget });
   }
-  return edges;
+  return {
+    edges,
+    ...(invalidEntry
+      ? { gap: `${configPath} has one or more invalid project references` }
+      : {}),
+  };
 }
 
 /**
@@ -164,7 +192,10 @@ export function discoverProjects(snapshot: RevisionSnapshot): ProjectDiscovery {
     const current = worklist.pop();
     if (current === undefined) continue;
 
-    for (const edge of ownReferences(current, snapshot)) {
+    const referenceRead = ownReferences(current, snapshot);
+    if (referenceRead.gap !== undefined) missing.add(referenceRead.gap);
+
+    for (const edge of referenceRead.edges) {
       if (EXCLUDED_PATH.test(edge.resolvedTarget)) continue;
 
       if (!snapshot.has(edge.resolvedTarget)) {

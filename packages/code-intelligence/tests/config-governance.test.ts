@@ -211,6 +211,8 @@ describe("governanceFor — incomplete inherited membership", () => {
       coverage: {
         membership: "incomplete",
         optionInheritance: "incomplete",
+        referenceDiscovery: "complete",
+        reasons: ["extends_unresolvable"],
       },
     });
 

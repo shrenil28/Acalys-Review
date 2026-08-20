@@ -167,6 +167,7 @@ export interface NonGovernanceEvidence {
  */
 export const GOVERNANCE_FAILURES = [
   "config_unparsable",
+  "config_semantically_invalid",
   "config_absent",
   "extends_unresolvable",
 ] as const;
