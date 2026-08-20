@@ -262,6 +262,43 @@ module.exports = {
     // Written separately rather than folded into the generator above because
     // the shapes genuinely differ: a library has several published entry
     // points, an application has one.
+    // ── Network representation is not presentation representation ──────────
+    //
+    // The findings seam established a boundary that works:
+    //
+    //     page → view model/adapter → API client → @acalys/contracts/api/v1
+    //
+    // It held because one person built it in one sitting. The second endpoint
+    // is where a convention like that quietly stops being followed — a page
+    // imports a DTO "just to type a prop", and six months later the wire format
+    // is the render format and changing either breaks the other.
+    //
+    // So it is architecture rather than convention.
+    {
+      name: "pages-must-not-import-api-contracts",
+      severity: "error",
+      comment:
+        "A page or component must never render a network DTO. Backend " +
+        "representations change for backend reasons; going through an adapter " +
+        "is what keeps a wire-format change from being a UI change — and is " +
+        "where lossy mappings like six lifecycle states onto four display " +
+        "states are made deliberately, once.",
+      from: { path: "^apps/web/src/(pages|components)/" },
+      to: { path: "^packages/contracts/" },
+    },
+    {
+      name: "pages-must-not-import-the-transport",
+      severity: "error",
+      comment:
+        "Pages consume hooks and adapters, never the HTTP client directly. A " +
+        "component that can call `client.get` can skip runtime validation, " +
+        "skip the adapter, and turn a failed request into an empty list — " +
+        "which is the collapse the whole seam exists to prevent.",
+      from: { path: "^apps/web/src/(pages|components)/" },
+      to: {
+        path: "^apps/web/src/lib/api/(client|result|reviewFindings)\\.ts$",
+      },
+    },
     {
       name: "no-unreachable-in-web",
       severity: "error",

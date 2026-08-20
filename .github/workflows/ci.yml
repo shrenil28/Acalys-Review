@@ -78,6 +78,16 @@ jobs:
       - name: Schema drift
         run: npm run schemas:check
 
+      # The dev alias and the published export are one public surface.
+      #
+      # apps/web resolves `@acalys/contracts/api/v1` to source so the dev server
+      # does not depend on a build; everything else resolves the export map.
+      # Two resolution paths for one specifier is where a surface silently
+      # forks — both green, and not the same API. Runs after the clean build,
+      # because it compares against `dist/`.
+      - name: Public surface conformance
+        run: node scripts/assert-export-conformance.mjs
+
       # apps/web is inherited verbatim; this proves the monorepo move did not
       # disturb it. Kept beside the clean build above rather than folded into
       # it: this one is a Vite bundle, and a bundler failure and a project-graph
