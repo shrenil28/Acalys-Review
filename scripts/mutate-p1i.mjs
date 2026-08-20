@@ -697,11 +697,10 @@ const MUTATIONS = [
   },
   {
     id: 79,
-    name: "symbol identity ignores the module, merging same-name symbols",
+    name: "symbols are grouped by name instead of by the checker's symbol",
     file: "packages/code-intelligence/src/repository-index/build.ts",
-    find: "        const symbolId = shortId([\n          revision,\n          path,\n          kind,",
-    replace:
-      "        const symbolId = shortId([\n          revision,\n          kind,",
+    find: '    const key = site.symbol ?? (Symbol("unbound") as unknown as ts.Node);',
+    replace: "    const key = site.name as unknown as ts.Node;",
     suite: "packages/code-intelligence/tests/repository-index.test.ts",
   },
   {
@@ -813,10 +812,10 @@ const MUTATIONS = [
   },
   {
     id: 93,
-    name: "absence is encoded inside the value alphabet",
+    name: "an absent field is encoded as an empty one",
     file: "packages/code-intelligence/src/repository-index/digest.ts",
-    find: 'const ABSENT = "-:";',
-    replace: 'const ABSENT = "~";',
+    find: '  parts.map((part) => (part === undefined ? ABSENT : encode(part))).join("");',
+    replace: '  parts.map((part) => encode(part ?? "")).join("");',
     suite: "packages/code-intelligence/tests/repository-index.test.ts",
   },
   {

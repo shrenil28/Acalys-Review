@@ -817,6 +817,38 @@ describe("an indexed representation dominates an equivalent syntactic one", () =
     expect(kept[0]?.reason).toBe("containing_symbol");
   });
 
+  it("ignores records carried by an index that failed its invariants", () => {
+    // The previous test cannot make this assertion, and a surviving mutation
+    // said so: `unavailableIndex` holds no records, so `declarationAt` returns
+    // nothing whether or not availability is consulted. Deleting the
+    // usability check was therefore invisible.
+    //
+    // This is the state that distinguishes them — records present, and the
+    // index declared unusable. It is reachable: a build can populate records
+    // and then fail a consistency check, and `IndexAvailability` exists
+    // precisely so that outcome has somewhere to be recorded.
+    const populated = build(files);
+    expect(populated.declarations.length).toBeGreaterThan(0);
+
+    const failed: RepositoryIndex = {
+      ...populated,
+      availability: {
+        kind: "invariant_failed",
+        why: "declaration spans disagreed with module content digests",
+      },
+    };
+
+    const kept = forSpan(
+      scoreCandidates(generateCandidates(plannerInput(failed))),
+    );
+
+    expect(kept).toHaveLength(1);
+    // Facts from an index that failed its own invariants must not be presented
+    // to the analyzer as though they were established.
+    expect(kept[0]?.reason).toBe("containing_symbol");
+    expect(kept[0]?.provenance?.source).toBe("direct_source");
+  });
+
   it("keeps the syntactic one when the module failed to parse", () => {
     // `not_indexed`, one level up. The index is usable, this module is not,
     // and the planner must still hand the analyzer the function.

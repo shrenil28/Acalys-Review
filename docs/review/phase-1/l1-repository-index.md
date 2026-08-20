@@ -191,9 +191,20 @@ boundary:
 ```
 
 Absence gets `-:`, which is outside the value alphabet — a length is a
-non-negative integer, so no encoded field can begin with `-`. The intermediate
-version used `~`, which had the same bug one level down: a `container` whose
-literal text was `~` would digest as no container at all.
+non-negative integer, so no encoded field can begin with `-`.
+
+A correction to what this document said at `e9f5aa8`: it claimed the
+intermediate `~` sentinel "had the same bug one level down", and that is false
+of the code as shipped. It was true only of a version where `line` re-encoded
+its parts and compared against the sentinel. In the final shape `line` takes
+`string | undefined` and encodes exactly once, and every encoded field contains
+a colon — so no encoded value can equal a bare `~`. `-:` is the better choice
+for a different reason (a length can never start with `-`, so the property is
+readable rather than argued), but the switch fixed nothing.
+
+The mutation written to guard it said so: planting `~` in place of `-:` left
+all tests green, because it is an equivalent mutant. It was retargeted at
+`line`'s absent branch, which does carry the property.
 
 The property, now testable rather than believed:
 
@@ -294,10 +305,36 @@ in `scripts/mutate-p1i.mjs`:
 93  absence encoded inside the value alphabet
 ```
 
-79 and 82 were retargeted rather than kept: 79 pointed at the span-derived
-`symbolId` that the checker-grouping fix removed, and 82 at the separator that
-length prefixing replaced. Retargeted at the mechanism that now carries the
-property, not at the line that used to.
+Three were retargeted rather than kept, and the first two rotted for the
+ordinary reason — the code they pointed at stopped existing:
+
+```
+79  pointed at the span-derived symbolId the checker-grouping fix removed
+82  pointed at the separator that length prefixing replaced
+93  pointed at the sentinel's spelling, which is an equivalent mutant
+```
+
+The full run that established this was not clean, and the failures were all in
+this checkpoint's own new work:
+
+```
+79  INVALID    the retarget silently missed its anchor, and I did not verify it
+92  SURVIVED   the fallback test could not observe the guard it named
+93  SURVIVED   equivalent mutant
+```
+
+**92 is the one worth reading twice.** The test asserted that an unavailable
+index leaves the syntactic candidate standing — and it passed for the wrong
+reason. `unavailableIndex` carries no records, so `declarationAt` returns
+nothing whether or not availability is consulted; deleting the usability check
+changed no observable behaviour. The replacement uses the state that actually
+distinguishes them: records present, `availability: invariant_failed`. That is
+a reachable outcome — a build can populate records and then fail a consistency
+check — and it is why `IndexAvailability` has a fourth case.
+
+This is the same shape as the two defects found while writing the digest: a
+test that varies an input dimension the code has already normalized cannot
+observe the code being wrong.
 
 The split is the checkpoint's point. 77–85 dying proves the facts are correct.
 Only 86–88 dying proves anything uses them.
