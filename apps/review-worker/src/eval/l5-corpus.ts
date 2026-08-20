@@ -5,6 +5,11 @@
  * experiment runner. Gold labels must remain independent of current output.
  */
 
+import {
+  CORRECTNESS_FAMILIES,
+  type CorrectnessFamily,
+} from "@acalys/review-engine";
+
 export const L5_EXPERIMENT_SCHEMA_VERSION = "p1-l5-experiment/v1" as const;
 export const L5_CORPUS_VERSION = "p1-l5-corpus/2026-08-21.v1" as const;
 
@@ -85,7 +90,10 @@ export interface L5ExpectedFinding {
   /** Stable authored identity for one distinct defect opportunity. */
   readonly goldId: string;
   readonly ruleId: string;
-  readonly family: L5ContextFamily;
+  /** Repository-intelligence family whose opportunity this gold exercises. */
+  readonly exposureFamily: L5ContextFamily;
+  /** Analyzer correctness taxonomy used by exact candidate matching. */
+  readonly correctnessFamily: CorrectnessFamily;
   readonly path: string;
   readonly allowedAnchor: {
     readonly startLine: number;
@@ -289,7 +297,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "format-implementation-diverges-from-public-declaration",
           ruleId: "structural-api-compatibility/v1",
-          family: "structural_index",
+          exposureFamily: "structural_index",
+          correctnessFamily: "api_contract",
           path: "src/format.ts",
           allowedAnchor: { startLine: 1, endLine: 1 },
           summary:
@@ -373,7 +382,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "parse-export-diverges-from-indexed-declaration",
           ruleId: "structural-api-compatibility/v1",
-          family: "structural_index",
+          exposureFamily: "structural_index",
+          correctnessFamily: "compatibility",
           path: "src/parser.ts",
           allowedAnchor: { startLine: 1, endLine: 4 },
           summary:
@@ -438,8 +448,9 @@ const rawCases: readonly L5CorpusCase[] = [
       expectedFindings: [
         {
           goldId: "reservation-completes-after-success",
-          ruleId: "async-completion/v1",
-          family: "binding",
+          ruleId: "acalys.correctness.async-completion/floating-promise",
+          exposureFamily: "binding",
+          correctnessFamily: "error_handling",
           path: "src/checkout.ts",
           allowedAnchor: { startLine: 3, endLine: 3 },
           summary: "Checkout reports success before the reservation settles.",
@@ -530,7 +541,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "validated-value-discarded",
           ruleId: "signature-compatibility/v1",
-          family: "binding",
+          exposureFamily: "binding",
+          correctnessFamily: "data_flow",
           path: "src/route.ts",
           allowedAnchor: { startLine: 3, endLine: 4 },
           summary:
@@ -616,7 +628,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "serialization-order-regression",
           ruleId: "behavior-contract/v1",
-          family: "test_relationship",
+          exposureFamily: "test_relationship",
+          correctnessFamily: "data_flow",
           path: "src/serialize.ts",
           allowedAnchor: { startLine: 2, endLine: 2 },
           summary: "Serialization no longer guarantees sorted object keys.",
@@ -699,7 +712,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "expiry-allows-boundary-token",
           ruleId: "behavior-contract/v1",
-          family: "test_relationship",
+          exposureFamily: "test_relationship",
+          correctnessFamily: "boundary",
           path: "src/token.ts",
           allowedAnchor: { startLine: 2, endLine: 2 },
           summary: "A token remains accepted at its exact expiry instant.",
@@ -787,7 +801,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "exact-optional-undefined-assignment",
           ruleId: "config-semantics/v1",
-          family: "config_governance",
+          exposureFamily: "config_governance",
+          correctnessFamily: "nullability",
           path: "packages/api/src/options.ts",
           allowedAnchor: { startLine: 3, endLine: 3 },
           summary: "The assignment violates exact optional property semantics.",
@@ -875,7 +890,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "unchecked-first-element",
           ruleId: "config-semantics/v1",
-          family: "config_governance",
+          exposureFamily: "config_governance",
+          correctnessFamily: "boundary",
           path: "services/report/src/first.ts",
           allowedAnchor: { startLine: 2, endLine: 2 },
           summary: "An empty array causes an unchecked undefined dereference.",
@@ -965,7 +981,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "auth-denial-not-audited",
           ruleId: "instruction-policy/v1",
-          family: "instruction_governance",
+          exposureFamily: "instruction_governance",
+          correctnessFamily: "error_handling",
           path: "src/auth/login.ts",
           allowedAnchor: { startLine: 5, endLine: 6 },
           summary: "The denial path no longer records the account id.",
@@ -1062,7 +1079,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "payment-token-debug-log",
           ruleId: "instruction-policy/v1",
-          family: "instruction_governance",
+          exposureFamily: "instruction_governance",
+          correctnessFamily: "data_flow",
           path: "src/payments/charge.ts",
           allowedAnchor: { startLine: 2, endLine: 2 },
           summary: "The changed debug statement exposes a payment token.",
@@ -1155,8 +1173,9 @@ const rawCases: readonly L5CorpusCase[] = [
       expectedFindings: [
         {
           goldId: "notify-returns-before-delivery",
-          ruleId: "async-completion/v1",
-          family: "binding",
+          ruleId: "acalys.correctness.async-completion/floating-promise",
+          exposureFamily: "binding",
+          correctnessFamily: "error_handling",
           path: "src/notify.ts",
           allowedAnchor: { startLine: 2, endLine: 3 },
           summary: "Notify returns before delivery completes.",
@@ -1258,7 +1277,8 @@ const rawCases: readonly L5CorpusCase[] = [
         {
           goldId: "absent-role-not-fail-closed",
           ruleId: "governed-policy/v1",
-          family: "instruction_governance",
+          exposureFamily: "instruction_governance",
+          correctnessFamily: "control_flow",
           path: "services/policy/src/access.ts",
           allowedAnchor: { startLine: 2, endLine: 2 },
           summary: "An absent role no longer has an explicit deny fallback.",
@@ -2023,9 +2043,14 @@ export function validateL5Corpus(corpus: L5Corpus): readonly string[] {
       ) {
         issues.push(`finding ${finding.goldId}: missing authored label fields`);
       }
-      if (!corpusCase.families.includes(finding.family)) {
+      if (!corpusCase.families.includes(finding.exposureFamily)) {
         issues.push(
-          `finding ${finding.goldId}: family is not declared by case ${corpusCase.id}`,
+          `finding ${finding.goldId}: exposure family is not declared by case ${corpusCase.id}`,
+        );
+      }
+      if (!CORRECTNESS_FAMILIES.includes(finding.correctnessFamily)) {
+        issues.push(
+          `finding ${finding.goldId}: unknown correctness family ${finding.correctnessFamily}`,
         );
       }
       const lineCount = corpusCase.files[finding.path]?.split("\n").length ?? 0;
@@ -2042,7 +2067,7 @@ export function validateL5Corpus(corpus: L5Corpus): readonly string[] {
       }
       const opportunity = [
         finding.ruleId,
-        finding.family,
+        finding.correctnessFamily,
         finding.path,
         finding.allowedAnchor.startLine,
         finding.allowedAnchor.endLine,
@@ -2053,9 +2078,10 @@ export function validateL5Corpus(corpus: L5Corpus): readonly string[] {
         );
       }
       goldOpportunities.add(opportunity);
-      const familyGold = goldByFamily.get(finding.family) ?? new Set<string>();
+      const familyGold =
+        goldByFamily.get(finding.exposureFamily) ?? new Set<string>();
       familyGold.add(finding.goldId);
-      goldByFamily.set(finding.family, familyGold);
+      goldByFamily.set(finding.exposureFamily, familyGold);
     }
 
     const ablationExposure = new Set<L5ContextFamily>();

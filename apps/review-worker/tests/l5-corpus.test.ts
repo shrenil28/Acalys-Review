@@ -74,7 +74,7 @@ describe("the frozen P1-L.5 corpus premises", () => {
     for (const family of L5_CONTEXT_FAMILIES) {
       const findings = L5_CORPUS.cases.flatMap((corpusCase) =>
         corpusCase.gold.expectedFindings.filter(
-          (finding) => finding.family === family,
+          (finding) => finding.exposureFamily === family,
         ),
       );
       expect(
@@ -85,7 +85,7 @@ describe("the frozen P1-L.5 corpus premises", () => {
       for (const finding of findings) {
         const matcherKey = [
           finding.ruleId,
-          finding.family,
+          finding.correctnessFamily,
           finding.path,
           finding.allowedAnchor.startLine,
           finding.allowedAnchor.endLine,
@@ -97,6 +97,29 @@ describe("the frozen P1-L.5 corpus premises", () => {
         matcherKeys.add(matcherKey);
       }
     }
+  });
+
+  it("keeps exposure attribution separate from correctness matching", () => {
+    const findings = L5_CORPUS.cases.flatMap(
+      (corpusCase) => corpusCase.gold.expectedFindings,
+    );
+
+    expect(
+      findings.every(
+        (finding) =>
+          L5_CONTEXT_FAMILIES.includes(finding.exposureFamily) &&
+          !L5_CONTEXT_FAMILIES.includes(
+            finding.correctnessFamily as (typeof L5_CONTEXT_FAMILIES)[number],
+          ),
+      ),
+    ).toBe(true);
+    expect(
+      findings.filter(
+        (finding) =>
+          finding.ruleId ===
+          "acalys.correctness.async-completion/floating-promise",
+      ),
+    ).toHaveLength(2);
   });
 
   it("gives every positive family a selector-scoped ablation exposure", () => {
@@ -278,7 +301,7 @@ describe("L.5 corpus validation failures", () => {
         gold: {
           ...corpusCase.gold,
           expectedFindings: corpusCase.gold.expectedFindings.filter(
-            (finding) => finding.family !== "binding",
+            (finding) => finding.exposureFamily !== "binding",
           ),
         },
       })),

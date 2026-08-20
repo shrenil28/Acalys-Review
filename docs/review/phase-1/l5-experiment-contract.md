@@ -147,6 +147,13 @@ exact repository path
 allowed anchor-line interval
 ```
 
+The matcher's correctness family is the analyzer taxonomy (for example,
+`error_handling` or `api_contract`). It is stored separately from the L.5
+`exposureFamily` (`binding`, `config_governance`, and so on), which exists only
+for corpus composition and causal attribution. Reusing one field for both
+domains invalidates the corpus because no exact candidate match is then
+possible.
+
 The interval is justified by the fixture and cannot be widened after results.
 Candidate and published scoring use deterministic maximum-cardinality bipartite
 matching. Among equally large matchings, sort by `goldId` and then by candidate
