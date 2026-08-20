@@ -1369,6 +1369,182 @@ const ALL_MUTATIONS = [
     replace: "      ? {}\n      : {}),",
     suite: "packages/code-intelligence/tests/config-discovery.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-L.4.3 Wave 2 — code-to-instruction production seam.
+  //
+  // 154-168 are contiguous by reservation. They cover classification, scope,
+  // plurality, precedence/trust separation, outage semantics, production
+  // planner consumption, independent identities, deletion, and provenance.
+  // ---------------------------------------------------------------------
+  {
+    id: 154,
+    name: "README prose is promoted to an instruction",
+    file: "packages/code-intelligence/src/repository-index/instruction-discovery.ts",
+    find: '  if (filename === "AGENTS.md") {',
+    replace: '  if (filename === "AGENTS.md" || filename === "README.md") {',
+    suite: "packages/code-intelligence/tests/instruction-discovery.test.ts",
+  },
+  {
+    id: 155,
+    name: "directory scope leaks into a path-prefix sibling",
+    file: "packages/code-intelligence/src/repository-index/instruction-applicability.ts",
+    find:
+      "  return scopeSegments.every(\n" +
+      "    (scopeSegment, index) => scopeSegment === targetSegments[index],\n" +
+      "  );",
+    replace: "  return targetPath.startsWith(scopeRoot);",
+    suite: "packages/code-intelligence/tests/instruction-applicability.test.ts",
+  },
+  {
+    id: 156,
+    name: "planner drops the root instruction when nested context exists",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "  const applicableCandidates = [...applications]",
+    replace: "  const applicableCandidates = [...applications].slice(-1)",
+    suite: "apps/review-worker/tests/instruction-wiring.test.ts",
+  },
+  {
+    id: 157,
+    name: "plural applicability collapses to one relationship",
+    file: "packages/code-intelligence/src/repository-index/instruction-applicability.ts",
+    find: "  return { relationships, evaluated, unevaluable };",
+    replace:
+      "  relationships.splice(1);\n  return { relationships, evaluated, unevaluable };",
+    suite: "packages/code-intelligence/tests/instruction-applicability.test.ts",
+  },
+  {
+    id: 158,
+    name: "computed precedence is ignored by prompt order",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "    if (instructionPrecedence !== 0) return instructionPrecedence;",
+    replace: "    if (false) return instructionPrecedence;",
+    suite: "packages/code-intelligence/tests/instruction-planner.test.ts",
+  },
+  {
+    id: 159,
+    name: "declared trust is used as semantic precedence",
+    file: "packages/code-intelligence/src/repository-index/instruction-precedence.ts",
+    find:
+      "  const leftSpecificity = leftApplicability.precedence.scopeSpecificity;\n" +
+      "  const rightSpecificity = rightApplicability.precedence.scopeSpecificity;",
+    replace:
+      '  const leftSpecificity = leftApplicability.trust === "authoritative" ? 1 : 0;\n' +
+      '  const rightSpecificity = rightApplicability.trust === "authoritative" ? 1 : 0;',
+    suite: "packages/code-intelligence/tests/instruction-precedence.test.ts",
+  },
+  {
+    id: 160,
+    name: "scope precedence is used as declared trust",
+    file: "packages/code-intelligence/src/repository-index/instruction-precedence.ts",
+    find: '  const higher = left.applicability.trust === "authoritative" ? left : right;',
+    replace:
+      "  const higher =\n" +
+      "    left.applicability.precedence.scopeSpecificity >\n" +
+      "    right.applicability.precedence.scopeSpecificity\n" +
+      "      ? left\n" +
+      "      : right;",
+    suite: "packages/code-intelligence/tests/instruction-precedence.test.ts",
+  },
+  {
+    id: 161,
+    name: "an unreadable nested artifact erases a known root positive",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "  if (scope.relationships.length > 0) {",
+    replace:
+      "  if (scope.relationships.length > 0 && coverage.unevaluable.length === 0) {",
+    suite: "apps/review-worker/tests/instruction-wiring.test.ts",
+  },
+  {
+    id: 162,
+    name: "incomplete discovery becomes no applicable instructions",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "  if (isInstructionCoverageComplete(coverage)) {",
+    replace: "  if (coverage.unevaluable.length === 0) {",
+    suite: "apps/review-worker/tests/instruction-wiring.test.ts",
+  },
+  {
+    id: 163,
+    name: "the production planner ignores factual instruction context",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "  candidates.push(...factualInstructionCandidates(input.instructionFacts));",
+    replace: "  candidates.push(...factualInstructionCandidates(undefined));",
+    suite: "apps/review-worker/tests/instruction-wiring.test.ts",
+  },
+  {
+    id: 164,
+    name: "instruction fact identity is omitted from analyzer context identity",
+    file: "apps/review-worker/src/analysis.ts",
+    find:
+      '          : item.provenance?.source === "instruction_facts"\n' +
+      "            ? item.provenance.factIdentity",
+    replace:
+      '          : item.provenance?.source === "instruction_facts"\n' +
+      "            ? undefined",
+    suite: "apps/review-worker/tests/instruction-wiring.test.ts",
+  },
+  {
+    id: 165,
+    name: "instruction artifacts contaminate RepositoryIndex identity",
+    file: "apps/review-worker/src/analysis.ts",
+    find:
+      "        instruction === undefined ||\n" +
+      '        instruction.instructionClass === "documentation"',
+    replace: "        true",
+    suite: "apps/review-worker/tests/instruction-wiring.test.ts",
+  },
+  {
+    id: 166,
+    name: "instruction facts contaminate ConfigFacts identity",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "    configFactsDigest: config.digest,",
+    replace: "    configFactsDigest: instructionIdentity,",
+    suite: "apps/review-worker/tests/instruction-wiring.test.ts",
+  },
+  {
+    id: 167,
+    name: "deleted instruction artifacts remain in production context",
+    file: "apps/review-worker/src/analysis.ts",
+    find:
+      "  const instructionFacts = discoverInstructionArtifacts({\n" +
+      "    revision: options.headSha,\n" +
+      "    ...(instructionObservation ?? repositoryInstructionObservation(repository)),\n" +
+      "  });",
+    replace:
+      "  const discoveredInstructionFacts = discoverInstructionArtifacts({\n" +
+      "    revision: options.headSha,\n" +
+      "    ...(instructionObservation ?? repositoryInstructionObservation(repository)),\n" +
+      "  });\n" +
+      "  const statefulRun = runRealAnalysis as typeof runRealAnalysis & {\n" +
+      "    previousInstructionFacts?: InstructionDiscoveryResult;\n" +
+      "  };\n" +
+      "  const previousInstructionFacts = statefulRun.previousInstructionFacts;\n" +
+      "  const instructionFacts =\n" +
+      "    previousInstructionFacts === undefined\n" +
+      "      ? discoveredInstructionFacts\n" +
+      "      : {\n" +
+      "          ...discoveredInstructionFacts,\n" +
+      "          artifacts: [\n" +
+      "            ...discoveredInstructionFacts.artifacts,\n" +
+      "            ...previousInstructionFacts.artifacts.filter(\n" +
+      "              (previous) =>\n" +
+      "                !discoveredInstructionFacts.artifacts.some(\n" +
+      "                  (current) => current.artifactPath === previous.artifactPath,\n" +
+      "                ),\n" +
+      "            ),\n" +
+      "          ],\n" +
+      "        };\n" +
+      "  statefulRun.previousInstructionFacts = instructionFacts;",
+    suite: "apps/review-worker/tests/instruction-wiring.test.ts",
+  },
+  {
+    id: 168,
+    name: "weaker provenance replaces factual instruction context",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: '  if (candidate.provenance?.source === "instruction_facts") return 2;',
+    replace:
+      '  if (candidate.provenance?.source === "instruction_facts") return 0;',
+    suite: "packages/code-intelligence/tests/instruction-planner.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
