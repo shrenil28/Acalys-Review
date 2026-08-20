@@ -1,7 +1,6 @@
 # P1-L.3 — incremental invalidation, judged by the full rebuild
 
-**Status: implementation complete, gates green, mutation evidence clean at
-`9b2ff77`.**
+**Status: CLOSED at `bd5a516`.**
 
 The claim, stated to match what the code does:
 
