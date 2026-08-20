@@ -13,6 +13,7 @@ import { TopBarActions } from "@/components/layout/TopBar";
 import { prFindings, severities } from "@/data/security";
 import { repoFilterOptions } from "@/data/repos";
 import { cn } from "@/lib/utils";
+import { MergeGateBadge } from "@/components/review/MergeGateBadge";
 
 const stateTone = { Open: "info", Merged: "purple", Closed: "neutral" } as const;
 
@@ -60,6 +61,9 @@ export function PrFindingsPage() {
       />
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
+        {/* Renders nothing unless a backend has actually evaluated this
+            revision, so the filter row is unchanged in the fixtures build. */}
+        <MergeGateBadge />
         <SearchInput
           placeholder="Search findings..."
           value={query}

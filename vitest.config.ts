@@ -18,6 +18,14 @@ export default defineConfig({
     // package's `exports` field.
     alias: [
       {
+        // apps/web's own alias, so a module under test resolves `@/…` the way
+        // Vite and TypeScript do. Without it a hook importing `@/lib/…` fails
+        // only when a test finally imports it — which is exactly when the
+        // frontend seams started being tested.
+        find: /^@\/(.*)/,
+        replacement: workspace("apps/web/src/$1"),
+      },
+      {
         find: "@acalys/contracts/api/v1",
         replacement: contracts("api/v1/index.ts"),
       },
