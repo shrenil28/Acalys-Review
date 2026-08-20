@@ -34,7 +34,7 @@ import { acquireSession, releaseSession } from "./mutation-session.mjs";
 const run = promisify(execFile);
 const ROOT = process.cwd();
 
-const MUTATIONS = [
+const ALL_MUTATIONS = [
   {
     id: 1,
     name: "promote a rejected candidate (store gate removed)",
@@ -1188,6 +1188,99 @@ const MUTATIONS = [
     replace: "              false as boolean,",
     suite: "apps/review-worker/tests/index-wiring.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-L.4.2 Wave 2 / Agent F — config red-team band.
+  //
+  // 133-142 are contiguous by reservation. The production planner does not
+  // consume ConfigFacts at this frozen parent, so that missing seam is a
+  // non-claim rather than an invented mutation. These targets exercise only
+  // code that exists and has a declared, runnable suite.
+  // ---------------------------------------------------------------------
+  {
+    id: 133,
+    name: "an unrelated outage erases positive governance",
+    file: "packages/code-intelligence/src/repository-index/config-governance.ts",
+    find: "  if (relationships.length > 0) {",
+    replace: "  if (relationships.length > 0 && unevaluable.length === 0) {",
+    suite: "packages/code-intelligence/tests/config-governance.test.ts",
+  },
+  {
+    id: 134,
+    name: "incomplete coverage is reported as not_governed",
+    file: "packages/code-intelligence/src/repository-index/config-governance.ts",
+    find: "  if (discoveryComplete && evaluationComplete) {",
+    replace: "  if (discoveryComplete) {",
+    suite: "packages/code-intelligence/tests/config-governance.test.ts",
+  },
+  {
+    id: 135,
+    name: "plural governance collapses to the first relationship",
+    file: "packages/code-intelligence/src/repository-index/config-governance.ts",
+    find: "  relationships.sort((a, b) => compare(a.projectPath, b.projectPath));",
+    replace:
+      "  relationships.splice(1);\n  relationships.sort((a, b) => compare(a.projectPath, b.projectPath));",
+    suite: "packages/code-intelligence/tests/config-governance.test.ts",
+  },
+  {
+    id: 136,
+    name: "nearest-directory discovery drops nested projects",
+    file: "packages/code-intelligence/src/repository-index/config-discovery.ts",
+    find: "  const discoveredList = [...discovered].sort(compare);",
+    replace:
+      '  const discoveredList = [...discovered].filter((path) => !path.includes("/")).sort(compare);',
+    suite: "packages/code-intelligence/tests/config-discovery.test.ts",
+  },
+  {
+    id: 137,
+    name: "an unavailable config is treated as an empty available project",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find: "    admittedFiles: [],\n    namedInFiles: [],\n    referencedProjects: [],",
+    replace:
+      '    admittedFiles: ["__unavailable__"],\n    namedInFiles: [],\n    referencedProjects: [],',
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 138,
+    name: "unresolved extends destroys explicit membership qualification",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find: '        membership: hasExplicitMembershipSelector ? "complete" : "incomplete",',
+    replace: '        membership: "incomplete",',
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 139,
+    name: "unresolved extends leaves inherited options complete",
+    file: "packages/code-intelligence/src/repository-index/config-projects.ts",
+    find: '        optionInheritance: "incomplete",',
+    replace: '        optionInheritance: "complete",',
+    suite: "packages/code-intelligence/tests/config-projects.test.ts",
+  },
+  {
+    id: 140,
+    name: "extends leaks its base into SourceGovernance",
+    file: "packages/code-intelligence/src/repository-index/config-governance.ts",
+    find: "      projectPath: project.configPath,\n      reason,",
+    replace:
+      "      projectPath: project.extendsPath ?? project.configPath,\n      reason,",
+    suite: "packages/code-intelligence/tests/config-governance.test.ts",
+  },
+  {
+    id: 141,
+    name: "project references leak into SourceGovernance",
+    file: "packages/code-intelligence/src/repository-index/config-governance.ts",
+    find: "        projectPath: project.configPath,\n        referencesProject,",
+    replace:
+      "        projectPath: referencesProject,\n        referencesProject,",
+    suite: "packages/code-intelligence/tests/config-governance.test.ts",
+  },
+  {
+    id: 142,
+    name: "analyzer identity ignores supplied context changes",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "      contextDigest: input.contextDigest,",
+    replace: '      contextDigest: "ignored",',
+    suite: "apps/review-worker/tests/analysis.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
@@ -1205,6 +1298,14 @@ const MUTATIONS = [
     suite: "apps/review-worker/tests/funnel.test.ts",
   },
 ];
+
+const requestedMutationIds = process.env["ACALYS_MUTATION_IDS"];
+const MUTATIONS =
+  requestedMutationIds === undefined
+    ? ALL_MUTATIONS
+    : ALL_MUTATIONS.filter((mutation) =>
+        new Set(requestedMutationIds.split(",").map(Number)).has(mutation.id),
+      );
 
 const backupDir = mkdtempSync(join(tmpdir(), "acalys-mutate-"));
 
