@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { FINDING_LIFECYCLE_STATES } from "@acalys/contracts/domain";
+import {
+  FINDING_LIFECYCLE_STATES,
+  FINDING_SEVERITIES,
+} from "@acalys/contracts/domain";
 import type { FindingDto } from "@acalys/contracts/api/v1";
 
 import { displaySeverity, present, toFindingViews } from "../src/lib/findings.js";
+import type { Severity } from "../src/data/security.js";
 import { dto } from "./fixtures/findings.js";
 
 
@@ -97,8 +101,32 @@ describe("Backend meanings survive the trip to the screen", () => {
   });
 
   it("maps every severity, and refuses one it does not know", () => {
-    expect(displaySeverity("critical")).toBe("Critical");
-    expect(displaySeverity("info")).toBe("Info");
+    // ── The canonical table ───────────────────────────────────────────────
+    //
+    // Asserting two of five mappings proved only that the function is total.
+    // `case "high": return "Medium"` passed that test — a Critical finding
+    // rendered one tone quieter is exactly the kind of quiet downgrade this
+    // layer exists to prevent — so every member gets its exact output, driven
+    // from the CONTRACT's own list rather than a copy of it.
+    const table: Record<(typeof FINDING_SEVERITIES)[number], Severity> = {
+      critical: "Critical",
+      high: "High",
+      medium: "Medium",
+      low: "Low",
+      info: "Info",
+    };
+
+    for (const severity of FINDING_SEVERITIES) {
+      expect(displaySeverity(severity), severity).toBe(table[severity]);
+    }
+
+    // Distinct readings, so no two severities the contract tells apart are
+    // indistinguishable on screen.
+    const labels = FINDING_SEVERITIES.map(displaySeverity);
+    expect(new Set(labels).size).toBe(FINDING_SEVERITIES.length);
+
+    // A severity added to the contract lands here, not in a component.
+    expect(FINDING_SEVERITIES).toHaveLength(5);
     expect(() =>
       displaySeverity("catastrophic" as FindingDto["severity"]),
     ).toThrow(/Unhandled finding value/);
