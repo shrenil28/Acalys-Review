@@ -89,6 +89,28 @@ export type ModuleCoverage = (typeof MODULE_COVERAGE)[number];
  * verifier that treats the first as the second concludes "no such declaration"
  * from its own failure to look, which is the closed-world mistake P1-J spent a
  * checkpoint learning to name.
+ *
+ * # `ambiguous` is not declaration multiplicity
+ *
+ * TypeScript lets one logical symbol have several declarations, and that is
+ * ordinary rather than uncertain:
+ *
+ * ```ts
+ * interface Foo { a: string }
+ * interface Foo { b: number }   // one symbol, two declarations
+ * ```
+ *
+ * That is an `exact` symbol whose {@link SymbolRecord.declarationCount} is 2 —
+ * the checker knows precisely which symbol it is. Reporting it as `ambiguous`
+ * would say we could not tell *which* symbol, which is false, and would make
+ * the word useless for the case that really is uncertain.
+ *
+ * `ambiguous` means the opposite: a *reference* that could denote more than one
+ * symbol and cannot be narrowed to one. That is reference resolution, which is
+ * L.2's subject. **At a declaration site it is currently unreachable**, and a
+ * test asserts so rather than leaving the claim in prose. It is declared here
+ * because L.2 will reach it, and a vocabulary invented at the moment it is
+ * first needed tends to be shaped by that moment.
  */
 export const RESOLUTIONS = [
   "exact",
@@ -161,6 +183,16 @@ export interface SymbolRecord {
   readonly kind: SymbolKind;
   readonly moduleId: string;
   readonly exported: boolean;
+  /**
+   * How many declarations this one symbol has in the indexed set.
+   *
+   * Usually 1. Greater for merged interfaces, overload sets, and
+   * declaration-merged namespaces. A separate fact from
+   * {@link Resolution} on purpose: multiplicity is something the checker knows
+   * exactly, and calling it uncertainty would blunt the word `ambiguous`
+   * before L.2 needs it.
+   */
+  readonly declarationCount: number;
   /** Enclosing declaration's name, when there is one. */
   readonly container?: string | undefined;
 }

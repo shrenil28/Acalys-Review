@@ -180,10 +180,11 @@ export interface RealAnalysisOptions {
   /**
    * Who this review belongs to, for the index identity.
    *
-   * Defaulted rather than required so existing callers keep working, but
-   * present in the identity either way: an index is a statement about one
-   * tenant's repository, and an identity missing the tenant would let two
-   * tenants' indexes for the same public revision compare equal.
+   * Optional only because no caller supplies one yet. Absence produces an
+   * `unscoped` identity, not a placeholder tenant id — an index built that way
+   * is usable in memory for this one analysis and is refused by
+   * `isPersistable`, because its tenant component distinguishes nothing and it
+   * must never become a cache key.
    */
   readonly tenantId?: string | undefined;
   readonly provider?: "github" | undefined;
@@ -342,7 +343,13 @@ function buildIndexFor(
   repository: ReadonlyMap<string, string>,
 ): RepositoryIndex {
   const identity = indexIdentity({
-    tenantId: options.tenantId ?? "unknown",
+    tenant:
+      options.tenantId === undefined
+        ? {
+            kind: "unscoped",
+            why: "the caller supplied no tenant; this index is single-analysis only",
+          }
+        : { kind: "tenant", tenantId: options.tenantId },
     provider: options.provider ?? "github",
     repositoryId: options.repositoryId,
     // A revision is not optional and not a branch name. If the head sha is not

@@ -59,8 +59,10 @@ export {
   declarationAt,
   declarationsIn,
   describeIdentity,
+  describeTenant,
   indexDigest,
   indexIdentity,
+  isPersistable,
   isUsable,
   moduleAt,
   sameIndex,
@@ -82,4 +84,5 @@ export {
   type RevisionSnapshot,
   type SymbolLookup,
   type SymbolRecord,
+  type TenantScope,
 } from "./repository-index/index.js";

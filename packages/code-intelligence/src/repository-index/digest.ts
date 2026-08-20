@@ -18,7 +18,7 @@
  * ```
  * ordering     canonical, re-applied here rather than assumed
  * fields       enumerated by name, never Object.keys
- * separator    a character that cannot occur inside a field
+ * boundaries   length-prefixed, so no delimiter can be confused
  * absence      encoded distinctly from empty string
  * versions     part of the preimage, not metadata beside it
  * ```
@@ -34,6 +34,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { describeTenant } from "./identity.js";
 import type { RepositoryIndexIdentity } from "./identity.js";
 import type {
   DeclarationRecord,
@@ -43,31 +44,57 @@ import type {
 } from "./records.js";
 
 /**
- * The field separator.
+ * Length-prefixed field encoding.
  *
- * A unit separator rather than a space, a pipe, or nothing at all. Every
- * printable candidate can occur inside a path, a symbol name, or a diagnostic
- * string -- and joining with no separator at all is worse still, because then
- * `("a", "bc")` and `("ab", "c")` share a preimage and two different indexes
- * digest equal. That is the one thing a digest must never do.
+ * The first version of this joined fields with nothing between them, so
+ * `("a", "bc")` and `("ab", "c")` produced the same preimage and two different
+ * indexes digested equal. The obvious repair is a separator — but a separator
+ * only works while no field can contain it, and these fields hold paths,
+ * symbol names, and compiler diagnostic text. Picking a byte nobody uses
+ * *today* is a bet on tomorrow's inputs.
  *
- * Built with `fromCharCode` rather than written as an escape, so nothing here
- * depends on an invisible byte surviving a copy, a diff, or an editor.
+ * Length prefixing removes the bet. A reader never has to find a boundary,
+ * because every field states its own extent:
+ *
+ * ```
+ * ("a", "bc")   ->   1:a2:bc
+ * ("ab", "c")   ->   2:ab1:c
+ * ("a:b", "c")  ->   3:a:b1:c      a colon in the value changes nothing
+ * ```
+ *
+ * The property, stated so it can be tested rather than believed:
+ *
+ * > Distinct canonical tuples cannot share a digest input.
+ *
+ * `length` is UTF-16 code units — what `String.prototype.length` reports and
+ * what any JavaScript reader would count. Not bytes: a byte length would have
+ * to name an encoding, and the value is never decoded from the digest anyway.
  */
-const SEP = String.fromCharCode(31);
+function encode(value: string): string {
+  return `${String(value.length)}:${value}`;
+}
 
 /**
  * How a missing optional value is written.
  *
- * A distinct token rather than `""`, because a symbol with `container: ""` and
- * a symbol with no container are different facts, and a digest that cannot
- * tell them apart would call two different indexes equal.
+ * `-:` rather than a printable sentinel like `~`. A sentinel drawn from the
+ * *value* alphabet reintroduces the problem it was meant to solve: a field
+ * whose literal content is `~` would encode to the sentinel and a symbol with
+ * `container: "~"` would digest as one with no container. A length is a
+ * non-negative integer, so no encoded value can begin with `-`, and the two
+ * spaces cannot meet.
  */
-const ABSENT = String.fromCharCode(30) + "absent";
+const ABSENT = "-:";
 
-const field = (value: string | undefined): string => value ?? ABSENT;
-
-const line = (parts: readonly string[]): string => parts.join(SEP);
+/**
+ * One canonical line, every field length-prefixed exactly once.
+ *
+ * Takes `string | undefined` so absence is encoded here rather than by each
+ * caller remembering to. A caller that forgot would silently write an empty
+ * string, which is a different fact.
+ */
+const line = (parts: readonly (string | undefined)[]): string =>
+  parts.map((part) => (part === undefined ? ABSENT : encode(part))).join("");
 
 function moduleLine(record: ModuleRecord): string {
   return line([
@@ -78,7 +105,7 @@ function moduleLine(record: ModuleRecord): string {
     record.role,
     record.coverage,
     record.contentDigest,
-    field(record.coverageDetail),
+    record.coverageDetail,
   ]);
 }
 
@@ -90,7 +117,7 @@ function symbolLine(record: SymbolRecord): string {
     record.kind,
     record.moduleId,
     record.exported ? "exported" : "local",
-    field(record.container),
+    record.container,
   ]);
 }
 
@@ -115,7 +142,7 @@ function declarationLine(record: DeclarationRecord): string {
 
 function identityLines(identity: RepositoryIndexIdentity): readonly string[] {
   return [
-    line(["identity", "tenant", identity.tenantId]),
+    line(["identity", "tenant", describeTenant(identity.tenant)]),
     line(["identity", "provider", identity.provider]),
     line(["identity", "repository", identity.repositoryId]),
     line([

@@ -22,10 +22,13 @@ export {
   INDEX_SCHEMA_VERSION,
   SUPPORTED_EXTENSIONS,
   describeIdentity,
+  describeTenant,
   indexIdentity,
+  isPersistable,
   sameIndex,
   type RepositoryIndexIdentity,
   type RepositoryIndexIdentityInput,
+  type TenantScope,
 } from "./identity.js";
 
 export {

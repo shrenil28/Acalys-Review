@@ -722,10 +722,10 @@ const MUTATIONS = [
   },
   {
     id: 82,
-    name: "the digest joins fields with nothing between them",
+    name: "the digest drops its length prefixes",
     file: "packages/code-intelligence/src/repository-index/digest.ts",
-    find: "const SEP = String.fromCharCode(31);",
-    replace: 'const SEP = "";',
+    find: "  return `${String(value.length)}:${value}`;",
+    replace: "  return value;",
     suite: "packages/code-intelligence/tests/repository-index.test.ts",
   },
   {
@@ -777,6 +777,47 @@ const MUTATIONS = [
     replace:
       '        provenance: {\n          source: "direct_source" as "repository_index",',
     suite: "apps/review-worker/tests/index-wiring.test.ts",
+  },
+  {
+    id: 89,
+    name: "declaration multiplicity is reported as resolution ambiguity",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: '  return { resolution: "exact", symbol };',
+    replace:
+      '  return {\n    resolution: declarations.length > 1 ? "ambiguous" : "exact",\n    symbol,\n  };',
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 90,
+    name: "an unscoped index reports itself as persistable",
+    file: "packages/code-intelligence/src/repository-index/identity.ts",
+    find: '  return identity.tenant.kind === "tenant";',
+    replace: "  return true;",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 91,
+    name: "the syntactic representation wins over the indexed one",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: '  return candidate.provenance?.source === "repository_index" ? 1 : 0;',
+    replace: "  return 0;",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 92,
+    name: "an unusable index still suppresses the syntactic fallback",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "  if (index === undefined || !isUsable(index)) return [];",
+    replace: "  if (index === undefined) return [];",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 93,
+    name: "absence is encoded inside the value alphabet",
+    file: "packages/code-intelligence/src/repository-index/digest.ts",
+    find: 'const ABSENT = "-:";',
+    replace: 'const ABSENT = "~";',
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
   },
   {
     id: 17,

@@ -47,6 +47,25 @@ import type {
   SymbolRecord,
 } from "./records.js";
 
+/**
+ * One declaration as it was found, before symbols are formed.
+ *
+ * An intermediate rather than a record type: grouping into symbols needs every
+ * site across every module in hand, so the walk collects and a second pass
+ * decides identity.
+ */
+interface DeclarationSite {
+  readonly moduleId: string;
+  readonly kind: SymbolKind;
+  readonly name: string;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly exported: boolean;
+  readonly container: string | undefined;
+  readonly resolution: Resolution;
+  readonly symbol: ts.Symbol | undefined;
+}
+
 /** One revision's worth of source, path to content. */
 export type RevisionSnapshot = ReadonlyMap<string, string>;
 
@@ -160,34 +179,49 @@ function containerOf(node: ts.Node): string | undefined {
 }
 
 /**
- * How firmly the checker settled this declaration.
+ * What the checker made of this declaration's name.
  *
- * The `unresolved` case is not a failure to record — it is the record. A
- * declaration the checker could not bind is a real fact about the revision
- * (usually a missing dependency), and dropping it would leave downstream code
- * to infer absence from silence.
+ * Returns the resolved symbol alongside the verdict, because the caller needs
+ * both: the verdict for the record, and the symbol so that several
+ * declarations of one logical symbol are grouped rather than counted as
+ * several symbols.
+ *
+ * `unresolved` is not a failure to record — it is the record. A declaration
+ * the checker could not bind is a real fact about the revision (usually a
+ * missing dependency), and dropping it would leave downstream code to infer
+ * absence from silence.
+ *
+ * Note what is deliberately NOT here: `declarations.length > 1` does not make
+ * a declaration `ambiguous`. Merged interfaces and overload sets are one
+ * symbol the checker identified precisely, and calling that uncertainty would
+ * spend the word `ambiguous` on the case that is not uncertain. See the
+ * commentary on {@link Resolution}.
  */
-function resolutionOf(
+function resolveDeclaration(
   checker: ts.TypeChecker,
   node: ts.Node,
   indexedFiles: ReadonlySet<string>,
-): Resolution {
+): { readonly resolution: Resolution; readonly symbol: ts.Symbol | undefined } {
   const named = node as ts.Node & { readonly name?: ts.Node };
   const nameNode = named.name;
-  if (nameNode === undefined) return "unresolved";
+  if (nameNode === undefined) {
+    return { resolution: "unresolved", symbol: undefined };
+  }
 
   const symbol = checker.getSymbolAtLocation(nameNode);
-  if (symbol === undefined) return "unresolved";
+  if (symbol === undefined) return { resolution: "unresolved", symbol };
 
   const declarations = symbol.getDeclarations() ?? [];
-  if (declarations.length === 0) return "unresolved";
+  if (declarations.length === 0) return { resolution: "unresolved", symbol };
 
   const outside = declarations.filter(
     (declaration) => !indexedFiles.has(declaration.getSourceFile().fileName),
   );
-  if (outside.length === declarations.length) return "external";
-  if (declarations.length > 1) return "ambiguous";
-  return "exact";
+  if (outside.length === declarations.length) {
+    return { resolution: "external", symbol };
+  }
+
+  return { resolution: "exact", symbol };
 }
 
 // ---------------------------------------------------------------------------
@@ -236,6 +270,7 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
   const modules: ModuleRecord[] = [];
   const symbols: SymbolRecord[] = [];
   const declarations: DeclarationRecord[] = [];
+  const sites: DeclarationSite[] = [];
 
   const indexable = new Map<string, string>();
   for (const [path, content] of snapshot) {
@@ -333,52 +368,114 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
       const kind = kindOf(node);
       const name = nameOf(node);
       if (kind !== undefined && name !== undefined) {
-        const start =
+        const startLine =
           source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-        const end =
+        const endLine =
           source.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
+        const { resolution, symbol } = resolveDeclaration(
+          checker,
+          node,
+          indexedFiles,
+        );
 
-        const symbolId = shortId([
-          revision,
-          path,
-          kind,
-          name,
-          String(start),
-          String(end),
-        ]);
-        const container = containerOf(node);
-
-        symbols.push({
-          symbolId,
-          name,
-          kind,
+        sites.push({
           moduleId: path,
+          kind,
+          name,
+          startLine,
+          endLine,
           exported: isExported(node),
-          ...(container === undefined ? {} : { container }),
-        });
-
-        declarations.push({
-          declarationId: shortId([symbolId, path, String(start), String(end)]),
-          symbolId,
-          moduleId: path,
-          kind,
-          startLine: start,
-          endLine: end,
-          resolution: resolutionOf(checker, node, indexedFiles),
-          provenance: {
-            source: "typescript_checker",
-            path,
-            startLine: start,
-            endLine: end,
-            extractorVersion: EXTRACTOR_VERSION,
-            revision,
-          },
+          container: containerOf(node),
+          resolution,
+          symbol,
         });
       }
       ts.forEachChild(node, visit);
     };
 
     ts.forEachChild(source, visit);
+  }
+
+  // ------------------------------------------------------------------
+  // Group declaration sites into symbols
+  // ------------------------------------------------------------------
+  //
+  // Grouped by the CHECKER's symbol, not by a synthesized name key. That is
+  // the difference between two claims:
+  //
+  //   interface Foo {}  interface Foo {}   one symbol, two declarations
+  //   function save(){} in two scopes      two symbols, one declaration each
+  //
+  // A name-and-module key merges the second pair; a span key splits the first.
+  // The checker already knows, which is the reason a Program is built at all.
+  const groups = new Map<ts.Symbol | ts.Node, DeclarationSite[]>();
+  for (const site of sites) {
+    // Sites the checker could not bind get their own group: an unresolved
+    // declaration is still a declaration, and merging them under one key would
+    // invent a symbol nobody declared.
+    const key = site.symbol ?? (Symbol("unbound") as unknown as ts.Node);
+    const existing = groups.get(key);
+    if (existing === undefined) groups.set(key, [site]);
+    else existing.push(site);
+  }
+
+  for (const group of groups.values()) {
+    // Canonical first declaration: the identity must not depend on which file
+    // the compiler visited first.
+    const ordered = [...group].sort(
+      (a, b) =>
+        compare(a.moduleId, b.moduleId) ||
+        a.startLine - b.startLine ||
+        a.endLine - b.endLine,
+    );
+    const first = ordered[0];
+    if (first === undefined) continue;
+
+    const symbolId = shortId([
+      revision,
+      first.moduleId,
+      first.kind,
+      first.name,
+      String(first.startLine),
+      String(first.endLine),
+    ]);
+
+    symbols.push({
+      symbolId,
+      name: first.name,
+      kind: first.kind,
+      moduleId: first.moduleId,
+      // Exported if ANY declaration exports it: a merged interface declared
+      // once with `export` and once without is exported.
+      exported: ordered.some((site) => site.exported),
+      declarationCount: ordered.length,
+      ...(first.container === undefined ? {} : { container: first.container }),
+    });
+
+    for (const site of ordered) {
+      declarations.push({
+        declarationId: shortId([
+          symbolId,
+          site.moduleId,
+          String(site.startLine),
+          String(site.endLine),
+        ]),
+        symbolId,
+        moduleId: site.moduleId,
+        kind: site.kind,
+        startLine: site.startLine,
+        endLine: site.endLine,
+        resolution: site.resolution,
+        provenance: {
+          source: "typescript_checker",
+          path: site.moduleId,
+          startLine: site.startLine,
+          endLine: site.endLine,
+          extractorVersion: EXTRACTOR_VERSION,
+          revision,
+        },
+      });
+    }
   }
 
   return finish(identity, { kind: "built" }, modules, symbols, declarations);

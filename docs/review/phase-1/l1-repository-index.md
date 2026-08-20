@@ -62,6 +62,46 @@ be gone with nothing in the type system to notice.
 
 ---
 
+## `ambiguous` is not declaration multiplicity
+
+TypeScript lets one logical symbol have several declarations, and that is
+ordinary rather than uncertain:
+
+```ts
+interface Foo {
+  a: string;
+}
+interface Foo {
+  b: number;
+} // one symbol, two declarations
+```
+
+The first version of the extractor recorded that as `resolution: "ambiguous"`,
+and worse, as **two symbols** — because `symbolId` was derived from the
+declaration span. Both were wrong, in opposite directions:
+
+```
+a name-and-module key    merges two distinct locals in different scopes
+a span key               splits one merged interface into two symbols
+```
+
+Grouping is now by the **checker's** symbol, which is the reason a `Program` is
+built at all. Merged interfaces are one `exact` symbol with
+`declarationCount: 2`; two same-named `helper` functions in different scopes are
+two symbols with one declaration each. Both are tested.
+
+`ambiguous` is reserved for its real meaning — a _reference_ that could denote
+more than one symbol and cannot be narrowed to one. L.1 records no references,
+so it is **currently unreachable at a declaration site**, and a test asserts
+that rather than leaving the claim in prose. When L.2 makes that test fail,
+that is the vocabulary being used correctly.
+
+Spending `ambiguous` on multiplicity would have left nothing to say when
+reference resolution genuinely cannot decide — and L.2's bindings lean entirely
+on that distinction.
+
+---
+
 ## Absence is a claim, and claims need standing
 
 `symbolNamed` returns three things, not two:
@@ -135,11 +175,29 @@ can observe whether canonical form is applied at all.
 
 **The digest joined fields with nothing between them.** `["a", "bc"]` and
 `["ab", "c"]` produced identical preimages, so two different indexes could
-digest equal. Now joined with `String.fromCharCode(31)`, built that way rather
-than written as an escape so nothing depends on an invisible byte surviving a
-diff. The first test written for it was also wrong — it compared `"ab/c.ts"` to
-`"a/bc.ts"`, two different strings that never collided. The real test states the
-property over the record type, as a field-boundary shift.
+digest equal. The first test written for it was also wrong — it compared
+`"ab/c.ts"` to `"a/bc.ts"`, two different strings that never collided.
+
+The first _fix_ was also not good enough. A separator only works while no field
+can contain it, and these fields hold paths, symbol names, and compiler
+diagnostic text; choosing a byte nobody uses today is a bet on tomorrow's
+inputs. The encoding is now length-prefixed, so a reader never has to find a
+boundary:
+
+```
+("a",  "bc")   ->   1:a2:bc
+("ab", "c")    ->   2:ab1:c
+("a:b","c")    ->   3:a:b1:c      a colon in the value changes nothing
+```
+
+Absence gets `-:`, which is outside the value alphabet — a length is a
+non-negative integer, so no encoded field can begin with `-`. The intermediate
+version used `~`, which had the same bug one level down: a `container` whose
+literal text was `~` would digest as no container at all.
+
+The property, now testable rather than believed:
+
+> Distinct canonical tuples cannot share a digest input.
 
 ---
 
@@ -172,23 +230,42 @@ recordId resolves to a declaration record in the index the run built
 indexIdentity carries the revision under review
 ```
 
+### Representation precedence
+
 A design question surfaced while wiring this. `scoreCandidates` dedupes on
-`path|start|end`, so the syntactic candidate and the indexed one collided and
-the syntactic one won. Both could have been kept — but they carry identical
-text, and the planner exists to stop the budget being spent twice on one
-function. The indexed answer **replaces** the syntactic one for the same span.
-What changes is not how many items there are but what the item can say about
-itself. Where the index has nothing, the syntactic candidate stands: degrading
-to a weaker fact is right, degrading to no context is not.
+`path|start|end`, so the syntactic candidate and the indexed one collided —
+and the syntactic one won, because it was generated first. Both could have been
+kept, but they carry identical text and the planner exists to stop the budget
+being spent twice on one function.
+
+The first fix skipped the syntactic candidate at generation time, which worked
+and was fragile: precedence lived in traversal order, so a refactor could
+reverse it silently. It is now one rule, applied in one place:
+
+```
+same semantic location + indexed observation positively established
+  -> the indexed representation dominates
+```
+
+"Positively established" is load-bearing. An index that failed to build, or
+that could not read this module, produces no indexed candidate at all — so the
+syntactic one is what remains. An incomplete index must cost the richer fact,
+never the context itself. Four tests hold the rule down: indexed wins when
+generated second, indexed wins when generated **first**, syntactic survives
+with no index, and syntactic survives when the index is unavailable or the
+module failed to parse.
+
+What changes is not how many items there are, but what the item can say about
+itself.
 
 ---
 
 ## Evidence
 
 ```
-mechanism witness   30 tests   packages/code-intelligence/tests/repository-index.test.ts
+mechanism witness   45 tests   packages/code-intelligence/tests/repository-index.test.ts
 wiring witness       9 tests   apps/review-worker/tests/index-wiring.test.ts
-repository total  1,909 tests   0 skipped
+repository total  1,924 tests   0 skipped
 depcruise           299 modules, 0 violations
 ```
 
@@ -209,7 +286,18 @@ in `scripts/mutate-p1i.mjs`:
 86  production plans without the repository index
 87  index built for a revision that is not the head
 88  index-derived item claims direct-source provenance
+
+89  declaration multiplicity reported as resolution ambiguity
+90  an unscoped index reports itself as persistable
+91  the syntactic representation wins over the indexed one
+92  an unusable index still suppresses the syntactic fallback
+93  absence encoded inside the value alphabet
 ```
+
+79 and 82 were retargeted rather than kept: 79 pointed at the span-derived
+`symbolId` that the checker-grouping fix removed, and 82 at the separator that
+length prefixing replaced. Retargeted at the mechanism that now carries the
+property, not at the line that used to.
 
 The split is the checkpoint's point. 77–85 dying proves the facts are correct.
 Only 86–88 dying proves anything uses them.
@@ -232,7 +320,9 @@ Stated explicitly, because each is a plausible thing to assume from the word
 - any performance improvement
 - any review-quality improvement
 
-`symbolId` is derived from revision, module, span, and kind, and is deliberately
+`symbolId` is derived from the canonical _first_ declaration of a
+checker-resolved symbol — revision, module, span, and kind — and is
+deliberately
 **not** a cross-revision fingerprint. Renames, moves, splits, and merges each
 break any fingerprint simple enough to compute here, and a fingerprint that is
 wrong across revisions is worse than none: it claims continuity that does not
@@ -254,7 +344,19 @@ correct`, `unsupported -> explicit`.
   analyzer.** `buildClusters` is called with the production path's own
   assembled items, which is the same function `runRealAnalysis` uses — but the
   assertion sits beside the analyzer rather than inside it.
-- **`tenantId` defaults to `"unknown"`** when a caller does not supply one.
-  Existing callers do not. The field is in the identity and the digest either
-  way, so two tenants cannot collide once real tenancy arrives, but the default
-  is a placeholder rather than a resolution.
+- **Tenant identity is `unscoped`, and that is a hard prerequisite, not a
+  cosmetic default.** The first version wrote `tenantId: "unknown"`, and the
+  claim beside it — "tenants cannot collide" — was wrong. A placeholder string
+  is a value in the _same domain_ as a real tenant id, so two tenants entering
+  through callers that supply nothing both become `"unknown"` and their
+  identities compare equal, with nothing in the type stopping that index being
+  handed to the other tenant.
+
+  `TenantScope` now makes the two cases different shapes, and `isPersistable`
+  refuses `unscoped`. A test demonstrates the collision directly — two
+  unscoped identities, everything else equal, comparing equal — so the hazard
+  is visible rather than latent.
+
+  **Real tenant identity is mandatory before any index is persisted, cached, or
+  shared across runs.** L.1 builds, uses, and discards the index inside one
+  call, so nothing crosses a tenant boundary today.

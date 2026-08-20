@@ -18,11 +18,16 @@ import {
   declarationsIn,
   indexDigest,
   indexIdentity,
+  isPersistable,
   isUsable,
   moduleAt,
   sameIndex,
   symbolNamed,
+  extractFile,
+  generateCandidates,
+  scoreCandidates,
   unavailableIndex,
+  type ContextCandidate,
   type RepositoryIndex,
   type RepositoryIndexIdentity,
 } from "../src/index.js";
@@ -33,7 +38,7 @@ const REVISION_B = "b".repeat(40);
 
 function identityFor(revision: string): RepositoryIndexIdentity {
   return indexIdentity({
-    tenantId: "tenant-1",
+    tenant: { kind: "tenant", tenantId: "tenant-1" },
     provider: "github",
     repositoryId: "repo-1",
     revision: gitObjectId(revision),
@@ -48,6 +53,33 @@ function build(
     identity: identityFor(revision),
     snapshot: new Map(Object.entries(files)),
   });
+}
+
+/**
+ * An index holding one module record with the given identity fields.
+ *
+ * Stated over the record type rather than built from source: the builder
+ * cannot currently produce a record whose `moduleId` and `path` differ, and
+ * the digest's contract is over records anyway — L.3's incremental builder and
+ * any future deserializer are other sources of them.
+ */
+function shaped(moduleId: string, path: string): RepositoryIndex {
+  return {
+    ...buildRepositoryIndex({
+      identity: identityFor(REVISION_A),
+      snapshot: new Map(),
+    }),
+    modules: [
+      {
+        moduleId,
+        path,
+        language: "typescript",
+        role: "production",
+        coverage: "indexed",
+        contentDigest: "0".repeat(64),
+      },
+    ],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -89,9 +121,53 @@ describe("index identity", () => {
 
   it("distinguishes two tenants indexing the same public revision", () => {
     const identity = identityFor(REVISION_A);
-    expect(sameIndex(identity, { ...identity, tenantId: "tenant-2" })).toBe(
-      false,
-    );
+    expect(
+      sameIndex(identity, {
+        ...identity,
+        tenant: { kind: "tenant", tenantId: "tenant-2" },
+      }),
+    ).toBe(false);
+  });
+
+  it("refuses to call an unscoped index persistable", () => {
+    const scoped = identityFor(REVISION_A);
+    const unscoped: RepositoryIndexIdentity = {
+      ...scoped,
+      tenant: { kind: "unscoped", why: "no caller supplied a tenant" },
+    };
+
+    expect(isPersistable(scoped)).toBe(true);
+    expect(isPersistable(unscoped)).toBe(false);
+  });
+
+  it("shows why unscoped must never become a cache key", () => {
+    // Two different tenants, everything else about the identity equal. Under
+    // `unscoped` the tenant component distinguishes nothing, so these compare
+    // equal — which is exactly the collision `"unknown"` as a tenant id would
+    // have hidden behind a value that LOOKED like an identity.
+    const base = identityFor(REVISION_A);
+    const tenantA: RepositoryIndexIdentity = {
+      ...base,
+      tenant: { kind: "unscoped", why: "caller A supplied nothing" },
+    };
+    const tenantB: RepositoryIndexIdentity = {
+      ...base,
+      tenant: { kind: "unscoped", why: "caller B supplied nothing" },
+    };
+
+    expect(sameIndex(tenantA, tenantB)).toBe(true);
+    // The collision is real; `isPersistable` is what stops it being acted on.
+    expect(isPersistable(tenantA)).toBe(false);
+  });
+
+  it("separates a scoped identity from an unscoped one", () => {
+    const scoped = identityFor(REVISION_A);
+    expect(
+      sameIndex(scoped, {
+        ...scoped,
+        tenant: { kind: "unscoped", why: "none" },
+      }),
+    ).toBe(false);
   });
 });
 
@@ -185,7 +261,7 @@ describe("resolution does not collapse", () => {
     expect(declarationsIn(index, "x.ts")[0]?.resolution).toBe("exact");
   });
 
-  it("marks a merged declaration ambiguous rather than picking one", () => {
+  it("treats merged interfaces as ONE exact symbol with two declarations", () => {
     const index = build({
       "m.ts": [
         "export interface Shape {",
@@ -197,13 +273,85 @@ describe("resolution does not collapse", () => {
       ].join("\n"),
     });
 
-    const resolutions = declarationsIn(index, "m.ts")
-      .filter((record) => record.kind === "interface")
-      .map((record) => record.resolution);
+    const shapes = index.symbols.filter((symbol) => symbol.name === "Shape");
+    const declarations = declarationsIn(index, "m.ts").filter(
+      (record) => record.kind === "interface",
+    );
 
-    // Two declarations of one symbol. Reporting either as `exact` would claim
-    // a single site for a fact that has two.
-    expect(resolutions).toEqual(["ambiguous", "ambiguous"]);
+    // TypeScript's declaration merging is ordinary, not uncertain. The checker
+    // knows precisely which symbol this is; there are simply two places it was
+    // written. Recording two symbols would invent one that nobody declared.
+    expect(shapes).toHaveLength(1);
+    expect(shapes[0]?.declarationCount).toBe(2);
+    expect(declarations).toHaveLength(2);
+    expect(new Set(declarations.map((record) => record.symbolId)).size).toBe(1);
+
+    // And crucially NOT `ambiguous`. Spending that word on declaration
+    // multiplicity would leave nothing to say when a reference genuinely
+    // cannot be narrowed to one symbol — which is L.2's subject.
+    expect(declarations.map((record) => record.resolution)).toEqual([
+      "exact",
+      "exact",
+    ]);
+  });
+
+  it("counts a single declaration as one, not as merged", () => {
+    const index = build({ "s.ts": "export interface Solo {\n  a: number;\n}" });
+    expect(
+      index.symbols.find((symbol) => symbol.name === "Solo")?.declarationCount,
+    ).toBe(1);
+  });
+
+  it("keeps two same-named symbols in different scopes apart", () => {
+    // The mirror of the merging case. These are two symbols the checker
+    // distinguishes, and a name-and-module key would fuse them exactly as a
+    // span key would split the merged interfaces above.
+    const index = build({
+      "scopes.ts": [
+        "export function outer(): number {",
+        "  function helper(): number {",
+        "    return 1;",
+        "  }",
+        "  return helper();",
+        "}",
+        "export function other(): number {",
+        "  function helper(): number {",
+        "    return 2;",
+        "  }",
+        "  return helper();",
+        "}",
+      ].join("\n"),
+    });
+
+    const helpers = index.symbols.filter((symbol) => symbol.name === "helper");
+    expect(helpers).toHaveLength(2);
+    expect(new Set(helpers.map((symbol) => symbol.symbolId)).size).toBe(2);
+    expect(helpers.every((symbol) => symbol.declarationCount === 1)).toBe(true);
+  });
+
+  it("does not reach `ambiguous` at a declaration site", () => {
+    // Declared unreachable rather than left as a claim in prose. `ambiguous`
+    // belongs to reference resolution — a reference that could denote more
+    // than one symbol — and L.1 records no references. If L.2 makes this fail,
+    // that is the vocabulary being used correctly, and this test is the place
+    // to notice.
+    const index = build({
+      "a.ts": "export function f(): void {}",
+      "b.ts": [
+        "export interface Merged {",
+        "  x: number;",
+        "}",
+        "export interface Merged {",
+        "  y: number;",
+        "}",
+        'import type { Gone } from "./nowhere.js";',
+        "export type Alias = Gone;",
+      ].join("\n"),
+    });
+
+    expect(index.declarations.map((record) => record.resolution)).not.toContain(
+      "ambiguous",
+    );
   });
 
   it("never reports an unresolvable declaration as absent", () => {
@@ -396,39 +544,9 @@ describe("the full rebuild is deterministic", () => {
     );
   });
 
-  it("never lets two different field splits share a preimage", () => {
-    // A boundary shift, not merely two different strings: `moduleId`/`path` of
-    // ("ab", "c") against ("a", "bc"). Concatenated with no separator both
-    // render "abc", so the two indexes would digest equal.
-    //
-    // The builder cannot currently produce a record whose moduleId and path
-    // differ, so this is stated over the record type directly — which is the
-    // right level anyway. The digest's contract is over records, and L.3's
-    // incremental builder and any future deserializer are other sources of
-    // them.
-    const base = build({});
-    const shape = (moduleId: string, path: string): RepositoryIndex => ({
-      ...base,
-      modules: [
-        {
-          moduleId,
-          path,
-          language: "typescript",
-          role: "production",
-          coverage: "indexed",
-          contentDigest: "0".repeat(64),
-        },
-      ],
-    });
-
-    expect(indexDigest(shape("ab", "c"))).not.toBe(
-      indexDigest(shape("a", "bc")),
-    );
-  });
-
   it("digests differently when the revision differs", () => {
-    // Same content, different revision. The identity is in the preimage, so
-    // an index for H1 cannot silently satisfy a question about H2.
+    // Same content, different revision. The identity is in the preimage, so an
+    // index for H1 cannot silently satisfy a question about H2.
     expect(indexDigest(build(files, REVISION_A))).not.toBe(
       indexDigest(build(files, REVISION_B)),
     );
@@ -439,6 +557,15 @@ describe("the full rebuild is deterministic", () => {
     const restamped: RepositoryIndex = {
       ...index,
       identity: { ...index.identity, extractorVersion: "acalys.extractor.v0" },
+    };
+    expect(indexDigest(index)).not.toBe(indexDigest(restamped));
+  });
+
+  it("digests differently when the schema version differs", () => {
+    const index = build(files);
+    const restamped: RepositoryIndex = {
+      ...index,
+      identity: { ...index.identity, indexSchemaVersion: "v0" },
     };
     expect(indexDigest(index)).not.toBe(indexDigest(restamped));
   });
@@ -456,8 +583,7 @@ describe("the full rebuild is deterministic", () => {
   it("distinguishes an absent optional field from an empty one", () => {
     const index = build(files);
     const [first, ...rest] = index.symbols;
-    expect(first).toBeDefined();
-    if (first === undefined) return;
+    if (first === undefined) throw new Error("no symbol");
 
     const withEmptyContainer: RepositoryIndex = {
       ...index,
@@ -468,6 +594,52 @@ describe("the full rebuild is deterministic", () => {
     // serialization that wrote both as nothing would call two different
     // indexes equal.
     expect(indexDigest(index)).not.toBe(indexDigest(withEmptyContainer));
+  });
+
+  it("never lets two different field splits share a preimage", () => {
+    // A boundary shift, not merely two different strings: `moduleId`/`path` of
+    // ("ab", "c") against ("a", "bc"). Concatenated with no boundary marker
+    // both render "abc", so the two indexes would digest equal.
+    expect(indexDigest(shaped("ab", "c"))).not.toBe(
+      indexDigest(shaped("a", "bc")),
+    );
+  });
+
+  it("is unambiguous for values containing the encoding's own delimiter", () => {
+    // Length prefixing rather than a separator, so a value holding `:` — or a
+    // value that looks exactly like an encoded field — changes nothing. A
+    // delimiter scheme is a bet that no input ever contains the delimiter, and
+    // these fields hold paths, symbol names, and compiler diagnostic text.
+    expect(indexDigest(shaped("a:b", "c"))).not.toBe(
+      indexDigest(shaped("a", "b:c")),
+    );
+    expect(indexDigest(shaped("3:xyz", "q"))).not.toBe(
+      indexDigest(shaped("3", ":xyzq")),
+    );
+  });
+
+  it("distinguishes an absent optional field from one holding the sentinel", () => {
+    // Absence is written outside the value alphabet. A printable sentinel
+    // would mean a `container` whose literal text equals the sentinel digests
+    // as no container at all — the same bug one level down.
+    const base = build({ "c.ts": "export function c(): void {}" });
+    const [symbol, ...rest] = base.symbols;
+    if (symbol === undefined) throw new Error("no symbol");
+
+    const absent: RepositoryIndex = { ...base, symbols: [symbol, ...rest] };
+    const sentinel: RepositoryIndex = {
+      ...base,
+      symbols: [{ ...symbol, container: "-:" }, ...rest],
+    };
+    const tilde: RepositoryIndex = {
+      ...base,
+      symbols: [{ ...symbol, container: "~" }, ...rest],
+    };
+
+    expect(symbol.container).toBeUndefined();
+    expect(indexDigest(absent)).not.toBe(indexDigest(sentinel));
+    expect(indexDigest(absent)).not.toBe(indexDigest(tilde));
+    expect(indexDigest(sentinel)).not.toBe(indexDigest(tilde));
   });
 });
 
@@ -546,5 +718,127 @@ describe("the index holds facts, never verdicts", () => {
         name,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Representation precedence
+// ---------------------------------------------------------------------------
+
+describe("an indexed representation dominates an equivalent syntactic one", () => {
+  const files = {
+    "src/local.ts": [
+      "export function run(value: number): number {",
+      "  return value + 1;",
+      "}",
+    ].join("\n"),
+  };
+  const changed = [{ path: "src/local.ts", changedLines: [2] }];
+
+  const plannerInput = (index?: RepositoryIndex) => ({
+    changed: changed.map((entry) => ({
+      path: entry.path,
+      content: files[entry.path as keyof typeof files],
+      changedLines: entry.changedLines,
+    })),
+    repository: Object.entries(files).map(([path, source]) =>
+      extractFile(path, source),
+    ),
+    sources: new Map(Object.entries(files)),
+    ...(index === undefined ? {} : { index }),
+  });
+
+  /** Every representation offered for one source span. */
+  const forSpan = (candidates: readonly ContextCandidate[]) =>
+    candidates.filter(
+      (candidate) =>
+        candidate.path === "src/local.ts" && candidate.startLine === 1,
+    );
+
+  it("offers both representations before scoring decides", () => {
+    // Generation stays generous; precedence is a scoring rule, applied in one
+    // place. If generation quietly dropped one, the rule below would be
+    // untestable and a traversal change could reverse it unnoticed.
+    const offered = forSpan(generateCandidates(plannerInput(build(files))));
+
+    expect(offered.map((candidate) => candidate.reason).sort()).toEqual([
+      "containing_symbol",
+      "indexed_declaration",
+    ]);
+  });
+
+  it("keeps the indexed one when it is generated second", () => {
+    const kept = forSpan(
+      scoreCandidates(generateCandidates(plannerInput(build(files)))),
+    );
+
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.provenance?.source).toBe("repository_index");
+  });
+
+  it("keeps the indexed one when it is generated first", () => {
+    // The same candidates, reversed. Precedence must be a property of the
+    // rule, not of the order the planner happened to emit them in — otherwise
+    // a refactor of traversal silently flips which fact reaches the analyzer.
+    const reversed = [
+      ...generateCandidates(plannerInput(build(files))),
+    ].reverse();
+    const kept = forSpan(scoreCandidates(reversed));
+
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.provenance?.source).toBe("repository_index");
+  });
+
+  it("keeps the syntactic one when there is no index at all", () => {
+    const kept = forSpan(scoreCandidates(generateCandidates(plannerInput())));
+
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.reason).toBe("containing_symbol");
+  });
+
+  it("keeps the syntactic one when the index is unavailable", () => {
+    // An incomplete index must cost the richer fact, never the context. The
+    // rule is "indexed dominates when positively established" — not "whenever
+    // an index object exists".
+    const kept = forSpan(
+      scoreCandidates(
+        generateCandidates(
+          plannerInput(
+            unavailableIndex(identityFor(REVISION_A), {
+              kind: "unavailable",
+              why: "clone failed",
+            }),
+          ),
+        ),
+      ),
+    );
+
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.reason).toBe("containing_symbol");
+  });
+
+  it("keeps the syntactic one when the module failed to parse", () => {
+    // `not_indexed`, one level up. The index is usable, this module is not,
+    // and the planner must still hand the analyzer the function.
+    const brokenIndex = build({
+      ...files,
+      "src/other.ts": "export function oops( {",
+    });
+    const withBrokenModule = buildRepositoryIndex({
+      identity: identityFor(REVISION_A),
+      snapshot: new Map([["src/local.ts", "export function run( {"]]),
+    });
+
+    expect(moduleAt(withBrokenModule, "src/local.ts")?.coverage).toBe(
+      "parse_failed",
+    );
+    expect(isUsable(brokenIndex)).toBe(true);
+
+    const kept = forSpan(
+      scoreCandidates(generateCandidates(plannerInput(withBrokenModule))),
+    );
+
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.reason).toBe("containing_symbol");
   });
 });

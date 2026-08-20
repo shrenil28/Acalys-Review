@@ -365,21 +365,8 @@ export function generateCandidates(
     // the module did not parse — the syntactic candidate stands. Degrading to
     // a weaker fact is right; degrading to no context is not.
     const indexed = indexedContainers(input.index, changed);
-    const indexedSpans = new Set(
-      indexed.map(
-        (record) =>
-          `${String(record.declaration.startLine)}:${String(record.declaration.endLine)}`,
-      ),
-    );
 
     for (const symbol of containers.values()) {
-      if (
-        indexedSpans.has(
-          `${String(symbol.startLine)}:${String(symbol.endLine)}`,
-        )
-      ) {
-        continue;
-      }
       candidates.push({
         kind: "symbol",
         path: changed.path,
@@ -561,15 +548,46 @@ function resolveSpecifier(
  * and the assembled context is deterministic — which is what makes the
  * planner's own eval comparable across runs.
  */
+/**
+ * How much authority a candidate's *provenance* carries.
+ *
+ * Only used to break ties between candidates describing the same span. It is
+ * deliberately not part of the score: standing is about which of two identical
+ * texts to keep, and score is about whether the text is worth the budget.
+ * Folding them together would let provenance quietly reorder the whole prompt.
+ */
+function standing(candidate: ContextCandidate): number {
+  return candidate.provenance?.source === "repository_index" ? 1 : 0;
+}
+
 export function scoreCandidates(
   candidates: readonly ContextCandidate[],
 ): readonly ScoredCandidate[] {
   const seen = new Set<string>();
   const scored: ScoredCandidate[] = [];
 
-  for (const candidate of candidates) {
-    // Identity is path plus span plus reason: the same file offered as both a
-    // caller and a test is one item, but a symbol and its whole file are not.
+  // Highest-standing representation first, so the loop below keeps it.
+  //
+  // Sorting rather than relying on the order candidates happened to be
+  // generated in. Two candidates can describe the same source span — the
+  // syntactic container and the indexed declaration — and they carry identical
+  // text, so keeping both would spend the budget twice on one function. Which
+  // one survives is a rule, not an accident of traversal:
+  //
+  //   same semantic location + indexed observation positively established
+  //     -> the indexed representation dominates
+  //
+  // "Positively established" is doing work. An index that failed to build, or
+  // that could not read this module, produces no indexed candidate at all
+  // (see `indexedContainers`), so the syntactic one is what remains. An
+  // incomplete index must cost the richer fact, never the context itself.
+  const byStanding = [...candidates].sort(
+    (left, right) => standing(right) - standing(left),
+  );
+
+  for (const candidate of byStanding) {
+    // Identity is path plus span: the same file offered as both a caller and a
+    // test is one item, but a symbol and its whole file are not.
     const identity = `${candidate.path}|${String(candidate.startLine ?? 0)}|${String(candidate.endLine ?? 0)}`;
     if (seen.has(identity)) continue;
     seen.add(identity);

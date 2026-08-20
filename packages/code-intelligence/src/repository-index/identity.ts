@@ -67,8 +67,29 @@ export const EXTRACTOR_VERSION = "acalys.extractor.typescript.v1";
  */
 export const SUPPORTED_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts"] as const;
 
+/**
+ * Who an index belongs to — or an explicit statement that nobody has said.
+ *
+ * `"unknown"` was the first version of this and it was wrong in a way worth
+ * naming. A placeholder string is a *value in the same domain* as a real
+ * tenant id, so two different tenants entering through callers that supply
+ * nothing both become `"unknown"` and their identities compare equal. Nothing
+ * in the type stops that index being cached and handed to the other tenant.
+ *
+ * Today no caller supplies a tenant and nothing is persisted, so the risk is
+ * latent rather than live. `unscoped` makes it latent *and visible*: it cannot
+ * be mistaken for a tenant id, and {@link isPersistable} refuses it.
+ *
+ * The hard prerequisite, recorded here rather than in a document nobody reads:
+ * **real tenant identity is mandatory before any index is persisted, cached,
+ * or shared across runs.**
+ */
+export type TenantScope =
+  | { readonly kind: "tenant"; readonly tenantId: string }
+  | { readonly kind: "unscoped"; readonly why: string };
+
 export interface RepositoryIndexIdentity {
-  readonly tenantId: string;
+  readonly tenant: TenantScope;
   readonly provider: SourceProvider;
   readonly repositoryId: string;
   /** The revision these facts describe. Never optional, never a branch name. */
@@ -78,7 +99,7 @@ export interface RepositoryIndexIdentity {
 }
 
 export interface RepositoryIndexIdentityInput {
-  readonly tenantId: string;
+  readonly tenant: TenantScope;
   readonly provider: SourceProvider;
   readonly repositoryId: string;
   readonly revision: GitObjectId;
@@ -94,7 +115,7 @@ export function indexIdentity(
   input: RepositoryIndexIdentityInput,
 ): RepositoryIndexIdentity {
   return {
-    tenantId: input.tenantId,
+    tenant: input.tenant,
     provider: input.provider,
     repositoryId: input.repositoryId,
     revision: input.revision,
@@ -116,7 +137,7 @@ export function sameIndex(
   right: RepositoryIndexIdentity,
 ): boolean {
   return (
-    left.tenantId === right.tenantId &&
+    sameTenant(left.tenant, right.tenant) &&
     left.provider === right.provider &&
     left.repositoryId === right.repositoryId &&
     left.revision.algorithm === right.revision.algorithm &&
@@ -126,9 +147,39 @@ export function sameIndex(
   );
 }
 
+function sameTenant(left: TenantScope, right: TenantScope): boolean {
+  if (left.kind !== right.kind) return false;
+  return left.kind === "tenant" && right.kind === "tenant"
+    ? left.tenantId === right.tenantId
+    : // Two unscoped identities are equal as values, and that is exactly the
+      // hazard: under `unscoped` the tenant component distinguishes nothing.
+      // `isPersistable` is what stops that equality being acted on.
+      true;
+}
+
+/**
+ * Whether this index may be stored, cached, or reused across runs.
+ *
+ * False for `unscoped`, because an index whose tenant component distinguishes
+ * nothing must never become a cache key: the next lookup for a different
+ * tenant's copy of the same public revision would hit it.
+ *
+ * In-memory use within a single analysis is fine and is what L.1 does — the
+ * index is built, used, and discarded inside one call.
+ */
+export function isPersistable(identity: RepositoryIndexIdentity): boolean {
+  return identity.tenant.kind === "tenant";
+}
+
+/** The tenant component as it appears in logs and the digest preimage. */
+export function describeTenant(tenant: TenantScope): string {
+  return tenant.kind === "tenant" ? `tenant:${tenant.tenantId}` : "unscoped";
+}
+
 /** A short, stable, human-readable identity, for logs and provenance strings. */
 export function describeIdentity(identity: RepositoryIndexIdentity): string {
   return [
+    describeTenant(identity.tenant),
     identity.provider,
     identity.repositoryId,
     identity.revision.value,

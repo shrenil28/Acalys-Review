@@ -112,7 +112,10 @@ describe("the production review path reaches the repository index", () => {
     // Not a branch, not "latest": the exact object the review is about.
     expect(outcome.index.identity.revision.value).toBe(SHA);
     expect(outcome.index.identity.repositoryId).toBe(REPO);
-    expect(outcome.index.identity.tenantId).toBe("tenant-1");
+    expect(outcome.index.identity.tenant).toEqual({
+      kind: "tenant",
+      tenantId: "tenant-1",
+    });
   });
 
   it("puts an index-derived fact into the assembled context", async () => {
