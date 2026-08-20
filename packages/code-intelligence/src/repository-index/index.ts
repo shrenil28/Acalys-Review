@@ -108,6 +108,31 @@ export {
 } from "./config-projects.js";
 
 export {
+  INSTRUCTION_APPLICABILITY_REASONS,
+  INSTRUCTION_CLASSES,
+  INSTRUCTION_FAILURES,
+  INSTRUCTION_TRUST,
+  NO_INSTRUCTION_FACTS,
+  instructionApplicabilityFor,
+  isInstructionArtifact,
+  isInstructionCoverageComplete,
+  type AvailableInstructionArtifact,
+  type InstructionApplicability,
+  type InstructionApplicabilityReason,
+  type InstructionApplicabilityResult,
+  type InstructionArtifact,
+  type InstructionClass,
+  type InstructionCoverage,
+  type InstructionFacts,
+  type InstructionFailure,
+  type InstructionPrecedence,
+  type InstructionProvenance,
+  type InstructionTrust,
+  type NoApplicableInstructionEvidence,
+  type UnavailableInstructionArtifact,
+} from "./instruction-model.js";
+
+export {
   governanceFor,
   optionInheritance,
   projectReferences,
