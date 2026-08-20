@@ -28,8 +28,11 @@
  */
 
 import type {
+  BindingEdge,
+  BindingLookup,
   DeclarationRecord,
   ModuleRecord,
+  ReferenceRecord,
   RepositoryIndex,
   SymbolLookup,
   SymbolRecord,
@@ -158,5 +161,112 @@ export function citeDeclaration(record: DeclarationRecord): string {
     `${record.provenance.source}, ` +
     `revision ${record.provenance.revision.slice(0, 12)}, ` +
     `${record.provenance.extractorVersion})`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// References and bindings (L.2)
+// ---------------------------------------------------------------------------
+
+/** Every reference recorded in a module, in canonical order. */
+export function referencesIn(
+  index: RepositoryIndex,
+  moduleId: string,
+): readonly ReferenceRecord[] {
+  return index.references.filter((record) => record.moduleId === moduleId);
+}
+
+/**
+ * The reference at a module and line with a given name.
+ *
+ * Name as well as line, because one line can hold several references —
+ * `save(load())` is two — and a line-only lookup would return whichever came
+ * first, which is a property of iteration rather than of the code.
+ */
+export function referenceAt(
+  index: RepositoryIndex,
+  moduleId: string,
+  line: number,
+  name: string,
+): ReferenceRecord | undefined {
+  return index.references.find(
+    (record) =>
+      record.moduleId === moduleId &&
+      record.line === line &&
+      record.name === name,
+  );
+}
+
+/**
+ * What a reference binds to.
+ *
+ * Three outcomes, for the reason {@link symbolNamed} has three. `unbound` here
+ * means the reference exists and carries no binding edge at all — which should
+ * not happen, since the builder emits an edge for every reference including
+ * unresolved ones, and is therefore worth being able to observe rather than
+ * assuming away.
+ */
+export function bindingOf(
+  index: RepositoryIndex,
+  reference: ReferenceRecord,
+): BindingLookup {
+  const module = index.modules.find(
+    (record) => record.moduleId === reference.moduleId,
+  );
+
+  if (module === undefined || module.coverage !== "indexed") {
+    return {
+      kind: "not_indexed",
+      moduleId: reference.moduleId,
+      coverage: module?.coverage ?? "excluded",
+      why:
+        module?.coverageDetail ??
+        `${reference.moduleId} was not successfully indexed`,
+    };
+  }
+
+  const binding = index.bindings.find(
+    (edge) => edge.referenceId === reference.referenceId,
+  );
+
+  return binding === undefined
+    ? { kind: "unbound", reference }
+    : { kind: "bound", binding };
+}
+
+/**
+ * The declarations a reference resolves to, or an empty list.
+ *
+ * Convenience over {@link bindingOf} for the common case, and deliberately NOT
+ * the primary API: it returns `[]` for "external", "unresolved", and "the
+ * module was never indexed" alike, so it cannot be used to conclude anything
+ * about absence. Callers reasoning about whether something exists must use
+ * `bindingOf` and switch on the outcome.
+ */
+export function resolvedDeclarations(
+  index: RepositoryIndex,
+  reference: ReferenceRecord,
+): readonly DeclarationRecord[] {
+  const lookup = bindingOf(index, reference);
+  if (lookup.kind !== "bound") return [];
+  return lookup.binding.declarationIds.flatMap((id) => {
+    const record = index.declarations.find(
+      (declaration) => declaration.declarationId === id,
+    );
+    return record === undefined ? [] : [record];
+  });
+}
+
+/** A one-line citation for a binding, checkable by hand. */
+export function citeBinding(
+  reference: ReferenceRecord,
+  binding: BindingEdge,
+): string {
+  return (
+    `${reference.moduleId}:${String(reference.line)} ` +
+    `${reference.kind} \`${reference.name}\` -> ${binding.resolution}` +
+    (binding.viaAlias ? " (via import)" : "") +
+    `, ${String(binding.declarationIds.length)} declaration(s), ` +
+    `revision ${binding.provenance.revision.slice(0, 12)}`
   );
 }

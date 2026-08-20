@@ -33,14 +33,20 @@
 import type { ExtractedSymbol, FileIntelligence } from "./symbols.js";
 import { containingSymbol, isTestFor, referencingFiles } from "./symbols.js";
 import type {
+  BindingEdge,
   DeclarationRecord,
+  ReferenceRecord,
   RepositoryIndex,
 } from "./repository-index/index.js";
 import {
+  bindingOf,
+  citeBinding,
   citeDeclaration,
   declarationAt,
   describeIdentity,
   isUsable,
+  referencesIn,
+  resolvedDeclarations,
   symbolById,
 } from "./repository-index/index.js";
 
@@ -297,6 +303,59 @@ function indexedContainers(
 }
 
 /**
+ * The declarations that calls in a changed file actually bind to.
+ *
+ * Calls only. A changed file references many names — types, reads, imports —
+ * and offering every bound declaration would spend the context budget on
+ * everything the file mentions. A call is the contract the change exercises,
+ * which is the same intent the name-matching loop had.
+ *
+ * Deduplicated by declaration: ten calls to one function are one declaration
+ * worth showing. Returns nothing when there is no index or the index is not
+ * usable, so "no index" is never mistaken for "this file calls nothing".
+ */
+function boundCallees(
+  index: RepositoryIndex | undefined,
+  path: string,
+): readonly {
+  readonly index: RepositoryIndex;
+  readonly reference: ReferenceRecord;
+  readonly binding: BindingEdge;
+  readonly declaration: DeclarationRecord;
+}[] {
+  if (index === undefined || !isUsable(index)) return [];
+
+  const seen = new Set<string>();
+  const found: {
+    index: RepositoryIndex;
+    reference: ReferenceRecord;
+    binding: BindingEdge;
+    declaration: DeclarationRecord;
+  }[] = [];
+
+  for (const reference of referencesIn(index, path)) {
+    if (reference.kind !== "call") continue;
+    const lookup = bindingOf(index, reference);
+    if (lookup.kind !== "bound") continue;
+    // `external` and `unresolved` carry no declarations, so they contribute
+    // nothing here — correctly. A reference into a dependency is a real fact
+    // and not a file this repository can show.
+    for (const declaration of resolvedDeclarations(index, reference)) {
+      if (seen.has(declaration.declarationId)) continue;
+      seen.add(declaration.declarationId);
+      found.push({
+        index,
+        reference,
+        binding: lookup.binding,
+        declaration,
+      });
+    }
+  }
+
+  return found;
+}
+
+/**
  * Offers everything plausibly relevant.
  *
  * Deliberately generous: selection is the next step's job, and a candidate
@@ -418,6 +477,41 @@ export function generateCandidates(
           indexIdentity: describeIdentity(record.index.identity),
           recordId: declaration.declarationId,
           citation: citeDeclaration(declaration),
+        },
+      });
+    }
+
+    // What the change actually calls, resolved by the checker.
+    //
+    // The loop below this one answers the same question by matching names
+    // across a resolved module, and gets it wrong exactly where it matters:
+    // a local or parameter that shadows an import produces a real declaration
+    // from a real file, which a reviewer reads and believes. The binding edge
+    // says which symbol the call denotes, so the wrong one is never offered.
+    //
+    // Same precedence rule as L.1: an indexed answer replaces the syntactic
+    // one for the same span, and where no binding is established the syntactic
+    // candidate stands.
+    for (const record of boundCallees(input.index, changed.path)) {
+      const source = input.sources.get(record.declaration.moduleId);
+      if (source === undefined) continue;
+      candidates.push({
+        kind: "symbol",
+        path: record.declaration.moduleId,
+        reason: "referenced_symbol",
+        trust: "repository_source",
+        content: sliceLines(
+          source,
+          record.declaration.startLine,
+          record.declaration.endLine,
+        ),
+        startLine: record.declaration.startLine,
+        endLine: record.declaration.endLine,
+        provenance: {
+          source: "repository_index",
+          indexIdentity: describeIdentity(record.index.identity),
+          recordId: record.binding.bindingId,
+          citation: citeBinding(record.reference, record.binding),
         },
       });
     }

@@ -34,7 +34,10 @@ export {
 export {
   MODULE_COVERAGE,
   MODULE_ROLES,
+  REFERENCE_KINDS,
   RESOLUTIONS,
+  type BindingEdge,
+  type BindingLookup,
   type DeclarationRecord,
   type FactProvenance,
   type IndexAvailability,
@@ -42,6 +45,8 @@ export {
   type ModuleCoverage,
   type ModuleRecord,
   type ModuleRole,
+  type ReferenceKind,
+  type ReferenceRecord,
   type RepositoryIndex,
   type Resolution,
   type SymbolLookup,
@@ -59,11 +64,16 @@ export {
 export { canonicalSerialization, indexDigest } from "./digest.js";
 
 export {
+  bindingOf,
+  citeBinding,
   citeDeclaration,
   declarationAt,
   declarationsIn,
   isUsable,
   moduleAt,
+  referenceAt,
+  referencesIn,
+  resolvedDeclarations,
   symbolById,
   symbolNamed,
 } from "./query.js";

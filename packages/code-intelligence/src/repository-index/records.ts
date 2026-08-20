@@ -274,4 +274,114 @@ export interface RepositoryIndex {
   readonly modules: readonly ModuleRecord[];
   readonly symbols: readonly SymbolRecord[];
   readonly declarations: readonly DeclarationRecord[];
+  /** L.2. Empty on an index built before references were extracted. */
+  readonly references: readonly ReferenceRecord[];
+  readonly bindings: readonly BindingEdge[];
 }
+
+// ---------------------------------------------------------------------------
+// References and bindings (L.2)
+// ---------------------------------------------------------------------------
+
+/**
+ * What kind of use a reference is.
+ *
+ * Closed, and coarser than TypeScript's node taxonomy on purpose. The
+ * distinctions kept are the ones that change what a reviewer needs: a call is
+ * a contract being exercised, a type position is a shape being relied on, an
+ * import is a dependency being declared.
+ */
+export const REFERENCE_KINDS = [
+  "call",
+  "read",
+  "type",
+  "import",
+  "export",
+] as const;
+
+export type ReferenceKind = (typeof REFERENCE_KINDS)[number];
+
+/**
+ * A place a name was used.
+ *
+ * Recorded independently of what it binds to, because the two facts have
+ * different failure modes: the reference certainly exists — it is text in a
+ * file — while the binding may not be establishable. Fusing them would force
+ * an unresolvable reference to be either invented or dropped, and dropping it
+ * is how "we could not resolve this" becomes "nothing uses that".
+ */
+export interface ReferenceRecord {
+  readonly referenceId: string;
+  readonly moduleId: string;
+  /** The identifier as written, before any alias is followed. */
+  readonly name: string;
+  readonly line: number;
+  readonly kind: ReferenceKind;
+  readonly provenance: FactProvenance;
+}
+
+/**
+ * What a reference binds to, according to the checker.
+ *
+ * This is the fact L.2 exists to produce, and the reason a `Program` was built
+ * back in L.1. Consider:
+ *
+ * ```ts
+ * import { save } from "./store.js";
+ *
+ * export function run(save: () => number): number {
+ *   return save();          // the PARAMETER, not the import
+ * }
+ * ```
+ *
+ * Name matching answers "the imported `save`" and is wrong. It is not wrong in
+ * a way that produces an error, either — it produces a plausible declaration
+ * from a real file, which a reviewer would read and believe. That is the whole
+ * argument for binding by checker rather than by string.
+ *
+ * `symbolId` is absent when the binding could not be established. It is not
+ * set to a guess, and `resolution` says which kind of failure it was:
+ * `external` (bound, but outside the indexed set), or `unresolved` (the
+ * checker could not bind it at all). Neither means "no such symbol exists".
+ */
+export interface BindingEdge {
+  readonly bindingId: string;
+  readonly referenceId: string;
+  readonly resolution: Resolution;
+  /** Present only for `exact` and `ambiguous`. */
+  readonly symbolId?: string | undefined;
+  /**
+   * Every declaration the bound symbol has inside the index.
+   *
+   * A set rather than one, because a symbol legitimately has several —
+   * overloads, merged interfaces — and picking one would be a judgement the
+   * index has no basis for. Empty for `external` and `unresolved`.
+   */
+  readonly declarationIds: readonly string[];
+  /**
+   * Whether the reference reached its symbol through an import alias.
+   *
+   * Recorded because it is the difference between "this module declares it"
+   * and "this module imported it", which a reviewer reading a citation needs
+   * and a `symbolId` alone does not carry.
+   */
+  readonly viaAlias: boolean;
+  readonly provenance: FactProvenance;
+}
+
+/**
+ * The answer to "what does this reference point at".
+ *
+ * Three outcomes for the same reason {@link SymbolLookup} has three: a caller
+ * that cannot distinguish "no binding recorded" from "the module was never
+ * indexed" will eventually report the second as the first.
+ */
+export type BindingLookup =
+  | { readonly kind: "bound"; readonly binding: BindingEdge }
+  | { readonly kind: "unbound"; readonly reference: ReferenceRecord }
+  | {
+      readonly kind: "not_indexed";
+      readonly moduleId: string;
+      readonly coverage: ModuleCoverage;
+      readonly why: string;
+    };

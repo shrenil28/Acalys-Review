@@ -36,12 +36,15 @@ import {
   type RepositoryIndexIdentity,
 } from "./identity.js";
 import type {
+  BindingEdge,
   DeclarationRecord,
   IndexAvailability,
   IndexCoverage,
   ModuleCoverage,
   ModuleRecord,
   ModuleRole,
+  ReferenceKind,
+  ReferenceRecord,
   RepositoryIndex,
   Resolution,
   SymbolRecord,
@@ -64,6 +67,22 @@ interface DeclarationSite {
   readonly container: string | undefined;
   readonly resolution: Resolution;
   readonly symbol: ts.Symbol | undefined;
+}
+
+/**
+ * One reference as it was found, before bindings are formed.
+ *
+ * Holds the checker's symbol rather than an id, because ids are only assigned
+ * once every declaration site across every module has been grouped — and a
+ * reference can point at a symbol declared in a file not yet walked.
+ */
+interface ReferenceSite {
+  readonly moduleId: string;
+  readonly name: string;
+  readonly line: number;
+  readonly kind: ReferenceKind;
+  readonly symbol: ts.Symbol | undefined;
+  readonly viaAlias: boolean;
 }
 
 /** One revision's worth of source, path to content. */
@@ -225,6 +244,67 @@ function resolveDeclaration(
 }
 
 // ---------------------------------------------------------------------------
+// References and bindings
+// ---------------------------------------------------------------------------
+
+/**
+ * What kind of use this identifier is, or `undefined` if it is not a reference.
+ *
+ * Declaration names are excluded here — a `function save()` is a declaration
+ * site, already recorded, and counting it as a reference to itself would make
+ * "how many things use this" answer at least one for everything.
+ */
+function referenceKindOf(node: ts.Identifier): ReferenceKind | undefined {
+  const parent = node.parent;
+
+  // The name half of a declaration is not a use of it.
+  const named = parent as ts.Node & { readonly name?: ts.Node };
+  if (named.name === node && kindOf(parent) !== undefined) return undefined;
+  if (ts.isParameter(parent) && parent.name === node) return undefined;
+  if (ts.isBindingElement(parent) && parent.name === node) return undefined;
+  if (ts.isPropertyAssignment(parent) && parent.name === node) return undefined;
+  if (ts.isPropertySignature(parent) && parent.name === node) return undefined;
+
+  if (ts.isImportSpecifier(parent) || ts.isImportClause(parent))
+    return "import";
+  if (ts.isExportSpecifier(parent)) return "export";
+  if (ts.isCallExpression(parent) && parent.expression === node) return "call";
+  if (ts.isTypeReferenceNode(parent)) return "type";
+  if (ts.isPropertyAccessExpression(parent) && parent.name === node) {
+    // The property half of `a.b` binds to a member, which L.2 does not model.
+    return undefined;
+  }
+  return "read";
+}
+
+/**
+ * Follows an import alias to the symbol that was actually declared.
+ *
+ * `import { save }` creates a local alias symbol whose only declaration is the
+ * import specifier itself. Recording that would answer "where is `save`
+ * declared?" with "on the import line", which is true and useless.
+ *
+ * Returned alongside a flag rather than silently substituted: whether a
+ * reference arrived through an import is a fact a reviewer wants, and one the
+ * resolved symbol alone cannot express.
+ */
+function followAlias(
+  checker: ts.TypeChecker,
+  symbol: ts.Symbol,
+): { readonly symbol: ts.Symbol; readonly viaAlias: boolean } {
+  if ((symbol.flags & ts.SymbolFlags.Alias) === 0) {
+    return { symbol, viaAlias: false };
+  }
+  try {
+    return { symbol: checker.getAliasedSymbol(symbol), viaAlias: true };
+  } catch {
+    // An alias the checker cannot follow — a broken re-export chain. The
+    // reference is still real; the binding simply is not establishable.
+    return { symbol, viaAlias: true };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // The build
 // ---------------------------------------------------------------------------
 
@@ -252,7 +332,82 @@ function compilerHost(snapshot: RevisionSnapshot): ts.CompilerHost {
     getCanonicalFileName: (fileName) => fileName,
     useCaseSensitiveFileNames: () => true,
     getNewLine: () => "\n",
+
+    // Module resolution, without which bindings across files are impossible.
+    //
+    // L.1 did not need this: declarations are found by walking one file at a
+    // time, so an unresolved import cost nothing visible. L.2 does, and the
+    // failure is deceptive — an import that cannot be resolved produces an
+    // alias symbol the checker declines to follow, so every cross-module
+    // reference reports `external` rather than erroring. "Bound, but outside
+    // our world" and "we could not find the file" look identical downstream.
+    //
+    // `resolveModuleNameLiterals` is the hook TypeScript 5 actually calls;
+    // `resolveModuleNames` is deprecated and supplying only it resolves
+    // nothing at all. Both are given, for the same reason the verifier's
+    // program gives both.
+    resolveModuleNameLiterals: (literals, containingFile) =>
+      literals.map((literal) => {
+        const resolvedModule = resolveSpecifier(
+          snapshot,
+          literal.text,
+          containingFile,
+        );
+        return {
+          ...(resolvedModule === undefined ? {} : { resolvedModule }),
+          failedLookupLocations: [],
+        } as ts.ResolvedModuleWithFailedLookupLocations;
+      }),
+    resolveModuleNames: (specifiers, containingFile) =>
+      specifiers.map((specifier) =>
+        resolveSpecifier(snapshot, specifier, containingFile),
+      ),
   };
+}
+
+/**
+ * `./store.js` from `run.ts` to `store.ts`, the way a bundler resolves
+ * TypeScript sources written with ESM extensions.
+ *
+ * Only relative specifiers. A bare `some-package` is a dependency this index
+ * does not materialize, and returning `undefined` is what makes references
+ * into it classify as `external` — a real answer, distinct from "unresolved".
+ */
+function resolveSpecifier(
+  snapshot: RevisionSnapshot,
+  specifier: string,
+  containingFile: string,
+): ts.ResolvedModuleFull | undefined {
+  if (!specifier.startsWith(".")) return undefined;
+
+  // The checker hands back paths prefixed by the host's current directory,
+  // while snapshot keys are repository-relative. Without stripping it, every
+  // join misses the map and every import binds to nothing.
+  const base = containingFile.replace(/^\/+/, "").split("/").slice(0, -1);
+  for (const part of specifier.split("/")) {
+    if (part === ".") continue;
+    else if (part === "..") base.pop();
+    else base.push(part);
+  }
+  const joined = base.join("/");
+
+  for (const candidate of [
+    joined.replace(/\.js$/, ".ts"),
+    joined.replace(/\.js$/, ".tsx"),
+    `${joined}.ts`,
+    `${joined}.tsx`,
+    joined,
+  ]) {
+    if (snapshot.has(candidate)) {
+      return {
+        resolvedFileName: candidate,
+        extension: candidate.endsWith(".tsx")
+          ? ts.Extension.Tsx
+          : ts.Extension.Ts,
+      };
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -270,7 +425,10 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
   const modules: ModuleRecord[] = [];
   const symbols: SymbolRecord[] = [];
   const declarations: DeclarationRecord[] = [];
+  const references: ReferenceRecord[] = [];
+  const bindings: BindingEdge[] = [];
   const sites: DeclarationSite[] = [];
+  const referenceSites: ReferenceSite[] = [];
 
   const indexable = new Map<string, string>();
   for (const [path, content] of snapshot) {
@@ -302,7 +460,15 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
   }
 
   if (indexable.size === 0) {
-    return finish(identity, { kind: "built" }, modules, symbols, declarations);
+    return finish(
+      identity,
+      { kind: "built" },
+      modules,
+      symbols,
+      declarations,
+      references,
+      bindings,
+    );
   }
 
   const program = ts.createProgram({
@@ -390,6 +556,28 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
           symbol,
         });
       }
+
+      if (ts.isIdentifier(node)) {
+        const referenceKind = referenceKindOf(node);
+        if (referenceKind !== undefined) {
+          const line =
+            source.getLineAndCharacterOfPosition(node.getStart(source)).line +
+            1;
+          const raw = checker.getSymbolAtLocation(node);
+          const followed =
+            raw === undefined ? undefined : followAlias(checker, raw);
+
+          referenceSites.push({
+            moduleId: path,
+            name: node.text,
+            line,
+            kind: referenceKind,
+            symbol: followed?.symbol,
+            viaAlias: followed?.viaAlias ?? false,
+          });
+        }
+      }
+
       ts.forEachChild(node, visit);
     };
 
@@ -408,6 +596,8 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
   //
   // A name-and-module key merges the second pair; a span key splits the first.
   // The checker already knows, which is the reason a Program is built at all.
+  const symbolIds = new Map<ts.Symbol, string>();
+  const declarationIds = new Map<string, readonly string[]>();
   const groups = new Map<ts.Symbol | ts.Node, DeclarationSite[]>();
   for (const site of sites) {
     // Sites the checker could not bind get their own group: an unresolved
@@ -439,6 +629,19 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
       String(first.startLine),
       String(first.endLine),
     ]);
+
+    if (first.symbol !== undefined) symbolIds.set(first.symbol, symbolId);
+    declarationIds.set(
+      symbolId,
+      ordered.map((site) =>
+        shortId([
+          symbolId,
+          site.moduleId,
+          String(site.startLine),
+          String(site.endLine),
+        ]),
+      ),
+    );
 
     symbols.push({
       symbolId,
@@ -478,7 +681,92 @@ export function buildRepositoryIndex(options: BuildOptions): RepositoryIndex {
     }
   }
 
-  return finish(identity, { kind: "built" }, modules, symbols, declarations);
+  // ------------------------------------------------------------------
+  // Bind references to symbols
+  // ------------------------------------------------------------------
+  //
+  // After grouping, because a binding names a symbol id and symbol ids are
+  // only assigned once every declaration site is in hand. A reference in the
+  // first file walked can point at a symbol declared in the last.
+  //
+  // Every reference produces an edge, including the ones that could not be
+  // bound. An unresolved reference is a fact about the revision; omitting it
+  // would leave a caller to infer that nothing uses the name, which is a
+  // different and stronger claim than "we could not tell".
+  for (const site of referenceSites) {
+    const referenceId = shortId([
+      revision,
+      site.moduleId,
+      site.name,
+      site.kind,
+      String(site.line),
+    ]);
+
+    references.push({
+      referenceId,
+      moduleId: site.moduleId,
+      name: site.name,
+      line: site.line,
+      kind: site.kind,
+      provenance: {
+        source: "typescript_checker",
+        path: site.moduleId,
+        startLine: site.line,
+        endLine: site.line,
+        extractorVersion: EXTRACTOR_VERSION,
+        revision,
+      },
+    });
+
+    const symbolId =
+      site.symbol === undefined ? undefined : symbolIds.get(site.symbol);
+    const declarations =
+      symbolId === undefined ? [] : (declarationIds.get(symbolId) ?? []);
+
+    // Three ways to fail, kept apart:
+    //
+    //   unresolved  the checker produced no symbol at all
+    //   external    it produced one, but nothing in the index declares it —
+    //               a dependency, or the standard library
+    //   exact       bound to a symbol this index knows
+    //
+    // `external` is the one worth not collapsing. "Bound, and outside our
+    // world" is a different fact from "we could not bind it", and only the
+    // first tells a reviewer the reference is fine and simply not ours.
+    const resolution: Resolution =
+      site.symbol === undefined
+        ? "unresolved"
+        : symbolId === undefined
+          ? "external"
+          : "exact";
+
+    bindings.push({
+      bindingId: shortId([referenceId, symbolId ?? "unbound"]),
+      referenceId,
+      resolution,
+      ...(symbolId === undefined ? {} : { symbolId }),
+      declarationIds: declarations,
+      viaAlias: site.viaAlias,
+      provenance: {
+        source: "typescript_checker",
+        path: site.moduleId,
+        startLine: site.line,
+        endLine: site.line,
+        extractorVersion: EXTRACTOR_VERSION,
+        revision,
+      },
+    });
+  }
+
+  return finish(
+    identity,
+    { kind: "built" },
+    modules,
+    symbols,
+    declarations,
+    references,
+    bindings,
+  );
 }
 
 function finish(
@@ -487,6 +775,8 @@ function finish(
   modules: ModuleRecord[],
   symbols: SymbolRecord[],
   declarations: DeclarationRecord[],
+  references: ReferenceRecord[],
+  bindings: BindingEdge[],
 ): RepositoryIndex {
   const coverage: IndexCoverage = {
     modulesTotal: modules.length,
@@ -518,6 +808,19 @@ function finish(
         a.startLine - b.startLine ||
         a.endLine - b.endLine ||
         compare(a.declarationId, b.declarationId),
+    ),
+    references: [...references].sort(
+      (a, b) =>
+        compare(a.moduleId, b.moduleId) ||
+        a.line - b.line ||
+        compare(a.name, b.name) ||
+        compare(a.kind, b.kind) ||
+        compare(a.referenceId, b.referenceId),
+    ),
+    bindings: [...bindings].sort(
+      (a, b) =>
+        compare(a.referenceId, b.referenceId) ||
+        compare(a.bindingId, b.bindingId),
     ),
   };
 }
@@ -552,5 +855,7 @@ export function unavailableIndex(
     modules: [],
     symbols: [],
     declarations: [],
+    references: [],
+    bindings: [],
   };
 }

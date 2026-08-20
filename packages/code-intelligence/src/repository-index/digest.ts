@@ -37,8 +37,10 @@ import { createHash } from "node:crypto";
 import { describeTenant } from "./identity.js";
 import type { RepositoryIndexIdentity } from "./identity.js";
 import type {
+  BindingEdge,
   DeclarationRecord,
   ModuleRecord,
+  ReferenceRecord,
   RepositoryIndex,
   SymbolRecord,
 } from "./records.js";
@@ -140,6 +142,35 @@ function declarationLine(record: DeclarationRecord): string {
   ]);
 }
 
+function referenceLine(record: ReferenceRecord): string {
+  return line([
+    "reference",
+    record.referenceId,
+    record.moduleId,
+    record.name,
+    String(record.line),
+    record.kind,
+    record.provenance.source,
+    record.provenance.extractorVersion,
+    record.provenance.revision,
+  ]);
+}
+
+function bindingLine(record: BindingEdge): string {
+  return line([
+    "binding",
+    record.bindingId,
+    record.referenceId,
+    record.resolution,
+    record.symbolId,
+    // The declaration set is sorted before joining: a binding to a symbol with
+    // two declarations is the same fact whichever order they were collected.
+    [...record.declarationIds].sort().join(","),
+    record.viaAlias ? "alias" : "direct",
+    record.provenance.revision,
+  ]);
+}
+
 function identityLines(identity: RepositoryIndexIdentity): readonly string[] {
   return [
     line(["identity", "tenant", describeTenant(identity.tenant)]),
@@ -193,6 +224,12 @@ export function canonicalSerialization(index: RepositoryIndex): string {
   }
   for (const record of [...index.declarations].sort(byLine(declarationLine))) {
     lines.push(declarationLine(record));
+  }
+  for (const record of [...index.references].sort(byLine(referenceLine))) {
+    lines.push(referenceLine(record));
+  }
+  for (const record of [...index.bindings].sort(byLine(bindingLine))) {
+    lines.push(bindingLine(record));
   }
 
   return lines.join("\n");

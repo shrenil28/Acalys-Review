@@ -818,6 +818,75 @@ const MUTATIONS = [
     replace: '  parts.map((part) => encode(part ?? "")).join("");',
     suite: "packages/code-intelligence/tests/repository-index.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-L.2 — references and bindings.
+  //
+  // 94-99 target the facts; 100 targets the production seam. 94 is the one
+  // the checkpoint exists for: resolving by name rather than by symbol does
+  // not fail loudly, it hands a reviewer a real declaration from a real file
+  // that the changed code never calls.
+  // ---------------------------------------------------------------------
+  {
+    id: 94,
+    name: "bindings resolve by name instead of by the checker's symbol",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: "      site.symbol === undefined ? undefined : symbolIds.get(site.symbol);",
+    replace: "      symbols.find((s) => s.name === site.name)?.symbolId;",
+    suite: "packages/code-intelligence/tests/repository-bindings.test.ts",
+  },
+  {
+    id: 95,
+    name: "import aliases are not followed to the declaration",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: "  if ((symbol.flags & ts.SymbolFlags.Alias) === 0) {\n    return { symbol, viaAlias: false };\n  }",
+    replace:
+      "  return { symbol, viaAlias: false };\n  if (false as boolean) {\n  }",
+    suite: "packages/code-intelligence/tests/repository-bindings.test.ts",
+  },
+  {
+    id: 96,
+    name: "`external` collapses into `unresolved`",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: '        : symbolId === undefined\n          ? "external"\n          : "exact";',
+    replace:
+      '        : symbolId === undefined\n          ? "unresolved"\n          : "exact";',
+    suite: "packages/code-intelligence/tests/repository-bindings.test.ts",
+  },
+  {
+    id: 97,
+    name: "unresolvable references are dropped instead of recorded",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: "  for (const site of referenceSites) {",
+    replace:
+      "  for (const site of referenceSites.filter((s) => s.symbol !== undefined)) {",
+    suite: "packages/code-intelligence/tests/repository-bindings.test.ts",
+  },
+  {
+    id: 98,
+    name: "`not_indexed` collapses into `unbound` for bindings",
+    file: "packages/code-intelligence/src/repository-index/query.ts",
+    find: '  if (module === undefined || module.coverage !== "indexed") {',
+    replace: "  if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/repository-bindings.test.ts",
+  },
+  {
+    id: 99,
+    name: "an unusable index still yields bound callees",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "  if (index === undefined || !isUsable(index)) return [];\n\n  const seen = new Set<string>();",
+    replace:
+      "  if (index === undefined) return [];\n\n  const seen = new Set<string>();",
+    suite: "packages/code-intelligence/tests/repository-bindings.test.ts",
+  },
+  {
+    id: 100,
+    name: "the production path stops consuming bindings",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "    for (const record of boundCallees(input.index, changed.path)) {",
+    replace:
+      "    for (const record of [] as ReturnType<typeof boundCallees>) {",
+    suite: "apps/review-worker/tests/binding-wiring.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
