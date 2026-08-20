@@ -24,8 +24,13 @@ import { createHash } from "node:crypto";
 
 import {
   buildRepositoryIndex,
+  discoverProjects,
   extractFile,
+  governanceFor,
   indexIdentity,
+  optionInheritance,
+  projectReferences,
+  readProjectConfigs,
   planContext,
   unavailableIndex,
   updateRepositoryIndex,
@@ -47,6 +52,11 @@ import {
   type ExecutionReport,
 } from "@acalys/review-engine";
 
+type ConfigGovernanceResult = ReturnType<typeof governanceFor>;
+type ConfigFacts = NonNullable<
+  Parameters<typeof planContext>[0]["configFacts"]
+>;
+
 import { analyzeAsyncCompletion } from "@acalys/review-engine";
 import {
   analyzeSignatureCompatibility,
@@ -55,6 +65,10 @@ import {
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function compare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 /** One file as the analyzer needs to see it. */
@@ -140,13 +154,14 @@ export function contextSnapshotDigest(
     readonly reason: string;
     readonly representation: string;
     readonly suppliedContent: string;
+    readonly identity?: string | undefined;
   }[],
 ): string {
   return sha256(
     items
       .map(
         (item) =>
-          `${item.path}:${item.reason}:${item.representation}:${sha256(item.suppliedContent)}`,
+          `${item.path}:${item.reason}:${item.representation}:${item.identity ?? ""}:${sha256(item.suppliedContent)}`,
       )
       .sort()
       .join("\n"),
@@ -226,6 +241,9 @@ export interface RealAnalysisOutcome {
    * between what was intended and what was sent.
    */
   readonly context: AssembledContext;
+  readonly configFacts: ConfigFacts;
+  readonly configFactsDigest: string;
+  readonly configGovernance: readonly ConfigGovernanceResult[];
   /**
    * How the index was obtained.
    *
@@ -252,6 +270,12 @@ export async function runRealAnalysis(
     headSha: options.headSha,
   });
 
+  const config = buildConfigFacts(
+    repository,
+    changed.map((file) => file.path),
+    options.headSha,
+  );
+
   // The structural facts for this exact revision, built before anything is
   // planned. Built rather than fetched: L.1 has no cache, so there is no
   // question of an index from a different revision answering for this one.
@@ -269,6 +293,8 @@ export async function runRealAnalysis(
       ),
       sources: repository,
       index,
+      configFacts: config.facts,
+      configFactsIdentity: config.digest,
     },
     options.contextTokenBudget ?? 60_000,
   );
@@ -307,7 +333,18 @@ export async function runRealAnalysis(
     },
   });
 
-  const contextDigest = contextSnapshotDigest(context.items);
+  const contextDigest = contextSnapshotDigest(
+    context.items.map((item) => ({
+      path: item.path,
+      reason: item.reason,
+      representation: item.representation,
+      suppliedContent: item.suppliedContent,
+      identity:
+        item.provenance?.source === "configuration_facts"
+          ? item.provenance.factIdentity
+          : undefined,
+    })),
+  );
   const cacheKey = analyzerCacheKey({
     repositoryId: options.repositoryId,
     headSha: options.headSha,
@@ -353,6 +390,9 @@ export async function runRealAnalysis(
     cacheKey,
     index,
     context,
+    configFacts: config.facts,
+    configFactsDigest: config.digest,
+    configGovernance: config.governance,
     ...(indexStats === undefined ? {} : { indexStats }),
   };
 }
@@ -398,12 +438,17 @@ function buildIndexFor(
       const outcome = updateRepositoryIndex({
         previous: options.previousIndex,
         nextIdentity: identity,
-        snapshot: repository,
+        snapshot: codeSnapshot(repository),
       });
       return { index: outcome.index, indexStats: outcome.stats };
     }
 
-    return { index: buildRepositoryIndex({ identity, snapshot: repository }) };
+    return {
+      index: buildRepositoryIndex({
+        identity,
+        snapshot: codeSnapshot(repository),
+      }),
+    };
   } catch (error) {
     return {
       index: unavailableIndex(identity, {
@@ -412,4 +457,73 @@ function buildIndexFor(
       }),
     };
   }
+}
+
+const TSCONFIG_PATH = /(^|\/)tsconfig(\.[\w.-]+)?\.json$/;
+
+function codeSnapshot(
+  repository: ReadonlyMap<string, string>,
+): ReadonlyMap<string, string> {
+  return new Map([...repository].filter(([path]) => !TSCONFIG_PATH.test(path)));
+}
+
+function buildConfigFacts(
+  repository: ReadonlyMap<string, string>,
+  changedPaths: readonly string[],
+  revision: string,
+): {
+  readonly facts: ConfigFacts;
+  readonly governance: readonly ConfigGovernanceResult[];
+  readonly digest: string;
+} {
+  const discovery = discoverProjects(repository);
+  const projects = readProjectConfigs(
+    repository,
+    discovery.discovered,
+    revision,
+  );
+  const governance = changedPaths.map((path) =>
+    governanceFor(discovery, projects, path),
+  );
+  const facts: ConfigFacts = {
+    projects: discovery.discovered,
+    governance: governance.flatMap((result) =>
+      result.status === "governed" ? result.relationships : [],
+    ),
+    inheritance: optionInheritance(projects),
+    references: projectReferences(projects),
+    failures: governance.flatMap((result) =>
+      "coverage" in result ? result.coverage.unevaluable : [],
+    ),
+  };
+  const digest = sha256(
+    JSON.stringify({
+      failures: [...facts.failures].sort((left, right) =>
+        compare(
+          `${left.configPath}:${left.failure}`,
+          `${right.configPath}:${right.failure}`,
+        ),
+      ),
+      governance: [...facts.governance].sort((left, right) =>
+        compare(
+          `${left.sourcePath}:${left.projectPath}`,
+          `${right.sourcePath}:${right.projectPath}`,
+        ),
+      ),
+      inheritance: [...facts.inheritance].sort((left, right) =>
+        compare(
+          `${left.projectPath}:${left.depth}`,
+          `${right.projectPath}:${right.depth}`,
+        ),
+      ),
+      projects: [...facts.projects].sort(),
+      references: [...facts.references].sort((left, right) =>
+        compare(
+          `${left.projectPath}:${left.referencesProject}`,
+          `${right.projectPath}:${right.referencesProject}`,
+        ),
+      ),
+    }),
+  );
+  return { facts, governance, digest };
 }

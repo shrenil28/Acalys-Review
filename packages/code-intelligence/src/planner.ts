@@ -39,6 +39,7 @@ import type {
   RepositoryIndex,
   TestRelationship,
 } from "./repository-index/index.js";
+import type { ConfigFacts } from "./repository-index/config-model.js";
 import {
   bindingOf,
   citeBinding,
@@ -126,6 +127,11 @@ export type ContextItemKind = (typeof CONTEXT_ITEM_KINDS)[number];
  */
 export type ItemProvenance =
   | { readonly source: "direct_source" }
+  | {
+      readonly source: "configuration_facts";
+      readonly factIdentity: string;
+      readonly citation: string;
+    }
   | {
       readonly source: "repository_index";
       /** {@link describeIdentity} — revision and extractor included. */
@@ -272,6 +278,10 @@ export interface PlannerInput {
    * not exercised.
    */
   readonly index?: RepositoryIndex | undefined;
+  /** Configuration facts selected for the changed files in this revision. */
+  readonly configFacts?: ConfigFacts | undefined;
+  /** Canonical identity of the configuration facts above. */
+  readonly configFactsIdentity?: string | undefined;
 }
 
 /**
@@ -393,6 +403,36 @@ export function generateCandidates(
 ): readonly ContextCandidate[] {
   const candidates: ContextCandidate[] = [];
   const byPath = new Map(input.repository.map((file) => [file.path, file]));
+
+  const selectedConfigurations = new Map(
+    (input.configFacts?.governance ?? []).map((relationship) => [
+      relationship.projectPath,
+      relationship,
+    ]),
+  );
+  for (const relationship of [...selectedConfigurations.values()].sort(
+    (left, right) =>
+      left.projectPath < right.projectPath
+        ? -1
+        : left.projectPath > right.projectPath
+          ? 1
+          : 0,
+  )) {
+    const content = input.sources.get(relationship.projectPath);
+    if (content === undefined) continue;
+    candidates.push({
+      kind: "configuration",
+      path: relationship.projectPath,
+      reason: "configuration",
+      trust: "repository_source",
+      content,
+      provenance: {
+        source: "configuration_facts",
+        factIdentity: input.configFactsIdentity ?? "unidentified",
+        citation: `${relationship.projectPath} governs ${relationship.sourcePath}`,
+      },
+    });
+  }
 
   for (const instruction of input.instructions ?? []) {
     candidates.push({
