@@ -14,7 +14,11 @@
  * them into absence.
  */
 
-import { posix as posixPath } from "node:path";
+import {
+  isRepositoryPath,
+  pathBasename,
+  pathDirname,
+} from "@acalys/contracts/domain";
 
 import type {
   AvailableInstructionArtifact,
@@ -40,6 +44,11 @@ export type InstructionCandidateClassification =
       readonly trust: "informational";
       readonly scopeRoot: string;
     };
+
+type DirectiveInstructionCandidateClassification = Exclude<
+  InstructionCandidateClassification,
+  { readonly instructionClass: "documentation" }
+>;
 
 export type InstructionTraversal =
   | {
@@ -72,12 +81,20 @@ export interface InstructionRevisionSnapshot {
 /** An unavailable candidate with the classification its path established. */
 export type DiscoveredUnavailableInstructionArtifact =
   UnavailableInstructionArtifact &
-    InstructionCandidateClassification & {
+    DirectiveInstructionCandidateClassification & {
       readonly provenance: InstructionProvenance;
     };
 
+type DiscoveredAvailableInstructionArtifact = Extract<
+  AvailableInstructionArtifact,
+  {
+    readonly instructionClass: "repository_policy" | "directory_scoped_policy";
+  }
+>;
+
 export type DiscoveredInstructionArtifact =
-  AvailableInstructionArtifact | DiscoveredUnavailableInstructionArtifact;
+  | DiscoveredAvailableInstructionArtifact
+  | DiscoveredUnavailableInstructionArtifact;
 
 export type InstructionEvaluationCoverage =
   | { readonly status: "complete" }
@@ -112,11 +129,13 @@ const compareText = (left: string, right: string): number =>
 export function classifyInstructionCandidate(
   artifactPath: string,
 ): InstructionCandidateClassification | undefined {
-  const filename = posixPath.basename(artifactPath);
-  const parent = posixPath.dirname(artifactPath);
+  if (!isRepositoryPath(artifactPath)) return undefined;
+
+  const filename = pathBasename(artifactPath);
+  const parent = pathDirname(artifactPath) ?? ".";
 
   if (filename === "AGENTS.md") {
-    if (artifactPath === "AGENTS.md") {
+    if (parent === ".") {
       return {
         instructionClass: "repository_policy",
         trust: "authoritative",
@@ -148,14 +167,25 @@ export function discoverInstructionArtifacts(
 ): InstructionDiscoveryResult {
   const traversal = snapshot.listPaths();
   const candidatePaths = [...new Set(traversal.paths)]
-    .filter((path) => classifyInstructionCandidate(path) !== undefined)
+    .filter((path) => {
+      const classification = classifyInstructionCandidate(path);
+      return (
+        classification !== undefined &&
+        classification.instructionClass !== "documentation"
+      );
+    })
     .sort(compareText);
   const artifacts: DiscoveredInstructionArtifact[] = [];
   const evaluationGaps: string[] = [];
 
   for (const artifactPath of candidatePaths) {
     const classification = classifyInstructionCandidate(artifactPath);
-    if (classification === undefined) continue;
+    if (
+      classification === undefined ||
+      classification.instructionClass === "documentation"
+    ) {
+      continue;
+    }
 
     const provenance: InstructionProvenance = {
       source: "repository_artifact",
@@ -208,9 +238,9 @@ export function discoverInstructionArtifacts(
 function availableArtifact(
   artifactPath: string,
   content: string,
-  classification: InstructionCandidateClassification,
+  classification: DirectiveInstructionCandidateClassification,
   provenance: InstructionProvenance,
-): AvailableInstructionArtifact {
+): DiscoveredAvailableInstructionArtifact {
   const base = {
     artifactPath,
     availability: { kind: "available" } as const,
@@ -223,14 +253,12 @@ function availableArtifact(
       return { ...base, ...classification };
     case "directory_scoped_policy":
       return { ...base, ...classification };
-    case "documentation":
-      return { ...base, ...classification };
   }
 }
 
 function unavailableArtifact(
   artifactPath: string,
-  classification: InstructionCandidateClassification,
+  classification: DirectiveInstructionCandidateClassification,
   failure: InstructionFailure,
   detail: string,
   provenance: InstructionProvenance,
@@ -249,8 +277,6 @@ function unavailableArtifact(
     case "repository_policy":
       return { ...base, ...classification };
     case "directory_scoped_policy":
-      return { ...base, ...classification };
-    case "documentation":
       return { ...base, ...classification };
   }
 }
