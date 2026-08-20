@@ -1,0 +1,162 @@
+/**
+ * Asking the index things — factually, and never for a verdict.
+ *
+ * Every function here is of the form "what exists at this revision". None is
+ * of the form "should this be flagged". That boundary is architectural rather
+ * than stylistic:
+ *
+ * ```
+ * good                          bad
+ * ----                          ---
+ * declarationsIn(module)        index.isPromiseBug(call)
+ * symbolNamed(module, name)     index.isSafeCallback(api)
+ * declarationAt(module, line)   index.shouldFlag(candidate)
+ * ```
+ *
+ * The analyzer and the verifier are both allowed to stand on this substrate.
+ * If they could also both ask it to settle the contested question, their two
+ * independent opinions would become one opinion consulted twice, and the
+ * independence P1-H and P1-J are built on would be gone with nothing in the
+ * type system to notice.
+ *
+ * # Absence is a claim, and claims need standing
+ *
+ * `symbolNamed` returns `not_indexed` rather than `absent` when the module was
+ * never successfully read. The distinction costs callers a branch and buys the
+ * only thing that makes an index citable: the difference between "this
+ * repository does not contain that" and "we did not manage to look".
+ */
+
+import type {
+  DeclarationRecord,
+  ModuleRecord,
+  RepositoryIndex,
+  SymbolLookup,
+  SymbolRecord,
+} from "./records.js";
+
+/** The module record for a path, or `undefined` if the path is not in the index. */
+export function moduleAt(
+  index: RepositoryIndex,
+  path: string,
+): ModuleRecord | undefined {
+  return index.modules.find((record) => record.path === path);
+}
+
+/**
+ * Every declaration in a module, in canonical order.
+ *
+ * Returns an empty array both for "no declarations" and for "module absent",
+ * which is why it is not the right function to ask an existence question with.
+ * {@link symbolNamed} is.
+ */
+export function declarationsIn(
+  index: RepositoryIndex,
+  moduleId: string,
+): readonly DeclarationRecord[] {
+  return index.declarations.filter((record) => record.moduleId === moduleId);
+}
+
+export function symbolById(
+  index: RepositoryIndex,
+  symbolId: string,
+): SymbolRecord | undefined {
+  return index.symbols.find((record) => record.symbolId === symbolId);
+}
+
+/**
+ * Does this module declare something by this name?
+ *
+ * The three-way answer is the point. A caller that wants to conclude "there is
+ * no such function" must first establish that the module was indexed at all,
+ * and the type will not let it skip that step.
+ */
+export function symbolNamed(
+  index: RepositoryIndex,
+  moduleId: string,
+  name: string,
+): SymbolLookup {
+  const module = index.modules.find((record) => record.moduleId === moduleId);
+
+  if (module === undefined) {
+    return {
+      kind: "not_indexed",
+      moduleId,
+      coverage: "excluded",
+      why: `${moduleId} is not present in this index`,
+    };
+  }
+
+  if (module.coverage !== "indexed") {
+    return {
+      kind: "not_indexed",
+      moduleId,
+      coverage: module.coverage,
+      why:
+        module.coverageDetail ??
+        `${moduleId} was not successfully indexed (${module.coverage})`,
+    };
+  }
+
+  const symbol = index.symbols.find(
+    (record) => record.moduleId === moduleId && record.name === name,
+  );
+
+  return symbol === undefined
+    ? { kind: "absent", moduleId }
+    : { kind: "found", symbol };
+}
+
+/**
+ * The innermost declaration containing a line.
+ *
+ * Innermost rather than first: a method inside a class inside a module all
+ * contain the line, and the one a reviewer needs is the tightest. Ties break
+ * on the shorter span, then on `declarationId`, so the answer is stable across
+ * runs rather than dependent on record order.
+ */
+export function declarationAt(
+  index: RepositoryIndex,
+  moduleId: string,
+  line: number,
+): DeclarationRecord | undefined {
+  const containing = index.declarations.filter(
+    (record) =>
+      record.moduleId === moduleId &&
+      record.startLine <= line &&
+      record.endLine >= line,
+  );
+
+  if (containing.length === 0) return undefined;
+
+  return containing.reduce((best, candidate) => {
+    const bestSpan = best.endLine - best.startLine;
+    const candidateSpan = candidate.endLine - candidate.startLine;
+    if (candidateSpan !== bestSpan)
+      return candidateSpan < bestSpan ? candidate : best;
+    return candidate.declarationId < best.declarationId ? candidate : best;
+  });
+}
+
+/** Whether the index can answer factual questions at all. */
+export function isUsable(index: RepositoryIndex): boolean {
+  return index.availability.kind === "built";
+}
+
+/**
+ * A one-line, human-readable citation for a declaration fact.
+ *
+ * The string a finding or a context item carries so that "the index says so"
+ * is never the whole of the evidence. Everything needed to go and check it by
+ * hand is present: revision, file, span, and the extractor that read it.
+ */
+export function citeDeclaration(record: DeclarationRecord): string {
+  return (
+    `${record.provenance.path}:${String(record.provenance.startLine)}-` +
+    `${String(record.provenance.endLine)} ` +
+    `(${record.kind} ${record.resolution}, ` +
+    `${record.provenance.source}, ` +
+    `revision ${record.provenance.revision.slice(0, 12)}, ` +
+    `${record.provenance.extractorVersion})`
+  );
+}

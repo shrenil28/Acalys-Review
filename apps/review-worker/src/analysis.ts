@@ -22,7 +22,16 @@
 
 import { createHash } from "node:crypto";
 
-import { extractFile, planContext } from "@acalys/code-intelligence";
+import {
+  buildRepositoryIndex,
+  extractFile,
+  indexIdentity,
+  planContext,
+  unavailableIndex,
+  type AssembledContext,
+  type RepositoryIndex,
+} from "@acalys/code-intelligence";
+import { gitObjectId } from "@acalys/contracts/domain";
 import type { CandidateFindingRow } from "@acalys/database";
 import {
   ALL_ANALYZER_IDS,
@@ -168,6 +177,16 @@ export function candidateFingerprint(
 export interface RealAnalysisOptions {
   readonly repositoryId: string;
   readonly headSha: string;
+  /**
+   * Who this review belongs to, for the index identity.
+   *
+   * Defaulted rather than required so existing callers keep working, but
+   * present in the identity either way: an index is a statement about one
+   * tenant's repository, and an identity missing the tenant would let two
+   * tenants' indexes for the same public revision compare equal.
+   */
+  readonly tenantId?: string | undefined;
+  readonly provider?: "github" | undefined;
   readonly source: AnalysisSource;
   readonly contextTokenBudget?: number | undefined;
   readonly limits?: Partial<ExecutionLimits> | undefined;
@@ -178,6 +197,23 @@ export interface RealAnalysisOutcome {
   readonly report: ExecutionReport;
   readonly contextDigest: string;
   readonly cacheKey: string;
+  /**
+   * The index this run planned against.
+   *
+   * Returned rather than kept private so a caller — and a test — can check
+   * that the facts in the context came from the revision under review. An
+   * analysis that cannot show which index it used cannot be audited later.
+   */
+  readonly index: RepositoryIndex;
+  /**
+   * What the analyzer was actually given, after scoring and truncation.
+   *
+   * Returned because an analysis that cannot show what it saw cannot be
+   * audited: "why did the reviewer miss this?" is answerable only against the
+   * assembled snapshot, and the planner is built around the distinction
+   * between what was intended and what was sent.
+   */
+  readonly context: AssembledContext;
 }
 
 /**
@@ -195,6 +231,11 @@ export async function runRealAnalysis(
     headSha: options.headSha,
   });
 
+  // The structural facts for this exact revision, built before anything is
+  // planned. Built rather than fetched: L.1 has no cache, so there is no
+  // question of an index from a different revision answering for this one.
+  const index = buildIndexFor(options, repository);
+
   const context = planContext(
     {
       changed: changed.map((file) => ({
@@ -206,6 +247,7 @@ export async function runRealAnalysis(
         extractFile(path, source),
       ),
       sources: repository,
+      index,
     },
     options.contextTokenBudget ?? 60_000,
   );
@@ -283,5 +325,38 @@ export async function runRealAnalysis(
       } satisfies CandidateFindingRow;
     });
 
-  return { candidates, report, contextDigest, cacheKey };
+  return { candidates, report, contextDigest, cacheKey, index, context };
+}
+
+/**
+ * Builds the index for the revision under review, or says why it could not.
+ *
+ * `unavailableIndex` rather than an empty one when the head sha is not a
+ * usable object id. The two are indistinguishable to any caller that only
+ * counts records, and that indistinguishability is precisely how an outage
+ * comes to read as "nothing found" — the failure P1-K caught rendering a
+ * verifier outage as a clean scan.
+ */
+function buildIndexFor(
+  options: RealAnalysisOptions,
+  repository: ReadonlyMap<string, string>,
+): RepositoryIndex {
+  const identity = indexIdentity({
+    tenantId: options.tenantId ?? "unknown",
+    provider: options.provider ?? "github",
+    repositoryId: options.repositoryId,
+    // A revision is not optional and not a branch name. If the head sha is not
+    // a well-formed object id we do not have a revision, and an index without
+    // one would be a statement about nothing.
+    revision: gitObjectId(options.headSha),
+  });
+
+  try {
+    return buildRepositoryIndex({ identity, snapshot: repository });
+  } catch (error) {
+    return unavailableIndex(identity, {
+      kind: "unavailable",
+      why: error instanceof Error ? error.message : "index build failed",
+    });
+  }
 }

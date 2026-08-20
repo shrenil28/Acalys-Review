@@ -32,6 +32,17 @@
 
 import type { ExtractedSymbol, FileIntelligence } from "./symbols.js";
 import { containingSymbol, isTestFor, referencingFiles } from "./symbols.js";
+import type {
+  DeclarationRecord,
+  RepositoryIndex,
+} from "./repository-index/index.js";
+import {
+  citeDeclaration,
+  declarationAt,
+  describeIdentity,
+  isUsable,
+  symbolById,
+} from "./repository-index/index.js";
 
 /**
  * Where a piece of context came from, and how far it may be trusted.
@@ -60,6 +71,12 @@ export function isInstruction(trust: TrustLevel): boolean {
 export const INCLUSION_REASONS = [
   "changed_hunk",
   "containing_symbol",
+  // Supplied by the repository index rather than by single-file extraction.
+  // A separate reason rather than a flag on `containing_symbol`, because the
+  // two are produced by different procedures with different standing: one
+  // parses a file alone, the other resolves bindings across the revision and
+  // can say which of two same-named declarations it means.
+  "indexed_declaration",
   "referenced_symbol",
   "caller",
   "associated_test",
@@ -84,6 +101,31 @@ export const CONTEXT_ITEM_KINDS = [
 
 export type ContextItemKind = (typeof CONTEXT_ITEM_KINDS)[number];
 
+/**
+ * Where an item's *fact* came from — not where its text came from.
+ *
+ * Every candidate carries source text. This says which procedure decided the
+ * text was the right text: a single-file parse, or a revision-wide index that
+ * resolved bindings and can cite a record.
+ *
+ * It exists so that "the index is integrated" is checkable rather than
+ * asserted. A snapshot whose items all say `direct_source` is a snapshot the
+ * index never touched, whatever the call graph suggests — and that is exactly
+ * the gap P1-K found between a well-tested module and a production path that
+ * never reached it.
+ */
+export type ItemProvenance =
+  | { readonly source: "direct_source" }
+  | {
+      readonly source: "repository_index";
+      /** {@link describeIdentity} — revision and extractor included. */
+      readonly indexIdentity: string;
+      /** The declaration record this item was cut from. */
+      readonly recordId: string;
+      /** Human-readable, re-checkable by hand. */
+      readonly citation: string;
+    };
+
 /** Something the planner could show the analyzer. */
 export interface ContextCandidate {
   readonly kind: ContextItemKind;
@@ -96,6 +138,8 @@ export interface ContextCandidate {
   readonly symbol?: ExtractedSymbol | undefined;
   readonly startLine?: number | undefined;
   readonly endLine?: number | undefined;
+  /** Defaults to `direct_source` when the planner had no index. */
+  readonly provenance?: ItemProvenance | undefined;
 }
 
 /**
@@ -120,6 +164,8 @@ export const REASON_WEIGHT: Readonly<Record<InclusionReason, number>> = {
   path_instruction: 950,
   changed_hunk: 900,
   containing_symbol: 880,
+  // Just above the syntactic equivalent: same material, better standing.
+  indexed_declaration: 885,
   associated_test: 700,
   caller: 650,
   referenced_symbol: 600,
@@ -206,6 +252,48 @@ export interface PlannerInput {
   readonly pathInstructions?:
     | readonly { readonly glob: string; readonly instructions: string }[]
     | undefined;
+  /**
+   * Structural facts for the revision under review.
+   *
+   * Optional because the planner must still work without it — an index that
+   * failed to build must degrade to syntactic candidates rather than empty the
+   * context. But when it is present, the items it produces say so, and a
+   * snapshot with no `repository_index` provenance is evidence the seam was
+   * not exercised.
+   */
+  readonly index?: RepositoryIndex | undefined;
+}
+
+/**
+ * The distinct declarations the index says a change sits inside.
+ *
+ * Deduplicated by record: twenty changed lines in one function are one
+ * declaration, and offering it twenty times would spend the budget on
+ * repetition. Returns nothing at all when there is no index or the index is
+ * not usable — a caller must not be able to tell "no index" from "index says
+ * there is nothing here", so the honest answer is to produce no indexed
+ * candidates rather than to fabricate an empty one.
+ */
+function indexedContainers(
+  index: RepositoryIndex | undefined,
+  changed: ChangedFileInput,
+): readonly {
+  readonly index: RepositoryIndex;
+  readonly declaration: DeclarationRecord;
+}[] {
+  if (index === undefined || !isUsable(index)) return [];
+
+  const found = new Map<string, DeclarationRecord>();
+  for (const line of changed.changedLines) {
+    const declaration = declarationAt(index, changed.path, line);
+    if (declaration !== undefined) {
+      found.set(declaration.declarationId, declaration);
+    }
+  }
+
+  return [...found.values()]
+    .sort((left, right) => left.startLine - right.startLine)
+    .map((declaration) => ({ index, declaration }));
 }
 
 /**
@@ -263,7 +351,35 @@ export function generateCandidates(
       const symbol = containingSymbol(intelligence, line);
       if (symbol !== undefined) containers.set(symbol.qualifiedName, symbol);
     }
+    // The same question — "what declaration is this hunk inside?" — answered
+    // twice, by two procedures with different standing.
+    //
+    // Where they agree on a span, the indexed answer REPLACES the syntactic
+    // one rather than joining it. They carry identical text, so offering both
+    // would spend the budget twice on one function; and the planner exists to
+    // stop exactly that. What changes is not how many items there are, but
+    // what the item can say about itself: a citable record and a binding the
+    // compiler resolved, instead of a span a parser guessed at alone.
+    //
+    // Where the index has nothing — it failed, the language is unsupported,
+    // the module did not parse — the syntactic candidate stands. Degrading to
+    // a weaker fact is right; degrading to no context is not.
+    const indexed = indexedContainers(input.index, changed);
+    const indexedSpans = new Set(
+      indexed.map(
+        (record) =>
+          `${String(record.declaration.startLine)}:${String(record.declaration.endLine)}`,
+      ),
+    );
+
     for (const symbol of containers.values()) {
+      if (
+        indexedSpans.has(
+          `${String(symbol.startLine)}:${String(symbol.endLine)}`,
+        )
+      ) {
+        continue;
+      }
       candidates.push({
         kind: "symbol",
         path: changed.path,
@@ -273,6 +389,49 @@ export function generateCandidates(
         symbol,
         startLine: symbol.startLine,
         endLine: symbol.endLine,
+        provenance: { source: "direct_source" },
+      });
+    }
+
+    for (const record of indexed) {
+      const declaration = record.declaration;
+      const symbol = symbolById(record.index, declaration.symbolId);
+      candidates.push({
+        kind: "symbol",
+        path: changed.path,
+        reason: "indexed_declaration",
+        trust: "repository_source",
+        content: sliceLines(
+          changed.content,
+          declaration.startLine,
+          declaration.endLine,
+        ),
+        ...(symbol === undefined
+          ? {}
+          : {
+              symbol: {
+                name: symbol.name,
+                kind: symbol.kind,
+                qualifiedName:
+                  symbol.container === undefined
+                    ? symbol.name
+                    : `${symbol.container}.${symbol.name}`,
+                ...(symbol.container === undefined
+                  ? {}
+                  : { container: symbol.container }),
+                startLine: declaration.startLine,
+                endLine: declaration.endLine,
+                exported: symbol.exported,
+              },
+            }),
+        startLine: declaration.startLine,
+        endLine: declaration.endLine,
+        provenance: {
+          source: "repository_index",
+          indexIdentity: describeIdentity(record.index.identity),
+          recordId: declaration.declarationId,
+          citation: citeDeclaration(declaration),
+        },
       });
     }
 

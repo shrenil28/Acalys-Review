@@ -670,6 +670,114 @@ const MUTATIONS = [
     replace: "  return check.blocking;",
     suite: "apps/web/tests/premerge.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-L.1 — the repository index.
+  //
+  // 77-85 target the facts; 86-88 target the production seam. The split is
+  // the checkpoint's whole point: a mechanism mutation that dies proves the
+  // index is correct, and only a wiring mutation that dies proves anything
+  // uses it. P1-K closed once on a false claim with the first kind passing
+  // and the second kind absent.
+  // ---------------------------------------------------------------------
+  {
+    id: 77,
+    name: "the index identity ignores the revision",
+    file: "packages/code-intelligence/src/repository-index/identity.ts",
+    find: "    left.revision.algorithm === right.revision.algorithm &&\n    left.revision.value === right.revision.value &&\n",
+    replace: "",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 78,
+    name: "the extractor version leaves the digest preimage",
+    file: "packages/code-intelligence/src/repository-index/digest.ts",
+    find: '    line(["identity", "extractor", identity.extractorVersion]),\n',
+    replace: "",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 79,
+    name: "symbol identity ignores the module, merging same-name symbols",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: "        const symbolId = shortId([\n          revision,\n          path,\n          kind,",
+    replace:
+      "        const symbolId = shortId([\n          revision,\n          kind,",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 80,
+    name: "`not_indexed` collapses into `absent`",
+    file: "packages/code-intelligence/src/repository-index/query.ts",
+    find: '  if (module.coverage !== "indexed") {',
+    replace: "  if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 81,
+    name: "canonical form follows the array order it was handed",
+    file: "packages/code-intelligence/src/repository-index/digest.ts",
+    find: "for (const record of [...index.symbols].sort(byLine(symbolLine))) {",
+    replace: "for (const record of index.symbols) {",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 82,
+    name: "the digest joins fields with nothing between them",
+    file: "packages/code-intelligence/src/repository-index/digest.ts",
+    find: "const SEP = String.fromCharCode(31);",
+    replace: 'const SEP = "";',
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 83,
+    name: "an unsupported language is skipped rather than recorded",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: "    if (!isSupported(path)) {",
+    replace: "    if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 84,
+    name: "a module that failed to parse is recorded as indexed",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: '    const coverage: ModuleCoverage =\n      syntactic.length === 0 ? "indexed" : "parse_failed";',
+    replace: '    const coverage: ModuleCoverage = "indexed";',
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 85,
+    name: "an unavailable index is built as an ordinary empty one",
+    file: "packages/code-intelligence/src/repository-index/build.ts",
+    find: "  return {\n    identity,\n    availability,\n    coverage: {\n      modulesTotal: 0,",
+    replace:
+      '  return {\n    identity,\n    availability: { kind: "built" },\n    coverage: {\n      modulesTotal: 0,',
+    suite: "packages/code-intelligence/tests/repository-index.test.ts",
+  },
+  {
+    id: 86,
+    name: "the production path plans without the repository index",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "      sources: repository,\n      index,\n",
+    replace: "      sources: repository,\n",
+    suite: "apps/review-worker/tests/index-wiring.test.ts",
+  },
+  {
+    id: 87,
+    name: "the index is built for a revision that is not the head",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "    revision: gitObjectId(options.headSha),",
+    replace: '    revision: gitObjectId("0".repeat(40)),',
+    suite: "apps/review-worker/tests/index-wiring.test.ts",
+  },
+  {
+    id: 88,
+    name: "an index-derived context item claims direct-source provenance",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: '        provenance: {\n          source: "repository_index",',
+    replace:
+      '        provenance: {\n          source: "direct_source" as "repository_index",',
+    suite: "apps/review-worker/tests/index-wiring.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",

@@ -19,6 +19,7 @@ P1-J                  deterministic quality + execution baseline ✓
 P1-INFRA-POSTGRES     one container, database per suite         ✓
 P1-K                  frontend production boundary              ✓
 P1-GATE-INTERLOCK     mutation session guards every gate        ✓
+P1-L.1                canonical repository index + live witness  ✓
 ```
 
 `P1-VERIFY-CONCURRENCY` is recorded rather than built, for the same reason
