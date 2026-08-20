@@ -181,3 +181,82 @@ to record the falsification rather than quietly corrected, and four rounds
 of fixes applied to code that had already been reviewed twice. A checkpoint
 that produces mechanism evidence and wiring evidence together cannot close
 on a false central claim, because the claim has a witness from the start.
+
+## 7. To prove a guard, make the two branches differ downstream
+
+Reaching a guarded branch is not testing it. The test must construct an input
+where the guarded and unguarded paths produce **different observable states** —
+otherwise the assertion holds for a reason other than the one it names.
+
+P1-L.1 produced three of these in one checkpoint, and a mutation found each:
+
+```
+determinism        varied Map insertion order, but the builder walks a
+                   SORTED key list — passed with every canonical sort deleted
+
+digest collision   compared "ab/c.ts" to "a/bc.ts", two different strings
+                   that never shared a preimage — adversarial-looking, not
+                   adversarial
+
+availability       asserted an unavailable index leaves the syntactic
+                   candidate standing, but `unavailableIndex` holds NO
+                   RECORDS, so the lookup returns nothing whether or not
+                   the guard runs
+```
+
+Each varied a dimension the code had already normalized, or exercised a state
+where the difference had been erased before the guard could matter.
+
+The repair is the same shape every time: find the state where the branches
+diverge. For the third, that is an index with records present _and_
+`availability: invariant_failed` — reachable, because a build can populate
+records and then fail a consistency check.
+
+Assert both premises before the conclusion:
+
+```
+prove the tempting fact exists
+prove the guard says it is unusable
+prove the tempting fact is not consumed
+```
+
+Without the first two, a later fixture edit that removes the temptation
+silently restores the vacuity, and the test goes on passing.
+
+## 8. A mutation must prove it applied before its result means anything
+
+A mutation whose anchor no longer matches reports `INVALID` after a full run,
+and an `INVALID` counted out of the denominator turns a stale definition into a
+flattering percentage. Anchor rot is the _expected_ failure of text-fragment
+targets — reformatting alone causes it — so the manifest is validated as a unit
+before the first suite runs:
+
+```
+target matched EXACTLY once     an ambiguous anchor mutates an arbitrary site
+replacement differs             a no-op mutation is unkillable
+applying changes the source     the transformation is real, not notional
+no duplicate ids                two definitions under one id hide one result
+```
+
+`node scripts/mutate-p1i.mjs --preflight-only` runs just this, in milliseconds.
+Retargeting a mutation is not finished when the entry is edited; it is finished
+when the preflight confirms the new anchor resolves.
+
+Each refusal class was planted and observed:
+
+```
+a stale anchor                  refused, exit 2, 41ms
+a duplicate mutation id         refused, exit 2, 37ms
+a replacement that is a no-op   refused, exit 2, 40ms
+```
+
+Runtime-invalid verdicts remain possible — a mutation can apply and still fail
+to reach its premise. This removes only the class knowable without running
+anything, which is the class that costs a full run to discover.
+
+**The preflight validates applicability, not intent.** A mutation retargeted at
+the wrong-but-existing line passes it. That happened here: a probe script
+killed mid-run left its edit in place, the next run snapshotted the corruption
+as its baseline, and the anchor was valid the whole time. Which is invariant 4
+again — a harness must restore its own snapshot, and restore-on-completion is
+not restore-on-signal.

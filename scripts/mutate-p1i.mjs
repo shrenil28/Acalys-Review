@@ -955,6 +955,111 @@ function parseReport(stdout) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Manifest preflight
+// ---------------------------------------------------------------------------
+//
+// Every mutation is checked for structural applicability BEFORE the first
+// expensive suite runs.
+//
+// This exists because of a specific failure. Mutation 79 was retargeted, the
+// file was then reformatted, the anchor no longer matched, and nobody noticed
+// until a full run had finished and reported it INVALID. The cost was an
+// entire run; the information — "this anchor is stale" — was available in
+// milliseconds.
+//
+// Anchor rot is the expected failure mode of text-fragment targets, not an
+// unusual one. Formatting must not be able to silently invalidate a mutation
+// definition, so the manifest is validated as a unit and the run refuses to
+// start unless every definition still describes a real transformation:
+//
+//   target matched EXACTLY once   an ambiguous anchor mutates an arbitrary site
+//   replacement differs           a no-op mutation is unkillable and meaningless
+//   applying changes the source   the transformation is real, not notional
+//
+// Runtime-invalid verdicts are still possible afterwards (a mutation can apply
+// and still fail to reach its premise). This only removes the class that is
+// knowable without running anything.
+{
+  const problems = [];
+  const seen = new Map();
+  const sources = new Map();
+
+  for (const mutation of MUTATIONS) {
+    const id = String(mutation.id);
+    if (seen.has(id)) {
+      problems.push(
+        `#${id} is declared twice (${seen.get(id)} and ${mutation.name})`,
+      );
+    }
+    seen.set(id, mutation.name);
+
+    let source = sources.get(mutation.file);
+    if (source === undefined) {
+      try {
+        source = readFileSync(join(ROOT, mutation.file), "utf8");
+        sources.set(mutation.file, source);
+      } catch {
+        problems.push(`#${id} targets ${mutation.file}, which cannot be read`);
+        continue;
+      }
+    }
+
+    // Exactly once. A fragment that matches twice mutates whichever site comes
+    // first, which is not the site the definition names.
+    const occurrences = source.split(mutation.find).length - 1;
+    if (occurrences === 0) {
+      problems.push(
+        `#${id} "${mutation.name}": anchor not found in ${mutation.file}`,
+      );
+      continue;
+    }
+    if (occurrences > 1) {
+      problems.push(
+        `#${id} "${mutation.name}": anchor matches ${String(occurrences)} sites in ` +
+          `${mutation.file}; it must identify one`,
+      );
+      continue;
+    }
+
+    if (mutation.replace === mutation.find) {
+      problems.push(`#${id} "${mutation.name}": replacement is the original`);
+      continue;
+    }
+
+    const mutated = source.replace(mutation.find, mutation.replace);
+    if (mutated === source) {
+      problems.push(`#${id} "${mutation.name}": applying it changes nothing`);
+    }
+  }
+
+  const total = MUTATIONS.length;
+  if (problems.length > 0) {
+    console.error(
+      `\nMutation manifest preflight FAILED — ` +
+        `${String(total - problems.length)} of ${String(total)} applicable.\n`,
+    );
+    for (const problem of problems) console.error(`  ${problem}`);
+    console.error(
+      "\nA stale anchor reports INVALID after a full run and quietly shrinks " +
+        "the denominator. Fix the definitions, then re-run.\n",
+    );
+    process.exit(2);
+  }
+
+  console.log(
+    `Mutation manifest preflight: ${String(total)} declared, ` +
+      `${String(total)} matched uniquely, ${String(total)} change source, ` +
+      `0 invalid before execution.\n`,
+  );
+
+  // `--preflight-only` validates the manifest without running anything. The
+  // whole point of the preflight is that anchor rot is knowable in
+  // milliseconds, and a check that can only be reached by paying for a full
+  // run is a check nobody performs while editing definitions.
+  if (process.argv.includes("--preflight-only")) process.exit(0);
+}
+
 acquireSession(SESSION_NONCE);
 
 const results = [];

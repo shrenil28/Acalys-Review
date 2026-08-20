@@ -818,17 +818,25 @@ describe("an indexed representation dominates an equivalent syntactic one", () =
   });
 
   it("ignores records carried by an index that failed its invariants", () => {
-    // The previous test cannot make this assertion, and a surviving mutation
-    // said so: `unavailableIndex` holds no records, so `declarationAt` returns
-    // nothing whether or not availability is consulted. Deleting the
-    // usability check was therefore invisible.
+    // The unavailable-index test above cannot make this assertion, and a
+    // surviving mutation said so: `unavailableIndex` holds no records, so
+    // `declarationAt` returns nothing whether or not availability is
+    // consulted. Deleting the usability check was therefore invisible.
     //
-    // This is the state that distinguishes them — records present, and the
-    // index declared unusable. It is reachable: a build can populate records
-    // and then fail a consistency check, and `IndexAvailability` exists
-    // precisely so that outcome has somewhere to be recorded.
+    // The general principle, which is stronger than "reach the branch":
+    //
+    //   to prove a guard, construct an input where the guarded and unguarded
+    //   branches produce DIFFERENT downstream states.
+    //
+    // Both premises are asserted before the conclusion, so a future fixture
+    // edit that removed the tempting record would fail here rather than
+    // silently recreating the vacuity.
     const populated = build(files);
-    expect(populated.declarations.length).toBeGreaterThan(0);
+
+    // Premise 1: the index really does hold a fact the planner would want.
+    const temptingFact = declarationAt(populated, "src/local.ts", 2);
+    expect(temptingFact).toBeDefined();
+    expect(temptingFact?.startLine).toBe(1);
 
     const failed: RepositoryIndex = {
       ...populated,
@@ -838,13 +846,18 @@ describe("an indexed representation dominates an equivalent syntactic one", () =
       },
     };
 
+    // Premise 2: the guard says that fact must not be used.
+    expect(failed.availability.kind).toBe("invariant_failed");
+    expect(isUsable(failed)).toBe(false);
+    // And the record is still right there, unchanged.
+    expect(declarationAt(failed, "src/local.ts", 2)).toEqual(temptingFact);
+
     const kept = forSpan(
       scoreCandidates(generateCandidates(plannerInput(failed))),
     );
 
+    // Conclusion: the tempting fact is not consumed.
     expect(kept).toHaveLength(1);
-    // Facts from an index that failed its own invariants must not be presented
-    // to the analyzer as though they were established.
     expect(kept[0]?.reason).toBe("containing_symbol");
     expect(kept[0]?.provenance?.source).toBe("direct_source");
   });
