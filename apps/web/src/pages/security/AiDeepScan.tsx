@@ -21,6 +21,7 @@ import {
 } from "@/data/security";
 import { repoNames, repositories } from "@/data/repos";
 import { relativeTime } from "@/lib/utils";
+import { useDeepScanFindings } from "@/lib/api/useDeepScanFindings";
 
 const statusTone = {
   Open: "danger",
@@ -29,8 +30,16 @@ const statusTone = {
   Ignored: "neutral",
 } as const;
 
+/** Stable, so the row memo does not rerun on every render. */
+const EMPTY: readonly DeepScanFinding[] = [];
+
 export function AiDeepScanPage() {
-  const loading = usePageLoad();
+  const simulatedLoad = usePageLoad();
+  // Fetching lives in the hook so this component renders fixtures, real data
+  // and test data identically, without knowing which it was given.
+  const source = useDeepScanFindings();
+  const findings = source.status === "ready" ? source.findings : EMPTY;
+  const loading = simulatedLoad || source.status === "loading";
   const [query, setQuery] = useState("");
   const [repo, setRepo] = useState<string[]>([]);
   const [severity, setSeverity] = useState<string[]>([]);
@@ -43,7 +52,7 @@ export function AiDeepScanPage() {
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return deepScanFindings.filter((finding) => {
+    return findings.filter((finding) => {
       const currentStatus = statuses[finding.id];
       if (repo.length > 0 && !repo.includes(finding.repo)) return false;
       if (severity.length > 0 && !severity.includes(finding.severity)) return false;
@@ -56,7 +65,7 @@ export function AiDeepScanPage() {
         finding.id.toLowerCase().includes(needle)
       );
     });
-  }, [query, repo, severity, category, status, statuses]);
+  }, [findings, query, repo, severity, category, status, statuses]);
 
   const neverScanned = repositories.filter(
     (entry) => entry.security.lastScanAt === null,
@@ -131,7 +140,22 @@ export function AiDeepScanPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.length === 0 ? (
+              {source.status === "failed" ? (
+                // ── Never "no vulnerabilities found" ──────────────────────
+                //
+                // A failed request and a clean scan both produce zero rows.
+                // Saying "none found" here would report an outage as good news
+                // — the frontend restatement of a rule the backend already
+                // enforces, where a verifier outage must not read as a clean
+                // review.
+                //
+                // The same empty-state shell, not a new visual element: what
+                // changed is the sentence, not the design.
+                <TableEmpty colSpan={7}>
+                  Findings could not be loaded, so this list is not a statement
+                  about your code. {source.detail}.
+                </TableEmpty>
+              ) : rows.length === 0 ? (
                 <TableEmpty colSpan={7}>
                   No vulnerabilities found in the analyzed scope. Coverage is
                   incomplete. {neverScanned} repositories have no completed AI Deep
