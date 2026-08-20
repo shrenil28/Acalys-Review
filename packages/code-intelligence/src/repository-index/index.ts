@@ -64,6 +64,17 @@ export {
 export { canonicalSerialization, indexDigest } from "./digest.js";
 
 export {
+  TEST_RELATIONSHIP_STRENGTHS,
+  citeTestRelationship,
+  testCoverageEvidence,
+  testRelationships,
+  testsForSymbol,
+  type TestEvidence,
+  type TestRelationship,
+  type TestRelationshipStrength,
+} from "./test-relationships.js";
+
+export {
   CONSISTENCY_RULES,
   validateIndexConsistency,
   type ConsistencyRule,
@@ -97,6 +108,7 @@ export {
   declarationsIn,
   isUsable,
   moduleAt,
+  modulesReferencing,
   referenceAt,
   referencesIn,
   resolvedDeclarations,

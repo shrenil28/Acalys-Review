@@ -1113,6 +1113,81 @@ const MUTATIONS = [
     replace: "      bindingsRecomputed: 0,",
     suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-L.4.1 — code-to-test relationships.
+  //
+  // 125-129 target the association and its evidence semantics; 130-132 target
+  // the reverse binding lookup and the production seam. 130 is the one the
+  // slice exists for: a reverse lookup that matches on names offers the
+  // reviewer files that mention a different symbol of the same name.
+  // ---------------------------------------------------------------------
+  {
+    id: 125,
+    name: "test association ignores the module role",
+    file: "packages/code-intelligence/src/repository-index/test-relationships.ts",
+    find: "    if (!testModules.has(reference.moduleId)) return [];",
+    replace: "    if (false as boolean) return [];",
+    suite: "packages/code-intelligence/tests/test-relationships.test.ts",
+  },
+  {
+    id: 126,
+    name: "a test module is related to itself",
+    file: "packages/code-intelligence/src/repository-index/test-relationships.ts",
+    find: "      if (targetModuleId === reference.moduleId) continue;",
+    replace: "      if (false as boolean) continue;",
+    suite: "packages/code-intelligence/tests/test-relationships.test.ts",
+  },
+  {
+    id: 127,
+    name: "an unreadable test module no longer withholds absence",
+    file: "packages/code-intelligence/src/repository-index/test-relationships.ts",
+    find: '  const blindSpot = index.modules.find(\n    (record) => record.role === "test" && record.coverage !== "indexed",\n  );',
+    replace:
+      "  const blindSpot = undefined as (typeof index.modules)[number] | undefined;",
+    suite: "packages/code-intelligence/tests/test-relationships.test.ts",
+  },
+  {
+    id: 128,
+    name: "a blind spot suppresses positive test evidence too",
+    file: "packages/code-intelligence/src/repository-index/test-relationships.ts",
+    find: '  const relationships = testsForSymbol(index, symbolId);\n  if (relationships.length > 0) {\n    return { kind: "referenced_by_tests", relationships };\n  }',
+    replace: "  const relationships = testsForSymbol(index, symbolId);",
+    suite: "packages/code-intelligence/tests/test-relationships.test.ts",
+  },
+  {
+    id: 129,
+    name: "a symbol absent from the index reports no_test_references",
+    file: "packages/code-intelligence/src/repository-index/test-relationships.ts",
+    find: '  if (symbol === undefined) {\n    return {\n      kind: "not_indexed",',
+    replace:
+      '  if (false as boolean) {\n    return {\n      kind: "not_indexed",',
+    suite: "packages/code-intelligence/tests/test-relationships.test.ts",
+  },
+  {
+    id: 130,
+    name: "the reverse lookup returns modules that only share a name",
+    file: "packages/code-intelligence/src/repository-index/query.ts",
+    find: "    const targets = binding.declarationIds.some(\n      (id) => declarationModule.get(id) === moduleId,\n    );\n    if (!targets) continue;",
+    replace: "    const targets = true;\n    if (!targets) continue;",
+    suite: "apps/review-worker/tests/index-wiring.test.ts",
+  },
+  {
+    id: 131,
+    name: "the reverse lookup runs against an unusable index",
+    file: "packages/code-intelligence/src/repository-index/query.ts",
+    find: "  if (!isUsable(index)) return [];\n\n  const declarationModule = new Map(",
+    replace:
+      "  if (false as boolean) return [];\n\n  const declarationModule = new Map(",
+    suite: "packages/code-intelligence/tests/test-relationships.test.ts",
+  },
+  {
+    id: 132,
+    name: "the name-matched fallback is offered beside the indexed answer",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "        if (indexedDependants.has(caller.path)) continue;",
+    replace: "        if (false as boolean) continue;",
+    suite: "apps/review-worker/tests/index-wiring.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",

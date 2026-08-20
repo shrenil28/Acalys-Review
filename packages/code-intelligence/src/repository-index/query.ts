@@ -270,3 +270,64 @@ export function citeBinding(
     `revision ${binding.provenance.revision.slice(0, 12)}`
   );
 }
+
+/**
+ * The modules whose references bind into a given module.
+ *
+ * The reverse of {@link resolvedDeclarations}: not "what does this call" but
+ * "what calls this". Both are the same binding edges read from opposite ends,
+ * which is why L.2's records answer it without new extraction.
+ *
+ * This exists because name matching answers the same question wrongly in a way
+ * that looks right. `referencingFiles(repository, "save", …)` returns every
+ * file mentioning `save` — including the ones that mean a different `save`
+ * entirely — and a reviewer shown those is being told something false about
+ * what depends on their change.
+ *
+ * Returns nothing for an unusable index, so "no index" is never read as
+ * "nothing depends on this".
+ */
+export function modulesReferencing(
+  index: RepositoryIndex,
+  moduleId: string,
+): readonly {
+  readonly moduleId: string;
+  readonly reference: ReferenceRecord;
+  readonly binding: BindingEdge;
+}[] {
+  if (!isUsable(index)) return [];
+
+  const declarationModule = new Map(
+    index.declarations.map((record) => [record.declarationId, record.moduleId]),
+  );
+  const references = new Map(
+    index.references.map((record) => [record.referenceId, record]),
+  );
+
+  const found: {
+    moduleId: string;
+    reference: ReferenceRecord;
+    binding: BindingEdge;
+  }[] = [];
+  const seen = new Set<string>();
+
+  for (const binding of index.bindings) {
+    const reference = references.get(binding.referenceId);
+    if (reference === undefined) continue;
+    if (reference.moduleId === moduleId) continue;
+
+    const targets = binding.declarationIds.some(
+      (id) => declarationModule.get(id) === moduleId,
+    );
+    if (!targets) continue;
+
+    // One entry per referencing module: "who depends on this?" is a question
+    // about modules, and ten call sites in one file are one dependant.
+    if (seen.has(reference.moduleId)) continue;
+    seen.add(reference.moduleId);
+
+    found.push({ moduleId: reference.moduleId, reference, binding });
+  }
+
+  return found.sort((a, b) => (a.moduleId < b.moduleId ? -1 : 1));
+}

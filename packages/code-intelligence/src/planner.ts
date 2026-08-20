@@ -37,6 +37,7 @@ import type {
   DeclarationRecord,
   ReferenceRecord,
   RepositoryIndex,
+  TestRelationship,
 } from "./repository-index/index.js";
 import {
   bindingOf,
@@ -44,10 +45,13 @@ import {
   citeDeclaration,
   declarationAt,
   describeIdentity,
+  citeTestRelationship,
   isUsable,
+  modulesReferencing,
   referencesIn,
   resolvedDeclarations,
   symbolById,
+  testRelationships,
 } from "./repository-index/index.js";
 
 /**
@@ -356,6 +360,28 @@ function boundCallees(
 }
 
 /**
+ * Tests the index says reference a module, with the index carried alongside.
+ *
+ * Nothing when there is no index or it is not usable, so "no index" is never
+ * mistaken for "nothing tests this module" — the same rule the declaration and
+ * binding paths follow.
+ */
+function relatedTests(
+  index: RepositoryIndex | undefined,
+  changedPath: string,
+): readonly (TestRelationship & { readonly index: RepositoryIndex })[] {
+  if (index === undefined || !isUsable(index)) return [];
+
+  return testRelationships(index)
+    .filter(
+      (relationship) =>
+        relationship.targetModuleId === changedPath &&
+        relationship.strength === "direct_symbol_reference",
+    )
+    .map((relationship) => ({ ...relationship, index }));
+}
+
+/**
  * Offers everything plausibly relevant.
  *
  * Deliberately generous: selection is the next step's job, and a candidate
@@ -547,12 +573,74 @@ export function generateCandidates(
 
     // Callers of anything the change touched. The most common real defect is a
     // contract mismatch between a changed function and something calling it.
+    //
+    // Two procedures again, and the difference is not cosmetic.
+    // `referencingFiles` matches a NAME across the repository, so a change to
+    // one `save` offers every file mentioning any `save` — and a reviewer
+    // shown those is being told something false about what depends on their
+    // change. `modulesReferencing` reads the binding edges backwards and
+    // returns only the modules that actually bind into this one.
+    //
+    // The indexed answer replaces the syntactic one per module, under the
+    // precedence rule L.1 established; where the index has nothing, the
+    // syntactic guess still stands.
+    const indexedDependants = new Set<string>();
+    if (input.index !== undefined && isUsable(input.index)) {
+      for (const dependant of modulesReferencing(input.index, changed.path)) {
+        const source = input.sources.get(dependant.moduleId);
+        if (source === undefined) continue;
+        indexedDependants.add(dependant.moduleId);
+
+        // Tests are left to the block below, which relates them at SYMBOL
+        // level and can say how strong the association is. Offering them from
+        // here as well would win the span-based dedupe and replace a citation
+        // that names `direct_symbol_reference` with one that says only
+        // "import" — the weaker fact displacing the stronger one purely
+        // because it was generated first.
+        const isTest =
+          input.index.modules.find(
+            (module) => module.moduleId === dependant.moduleId,
+          )?.role === "test";
+        if (isTest) {
+          indexedDependants.add(dependant.moduleId);
+          continue;
+        }
+
+        candidates.push({
+          kind: "source_file",
+          path: dependant.moduleId,
+          reason: "caller",
+          trust: "repository_source",
+          content: source,
+          provenance: {
+            source: "repository_index",
+            indexIdentity: describeIdentity(input.index.identity),
+            recordId: dependant.binding.bindingId,
+            citation: citeBinding(dependant.reference, dependant.binding),
+          },
+        });
+      }
+    }
+
     for (const symbol of containers.values()) {
       for (const caller of referencingFiles(
         input.repository,
         symbol.name,
         changed.path,
       )) {
+        if (indexedDependants.has(caller.path)) continue;
+        // The index spoke about this module and did not name it a dependant,
+        // so the syntactic guess is a name collision rather than a dependency.
+        if (
+          input.index !== undefined &&
+          isUsable(input.index) &&
+          input.index.modules.some(
+            (module) =>
+              module.moduleId === caller.path && module.coverage === "indexed",
+          )
+        ) {
+          continue;
+        }
         const source = input.sources.get(caller.path);
         if (source === undefined) continue;
         candidates.push({
@@ -567,14 +655,46 @@ export function generateCandidates(
               : "associated_test",
           trust: "repository_source",
           content: source,
+          provenance: { source: "direct_source" },
         });
       }
     }
 
-    // Tests named for the changed file, which frequently do not import it in a
-    // way the reference walk would catch.
+    // Tests that reference the changed module, on the checker's account.
+    //
+    // `isTestFor` below matches filenames — `save.test.ts` is held to test
+    // `save.ts` — which is a naming convention rather than a fact, and is
+    // wrong in both directions. When the index is available the association
+    // comes from bindings instead, and the syntactic guess is skipped for any
+    // test the index already related, under the same precedence rule L.1
+    // established: the indexed answer dominates when positively established.
+    const indexedTests = new Set<string>();
+    for (const relationship of relatedTests(input.index, changed.path)) {
+      const source = input.sources.get(relationship.testModuleId);
+      if (source === undefined) continue;
+      indexedTests.add(relationship.testModuleId);
+      candidates.push({
+        kind: "test",
+        path: relationship.testModuleId,
+        reason: "associated_test",
+        trust: "repository_source",
+        content: source,
+        provenance: {
+          source: "repository_index",
+          indexIdentity: describeIdentity(relationship.index.identity),
+          recordId: relationship.viaReferenceId ?? relationship.testModuleId,
+          citation: citeTestRelationship(relationship, relationship.index),
+        },
+      });
+    }
+
+    // Tests named for the changed file. Kept, because a test that exercises a
+    // module through a helper it does not import directly is real and the
+    // reference walk cannot see it — but skipped where the index already
+    // spoke, so one test is not offered twice.
     for (const file of input.repository) {
       if (!isTestFor(file.path, changed.path)) continue;
+      if (indexedTests.has(file.path)) continue;
       const source = input.sources.get(file.path);
       if (source === undefined) continue;
       candidates.push({
@@ -583,6 +703,7 @@ export function generateCandidates(
         reason: "associated_test",
         trust: "repository_source",
         content: source,
+        provenance: { source: "direct_source" },
       });
     }
   }

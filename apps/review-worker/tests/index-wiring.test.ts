@@ -240,3 +240,95 @@ describe("the production review path reaches the repository index", () => {
     expect(outcome.context.items.length).toBeGreaterThan(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P1-L.4.1 — test association reaches the analyzer
+// ---------------------------------------------------------------------------
+
+describe("the production path offers the test that actually imports the change", () => {
+  // Two identically named exports, and two tests. Filename matching pairs
+  // `a.test.ts` with `a.ts` correctly here by luck — so the fixture puts the
+  // test somewhere the naming convention CANNOT reach: a test whose filename
+  // has nothing to do with the module it imports.
+  const FILES = {
+    "src/a.ts": "export function save(): number {\n  return 1;\n}",
+    "src/b.ts": "export function save(): number {\n  return 2;\n}",
+    "tests/unrelated-name.test.ts": [
+      'import { save } from "../src/a.js";',
+      "export function check(): number {",
+      "  return save();",
+      "}",
+    ].join("\n"),
+    "tests/b-checks.test.ts": [
+      'import { save } from "../src/b.js";',
+      "export function check(): number {",
+      "  return save();",
+      "}",
+    ].join("\n"),
+  };
+
+  const CHANGED_A = [{ path: "src/a.ts", changedLines: [2] }];
+
+  const reviewA = () =>
+    runRealAnalysis({
+      repositoryId: REPO,
+      headSha: SHA,
+      tenantId: "tenant-1",
+      source: fixtureSource(FILES, CHANGED_A),
+    });
+
+  it("offers the importing test even though its name says nothing", async () => {
+    const outcome = await reviewA();
+
+    const tests = outcome.context.items.filter(
+      (item) => item.reason === "associated_test",
+    );
+    const paths = tests.map((item) => item.path);
+
+    // `isTestFor` cannot produce this: the filename shares nothing with a.ts.
+    // Only the binding can.
+    expect(paths).toContain("tests/unrelated-name.test.ts");
+    // And the test that imports the OTHER save is not offered. A name-matching
+    // associator has no basis to exclude it, because both are just "a test".
+    expect(paths).not.toContain("tests/b-checks.test.ts");
+  });
+
+  it("carries index provenance on the association", async () => {
+    const outcome = await reviewA();
+
+    const association = outcome.context.items.find(
+      (item) =>
+        item.reason === "associated_test" &&
+        item.path === "tests/unrelated-name.test.ts",
+    );
+    expect(association).toBeDefined();
+
+    // Not merely "a test was offered" — that would be true of the syntactic
+    // path too. The provenance is what distinguishes which procedure decided.
+    expect(association?.provenance?.source).toBe("repository_index");
+    if (association?.provenance?.source === "repository_index") {
+      expect(association.provenance.citation).toContain(
+        "direct_symbol_reference",
+      );
+    }
+  });
+
+  it("delivers the association to what the analyzer is handed", async () => {
+    const outcome = await reviewA();
+
+    const clusters = buildClusters(
+      CHANGED_A.map((entry) => ({
+        path: entry.path,
+        changedLines: entry.changedLines,
+      })),
+      outcome.context.items,
+    );
+
+    const seen = clusters
+      .flatMap((cluster) => cluster.context)
+      .filter((item) => item.reason === "associated_test")
+      .map((item) => item.path);
+
+    expect(seen).toContain("tests/unrelated-name.test.ts");
+  });
+});
