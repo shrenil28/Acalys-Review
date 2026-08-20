@@ -1,4 +1,9 @@
 import { accountL5Context } from "../../../packages/code-intelligence/src/eval/l5-context.js";
+import {
+  DEFAULT_PREMERGE_CONFIG,
+  DEFAULT_PUBLICATION_CONFIG,
+  DEFAULT_VERIFICATION_POLICY,
+} from "@acalys/review-engine";
 import { describe, expect, it } from "vitest";
 
 import { runRealAnalysis } from "../src/analysis.js";
@@ -8,24 +13,29 @@ import {
   L5_FACT_FAMILIES,
   L5_MODES,
   equivalenceIdentity,
+  runL5Pair,
 } from "../src/eval/l5-run.js";
+import { scoreQuality } from "../src/eval/l5-quality.js";
 import {
   L5_PRODUCTION_STAGE_CAPABILITY,
+  adaptL5GoldFindings,
   adaptL5CacheIdentityPairs,
   adaptL5CorpusCase,
   contextAccountingInputForTrace,
   inspectL5RequiredExposurePremises,
+  l5ProductionSubstantiveHashes,
   plannerAvailabilityForMode,
   runL5ProductionAnalysis,
+  runL5ProductionFunnel,
 } from "../src/eval/l5-production.js";
 
 const OPTIONS = {
   repositoryId: "0192f8a1-0000-7000-8000-0000000000a5",
   tenantId: "tenant-l5-production",
   policies: {
-    verifierPolicyVersion: "acalys.verifier/v1",
-    publicationPolicy: { version: "acalys.publication/v1" },
-    premergePolicy: { version: "acalys.premerge/v1" },
+    verifierPolicy: DEFAULT_VERIFICATION_POLICY,
+    publicationPolicy: DEFAULT_PUBLICATION_CONFIG,
+    premergePolicy: DEFAULT_PREMERGE_CONFIG,
   },
 } as const;
 
@@ -324,14 +334,119 @@ describe("P1-L.5 production measurement adapter", () => {
     ).toThrow(/not exhaustive/);
   });
 
-  it("reports the honest published-stage composition boundary", () => {
+  it("maps quality gold to analyzer correctness rather than context exposure", () => {
+    const corpusCase = caseById("binding-floating-reservation");
+    const [gold] = adaptL5GoldFindings(corpusCase);
+
+    expect(gold?.matcher.family).toBe(
+      corpusCase.gold.expectedFindings[0]?.correctnessFamily,
+    );
+    expect(gold?.matcher.family).not.toBe(
+      corpusCase.gold.expectedFindings[0]?.exposureFamily,
+    );
+  });
+
+  it("runs the production decision kernels through all downstream stages", async () => {
+    const adapted = adaptL5CorpusCase(
+      caseById("binding-floating-reservation"),
+      OPTIONS,
+    );
+    const outcome = await runL5ProductionFunnel(adapted, L5_MODES.TREATMENT);
+
+    expect(outcome.verifiedCandidates.length).toBeGreaterThan(0);
+    expect(
+      outcome.verifiedCandidates.every((candidate) => candidate.attempt),
+    ).toBe(true);
+    expect(outcome.promotion.kind).toBe("promoted");
+    expect(outcome.publication).not.toBeNull();
+    expect(outcome.premerge).not.toBeNull();
+    expect(outcome.qualityCandidates).toHaveLength(
+      outcome.verifiedCandidates.length,
+    );
+    expect(Object.values(l5ProductionSubstantiveHashes(outcome))).toHaveLength(
+      5,
+    );
+  });
+
+  it("proves recorder non-interference through the guarded A/B harness", async () => {
+    const adapted = adaptL5CorpusCase(
+      withoutLabels(caseById("binding-floating-reservation")),
+      OPTIONS,
+    );
+    const events: unknown[] = [];
+    const result = await runL5Pair({
+      control: {
+        case: adapted,
+        equivalence: adapted.equivalence,
+        mode: L5_MODES.CONTROL,
+      },
+      treatment: {
+        case: adapted,
+        equivalence: adapted.equivalence,
+        mode: L5_MODES.TREATMENT,
+      },
+      execute: ({ case: productionCase, mode, recorder }) =>
+        runL5ProductionFunnel(productionCase, mode, recorder),
+      substantiveHashes: l5ProductionSubstantiveHashes,
+      modeAttestation: (outcome) => outcome.attestation,
+      createRealRecorder: () => ({
+        record: (event) => events.push(event),
+      }),
+      score: ({ control, treatment }) => ({
+        control: scoreQuality({
+          caseIds: [adapted.corpusCase.id],
+          goldFindings: control.output.goldFindings,
+          candidates: control.output.qualityCandidates,
+        }),
+        treatment: scoreQuality({
+          caseIds: [adapted.corpusCase.id],
+          goldFindings: treatment.output.goldFindings,
+          candidates: treatment.output.qualityCandidates,
+        }),
+      }),
+    });
+
+    expect(events.length).toBeGreaterThan(0);
+    expect(Object.values(result.substantiveHashes.control)).toHaveLength(5);
+    expect(Object.values(result.substantiveHashes.treatment)).toHaveLength(5);
+  });
+
+  it("keeps publication and premerge independent after promotion", async () => {
+    const adapted = adaptL5CorpusCase(
+      caseById("binding-floating-reservation"),
+      {
+        ...OPTIONS,
+        policies: {
+          ...OPTIONS.policies,
+          publicationPolicy: {
+            ...DEFAULT_PUBLICATION_CONFIG,
+            maxComments: 0,
+          },
+          premergePolicy: {
+            blockingSeverity: "info",
+            blocking: true,
+          },
+        },
+      },
+    );
+    const outcome = await runL5ProductionFunnel(adapted, L5_MODES.TREATMENT);
+
+    expect(outcome.promotion.kind).toBe("promoted");
+    expect(outcome.publication?.publish).toEqual([]);
+    expect(outcome.publication?.withheld).not.toEqual([]);
+    expect(outcome.premerge).toEqual([
+      expect.objectContaining({ status: "failed", blocking: true }),
+    ]);
+  });
+
+  it("reports all production measurement stages as composed", () => {
     expect(L5_PRODUCTION_STAGE_CAPABILITY).toEqual({
       candidates: true,
-      verificationDecisions: false,
-      promotions: false,
-      publicationDecisions: false,
-      premergeDecisions: false,
-      limitation: expect.stringContaining("no verifier"),
+      verificationDecisions: true,
+      promotions: true,
+      publicationDecisions: true,
+      premergeDecisions: true,
+      limitation: null,
     });
   });
 });

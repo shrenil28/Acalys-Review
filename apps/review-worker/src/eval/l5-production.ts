@@ -22,14 +22,32 @@ import {
   ANALYZER_VERSION,
   ALL_ANALYZER_IDS,
   DEFAULT_LIMITS,
+  DEFAULT_PREMERGE_CONFIG,
+  DEFAULT_PUBLICATION_CONFIG,
+  DEFAULT_VERIFICATION_POLICY,
   SIGNATURE_ANALYZER_ID,
   SIGNATURE_ANALYZER_VERSION,
   SWALLOWED_ERROR_ANALYZER_ID,
   SWALLOWED_ERROR_VERSION,
+  evaluatePreMerge,
+  planPublication,
+  planVerificationContext,
+  promoteVerified,
+  toVerificationInput,
+  verifyDeterministically,
+  type CandidateFinding,
   type ExecutionLimits,
+  type PreMergeCheckPlan,
+  type PreMergeConfig,
+  type PromotionOutcome,
+  type PublicationConfig,
+  type PublicationPlan,
+  type VerificationPolicy,
+  type VerifiedCandidate,
 } from "@acalys/review-engine";
 
 import {
+  candidateFingerprint,
   runRealAnalysis,
   type AnalysisInstructionObservation,
   type AnalysisSource,
@@ -52,6 +70,7 @@ import type {
   L5CacheIdentityCategory,
   L5CacheIdentityPair,
 } from "./l5-identity.js";
+import type { GoldFinding, QualityCandidate } from "./l5-quality.js";
 import {
   L5_FACT_FAMILIES,
   L5_MODES,
@@ -61,6 +80,8 @@ import {
   type L5ModeAttestation,
   type L5ModeDefinition,
   type L5ModeId,
+  type L5Recorder,
+  type L5SubstantiveHashes,
 } from "./l5-run.js";
 
 export const L5_PRODUCTION_PLANNER_SCHEMA_VERSION =
@@ -82,19 +103,25 @@ const L5_PRODUCTION_ANALYZERS = [
 
 export const L5_PRODUCTION_STAGE_CAPABILITY = Object.freeze({
   candidates: true,
-  verificationDecisions: false,
-  promotions: false,
-  publicationDecisions: false,
-  premergeDecisions: false,
-  limitation:
-    "runRealAnalysis returns candidate-stage analysis only; it has no verifier, promotion, publication, or premerge execution ports",
+  verificationDecisions: true,
+  promotions: true,
+  publicationDecisions: true,
+  premergeDecisions: true,
+  limitation: null,
 });
 
 export interface L5ProductionPolicies {
-  readonly verifierPolicyVersion: string;
-  readonly publicationPolicy: unknown;
-  readonly premergePolicy: unknown;
+  readonly verifierPolicy: VerificationPolicy;
+  readonly publicationPolicy: PublicationConfig;
+  readonly premergePolicy: PreMergeConfig;
 }
+
+export const L5_DEFAULT_PRODUCTION_POLICIES: L5ProductionPolicies =
+  Object.freeze({
+    verifierPolicy: DEFAULT_VERIFICATION_POLICY,
+    publicationPolicy: DEFAULT_PUBLICATION_CONFIG,
+    premergePolicy: DEFAULT_PREMERGE_CONFIG,
+  });
 
 export interface L5ProductionCaseOptions {
   readonly repositoryId: string;
@@ -109,6 +136,7 @@ export interface L5AdaptedProductionCase {
   readonly headSha: string;
   readonly source: AnalysisSource;
   readonly snapshot: AnalysisSourceSnapshot;
+  readonly policies: L5ProductionPolicies;
   readonly equivalence: L5EquivalenceInput;
   readonly analysisOptions: Omit<
     RealAnalysisOptions,
@@ -135,6 +163,15 @@ export interface L5ProductionAnalysisOutcome {
   readonly contextAccountingInput: ReturnType<
     typeof contextAccountingInputForTrace
   >;
+}
+
+export interface L5ProductionFunnelOutcome extends L5ProductionAnalysisOutcome {
+  readonly verifiedCandidates: readonly VerifiedCandidate[];
+  readonly promotion: PromotionOutcome;
+  readonly publication: PublicationPlan | null;
+  readonly premerge: readonly PreMergeCheckPlan[] | null;
+  readonly qualityCandidates: readonly QualityCandidate[];
+  readonly goldFindings: readonly GoldFinding[];
 }
 
 export class L5ProductionPremiseError extends Error {
@@ -291,7 +328,7 @@ export function adaptL5CorpusCase(
     requiredContextLabels: [...corpusCase.gold.requiredContext],
     forbiddenContextLabels: [...corpusCase.gold.forbiddenContext],
     analyzers: L5_PRODUCTION_ANALYZERS,
-    verifierPolicyVersion: options.policies.verifierPolicyVersion,
+    verifierPolicyVersion: options.policies.verifierPolicy.version,
     publicationPolicy: options.policies.publicationPolicy,
     premergePolicy: options.policies.premergePolicy,
     contextTokenBudget: corpusCase.contextSelection.budgetTokens,
@@ -310,6 +347,7 @@ export function adaptL5CorpusCase(
     headSha,
     source,
     snapshot,
+    policies: options.policies,
     equivalence,
     analysisOptions: {
       repositoryId: options.repositoryId,
@@ -820,6 +858,274 @@ export async function runL5ProductionAnalysis(
       adapted.corpusCase,
       trace,
     ),
+  };
+}
+
+interface OrderedProductionCandidate {
+  readonly candidateId: string;
+  readonly finding: CandidateFinding;
+  readonly fingerprint: string;
+}
+
+function orderedProductionCandidates(
+  adapted: L5AdaptedProductionCase,
+  findings: readonly CandidateFinding[],
+): readonly OrderedProductionCandidate[] {
+  const ordered = findings
+    .map((finding, ordinal) => ({
+      finding,
+      ordinal,
+      semantic: canonicalJson({
+        ruleId: finding.ruleId,
+        family: finding.family,
+        category: finding.category,
+        path: finding.location.path,
+        startLine: finding.location.startLine,
+        endLine: finding.location.endLine,
+        analyzerIdentityHint: finding.identityHint,
+      }),
+    }))
+    .sort((left, right) =>
+      left.semantic < right.semantic
+        ? -1
+        : left.semantic > right.semantic
+          ? 1
+          : left.ordinal - right.ordinal,
+    );
+  const occurrences = new Map<string, number>();
+  return ordered.map(({ finding, semantic }) => {
+    const occurrence = occurrences.get(semantic) ?? 0;
+    occurrences.set(semantic, occurrence + 1);
+    return {
+      candidateId: `${adapted.corpusCase.id}:${sha256(semantic)}:${String(occurrence)}`,
+      finding,
+      fingerprint: candidateFingerprint(adapted.repositoryId, finding),
+    };
+  });
+}
+
+function recordStage(
+  recorder: L5Recorder | undefined,
+  event: Readonly<Record<string, unknown>>,
+): void {
+  recorder?.record(
+    Object.freeze({
+      schema: "acalys.p1-l5.production-stage/v1",
+      ...event,
+    }),
+  );
+}
+
+function fingerprintCounts(
+  fingerprints: readonly string[],
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const fingerprint of fingerprints) {
+    counts.set(fingerprint, (counts.get(fingerprint) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function consumeFingerprint(
+  counts: Map<string, number>,
+  fingerprint: string,
+): boolean {
+  const count = counts.get(fingerprint) ?? 0;
+  if (count === 0) return false;
+  counts.set(fingerprint, count - 1);
+  return true;
+}
+
+export function adaptL5GoldFindings(
+  corpusCase: L5CorpusCase,
+): readonly GoldFinding[] {
+  return corpusCase.gold.expectedFindings.map((finding) => ({
+    goldId: finding.goldId,
+    caseId: corpusCase.id,
+    matcher: {
+      ruleId: finding.ruleId,
+      family: finding.correctnessFamily,
+      path: finding.path,
+      allowedAnchorLines: {
+        startLine: finding.allowedAnchor.startLine,
+        endLine: finding.allowedAnchor.endLine,
+      },
+    },
+  }));
+}
+
+function qualityCandidatesFor(
+  adapted: L5AdaptedProductionCase,
+  candidates: readonly OrderedProductionCandidate[],
+  verified: readonly VerifiedCandidate[],
+  promotion: PromotionOutcome,
+  publication: PublicationPlan | null,
+): readonly QualityCandidate[] {
+  const attemptById = new Map(
+    verified.map((candidate) => [candidate.candidateId, candidate.attempt]),
+  );
+  const promoted = fingerprintCounts(
+    promotion.kind === "promoted"
+      ? promotion.findings.map((finding) => finding.fingerprint)
+      : [],
+  );
+  const published = fingerprintCounts(
+    publication?.publish.map((finding) => finding.fingerprint) ?? [],
+  );
+
+  return candidates.map(({ candidateId, finding, fingerprint }) => {
+    const attempt = attemptById.get(candidateId);
+    if (attempt === undefined) {
+      throw new Error(`Missing L.5 verification attempt for ${candidateId}`);
+    }
+    return {
+      caseId: adapted.corpusCase.id,
+      ruleId: finding.ruleId,
+      family: finding.family,
+      category: finding.category,
+      path: finding.location.path,
+      startLine: finding.location.startLine,
+      endLine: finding.location.endLine,
+      analyzerIdentityHint: finding.identityHint,
+      verificationDecision:
+        attempt.status === "unavailable" ? "unavailable" : attempt.decision,
+      promoted: consumeFingerprint(promoted, fingerprint),
+      published: consumeFingerprint(published, fingerprint),
+    };
+  });
+}
+
+/** Runs the existing pure production decision kernels without persistence. */
+export async function runL5ProductionFunnel(
+  adapted: L5AdaptedProductionCase,
+  mode: L5ModeDefinition,
+  recorder?: L5Recorder,
+): Promise<L5ProductionFunnelOutcome> {
+  const analysisOutcome = await runL5ProductionAnalysis(adapted, mode);
+  const candidates = orderedProductionCandidates(
+    adapted,
+    analysisOutcome.analysis.report.findings,
+  );
+  recordStage(recorder, {
+    caseId: adapted.corpusCase.id,
+    modeId: mode.id,
+    stage: "candidates",
+    count: candidates.length,
+  });
+
+  const repository = {
+    revisionId: adapted.headSha,
+    files: adapted.snapshot.repository,
+  };
+  const verifiedCandidates = candidates.map(
+    ({ candidateId, finding, fingerprint }): VerifiedCandidate => {
+      const { input } = toVerificationInput(candidateId, finding, {
+        repositoryId: adapted.repositoryId,
+        revisionId: adapted.headSha,
+      });
+      const context = planVerificationContext({
+        verificationInput: input,
+        repository,
+        policy: adapted.policies.verifierPolicy,
+      });
+      return {
+        candidateId,
+        fingerprint,
+        severity: finding.proposedSeverity,
+        category: finding.category,
+        path: finding.location.path,
+        attempt: verifyDeterministically(input, context),
+      };
+    },
+  );
+  recordStage(recorder, {
+    caseId: adapted.corpusCase.id,
+    modeId: mode.id,
+    stage: "verificationDecisions",
+    count: verifiedCandidates.length,
+  });
+
+  const promotion = promoteVerified(verifiedCandidates);
+  recordStage(recorder, {
+    caseId: adapted.corpusCase.id,
+    modeId: mode.id,
+    stage: "promotions",
+    kind: promotion.kind,
+  });
+
+  const promotedFindings =
+    promotion.kind === "promoted" ? promotion.findings : null;
+  const publication =
+    promotedFindings === null
+      ? null
+      : planPublication(promotedFindings, adapted.policies.publicationPolicy);
+  recordStage(recorder, {
+    caseId: adapted.corpusCase.id,
+    modeId: mode.id,
+    stage: "publicationDecisions",
+    count: publication?.decisions.length ?? 0,
+    blocked: publication === null,
+  });
+
+  // Enforcement and attention branch independently from the same promotion.
+  const premerge =
+    promotedFindings === null
+      ? null
+      : evaluatePreMerge(promotedFindings, adapted.policies.premergePolicy);
+  recordStage(recorder, {
+    caseId: adapted.corpusCase.id,
+    modeId: mode.id,
+    stage: "premergeDecisions",
+    count: premerge?.length ?? 0,
+    blocked: premerge === null,
+  });
+
+  return {
+    ...analysisOutcome,
+    verifiedCandidates,
+    promotion,
+    publication,
+    premerge,
+    qualityCandidates: qualityCandidatesFor(
+      adapted,
+      candidates,
+      verifiedCandidates,
+      promotion,
+      publication,
+    ),
+    goldFindings: adaptL5GoldFindings(adapted.corpusCase),
+  };
+}
+
+function substantiveHash(value: unknown): string {
+  return sha256(canonicalJson(value));
+}
+
+export function l5ProductionSubstantiveHashes(
+  outcome: L5ProductionFunnelOutcome,
+): L5SubstantiveHashes {
+  return {
+    candidates: substantiveHash(
+      outcome.qualityCandidates.map((candidate) => ({
+        caseId: candidate.caseId,
+        ruleId: candidate.ruleId,
+        family: candidate.family,
+        category: candidate.category,
+        path: candidate.path,
+        startLine: candidate.startLine,
+        endLine: candidate.endLine,
+        analyzerIdentityHint: candidate.analyzerIdentityHint,
+      })),
+    ),
+    verificationDecisions: substantiveHash(
+      outcome.verifiedCandidates.map((candidate) => ({
+        candidateId: candidate.candidateId,
+        attempt: candidate.attempt ?? null,
+      })),
+    ),
+    promotions: substantiveHash(outcome.promotion),
+    publicationDecisions: substantiveHash(outcome.publication),
+    premergeDecisions: substantiveHash(outcome.premerge),
   };
 }
 

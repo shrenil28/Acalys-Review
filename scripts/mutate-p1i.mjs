@@ -1572,8 +1572,7 @@ const ALL_MUTATIONS = [
     id: 171,
     name: "structural index is omitted from causal attribution",
     file: "apps/review-worker/src/eval/l5-quality.ts",
-    find:
-      'export const L5_FACT_FAMILIES = [\n  "structural_index",\n  "binding",',
+    find: 'export const L5_FACT_FAMILIES = [\n  "structural_index",\n  "binding",',
     replace: 'export const L5_FACT_FAMILIES = [\n  "binding",',
     suite: "apps/review-worker/tests/l5-quality.test.ts",
   },
@@ -1665,6 +1664,23 @@ const ALL_MUTATIONS = [
       "    if (input.index !== undefined && isUsable(input.index)) {\n" +
       "      for (const dependant of modulesReferencing(input.index, changed.path)) {",
     suite: "packages/code-intelligence/tests/l5-planner-seam.test.ts",
+  },
+  {
+    id: 181,
+    name: "quality gold matches context exposure instead of analyzer family",
+    file: "apps/review-worker/src/eval/l5-production.ts",
+    find: "      family: finding.correctnessFamily,",
+    replace: "      family: finding.exposureFamily,",
+    suite: "apps/review-worker/tests/l5-production.test.ts",
+  },
+  {
+    id: 182,
+    name: "L5 premerge enforcement is derived from publication output",
+    file: "apps/review-worker/src/eval/l5-production.ts",
+    find: "      : evaluatePreMerge(promotedFindings, adapted.policies.premergePolicy);",
+    replace:
+      "      : evaluatePreMerge(publication?.publish ?? [], adapted.policies.premergePolicy);",
+    suite: "apps/review-worker/tests/l5-production.test.ts",
   },
   {
     id: 17,
