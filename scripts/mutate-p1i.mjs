@@ -17,7 +17,7 @@
  * by `cp -r /tmp/bak src`: when the destination already exists that produces
  * `src/src/`, and eighteen duplicated modules once reached a commit that way.
  */
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import {
   readFileSync,
   writeFileSync,
@@ -507,6 +507,30 @@ const MUTATIONS = [
     suite: "packages/review-engine/tests/telemetry.test.ts",
   },
   {
+    id: 58,
+    name: "every suite shares one database name",
+    file: "packages/database/tests/postgres.ts",
+    find: "  const database = `acalys_test_${RUN_ID.slice(0, 12)}_${label}`.replace(",
+    replace: "  const database = `acalys_test_shared`.replace(",
+    suite: "packages/database/tests/isolation.test.ts",
+  },
+  {
+    id: 59,
+    name: "suite code receives the maintenance connection",
+    file: "packages/database/tests/postgres.ts",
+    find: "  return await connect(port, database);",
+    replace: "  return await connect(port, MAINTENANCE_DATABASE);",
+    suite: "packages/database/tests/isolation.test.ts",
+  },
+  {
+    id: 60,
+    name: "the shared server boots without single-flight coordination",
+    file: "packages/database/tests/postgres.ts",
+    find: "  return await withStartupSlot(MAX_CONCURRENT_STARTUPS, async () => {",
+    replace: "  return await (async () => {",
+    suite: "packages/database/tests/shared-server.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",
@@ -526,6 +550,41 @@ const MUTATIONS = [
 
 const backupDir = mkdtempSync(join(tmpdir(), "acalys-mutate-"));
 
+/**
+ * Files currently mutated, and how to put them back.
+ *
+ * The normal path restores after each mutation. An INTERRUPTED run does not —
+ * and one killed by a timeout left `ON CONFLICT` deleted from the promotion
+ * insert, sitting in the working tree looking like an edit somebody meant.
+ *
+ * The same lesson the Docker containers taught, in a second place: cleanup
+ * that only runs on the happy path is not cleanup. Signals cannot cover
+ * SIGKILL, so the harness also refuses to start if it finds a mutation
+ * outstanding from a previous run.
+ */
+const outstanding = new Map();
+
+const restoreAll = () => {
+  for (const [file, saved] of outstanding) {
+    try {
+      copyFileSync(saved, join(ROOT, file));
+    } catch {
+      // Nothing useful to do while exiting.
+    }
+  }
+  outstanding.clear();
+};
+
+process.once("SIGINT", () => {
+  restoreAll();
+  process.exit(130);
+});
+process.once("SIGTERM", () => {
+  restoreAll();
+  process.exit(143);
+});
+process.once("exit", restoreAll);
+
 function backup(file) {
   const target = join(backupDir, file.replaceAll("/", "__"));
   copyFileSync(join(ROOT, file), target);
@@ -534,6 +593,7 @@ function backup(file) {
 
 function restore(file, saved) {
   copyFileSync(saved, join(ROOT, file));
+  outstanding.delete(file);
 }
 
 async function runSuite(suite) {
@@ -563,6 +623,35 @@ function parseReport(stdout) {
   }
 }
 
+// Refuse to start on a tree already carrying an edit to a file this harness
+// mutates. Signals cannot cover SIGKILL, so the last line of defence is
+// noticing on the way in — an outstanding mutation would otherwise be measured
+// as the baseline, and every verdict in the run would be against the wrong
+// code.
+{
+  const targets = [...new Set(MUTATIONS.map((mutation) => mutation.file))];
+  const dirty = execFileSync(
+    "git",
+    ["status", "--porcelain", "--", ...targets],
+    {
+      cwd: ROOT,
+      encoding: "utf8",
+    },
+  ).trim();
+
+  if (dirty !== "" && process.env["ACALYS_MUTATE_ALLOW_DIRTY"] !== "1") {
+    console.error(
+      "Refusing to run: files this harness mutates have uncommitted changes.\n\n" +
+        dirty +
+        "\n\nAn interrupted run leaves a mutation applied, and measuring against " +
+        "it would make every verdict a verdict about the wrong code. Commit or " +
+        "restore first, or set ACALYS_MUTATE_ALLOW_DIRTY=1 if the changes are " +
+        "deliberate.",
+    );
+    process.exit(2);
+  }
+}
+
 const results = [];
 
 for (const mutation of MUTATIONS) {
@@ -580,6 +669,7 @@ for (const mutation of MUTATIONS) {
   }
 
   const mutated = original.replace(mutation.find, mutation.replace);
+  outstanding.set(mutation.file, saved);
   writeFileSync(join(ROOT, mutation.file), mutated);
 
   // Verify from disk that the mutation is really there, rather than trusting
@@ -625,9 +715,28 @@ for (const mutation of MUTATIONS) {
       status: test.status,
     })),
   );
-  const executed = tests.filter((test) => test.status !== "pending").length;
-  const skipped = tests.filter((test) => test.status === "pending").length;
+
+  // `skipped` as well as `pending`. Vitest reports a test whose suite failed to
+  // start as "skipped", and the first version of this parser only knew
+  // "pending" — so five un-run tests counted as five executed, zero failed, and
+  // a mutation that broke `beforeAll` outright was reported as SURVIVED.
+  const notRun = new Set(["pending", "skipped", "todo"]);
+  const executed = tests.filter((test) => !notRun.has(test.status)).length;
+  const skipped = tests.filter((test) => notRun.has(test.status)).length;
   const failed = tests.filter((test) => test.status === "failed");
+
+  // A test FILE that failed to run at all.
+  //
+  // Counted as a kill, and separately from a failed assertion: a mutation that
+  // makes the suite unable to start has been detected just as surely as one
+  // that trips an expectation, and the previous parser called it SURVIVED
+  // because it only looked at assertions that never ran.
+  //
+  // Distinct from a compile failure, which produces no report to parse and is
+  // still INVALID.
+  const brokenSuites = (report.testResults ?? [])
+    .filter((file) => file.status === "failed")
+    .map((file) => file.name ?? "unknown file");
 
   results.push({
     ...mutation,
@@ -636,14 +745,17 @@ for (const mutation of MUTATIONS) {
     skipped,
     failedCount: failed.length,
     failing: failed.slice(0, 3).map((test) => test.name),
+    brokenSuites,
     verdict:
-      executed > 0 && skipped === 0 && failed.length > 0
-        ? "KILLED"
-        : executed === 0
-          ? "INVALID — executed = 0"
-          : skipped > 0
-            ? "INVALID — skipped > 0"
-            : "SURVIVED",
+      brokenSuites.length > 0 && failed.length === 0
+        ? "KILLED — suite could not run"
+        : executed > 0 && skipped === 0 && failed.length > 0
+          ? "KILLED"
+          : executed === 0
+            ? "INVALID — executed = 0"
+            : skipped > 0
+              ? "INVALID — skipped > 0"
+              : "SURVIVED",
   });
 }
 
@@ -662,7 +774,7 @@ for (const result of results) {
   );
 }
 
-const killed = results.filter((r) => r.verdict === "KILLED").length;
+const killed = results.filter((r) => r.verdict.startsWith("KILLED")).length;
 const survived = results.filter((r) => r.verdict === "SURVIVED").length;
 const invalid = results.filter((r) => r.verdict.startsWith("INVALID")).length;
 console.log(

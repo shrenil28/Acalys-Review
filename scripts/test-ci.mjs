@@ -14,10 +14,21 @@
  * the skip assertion failed   a suite silently did not run
  * ```
  */
-import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { execFileSync, spawn } from "node:child_process";
 import { captureDiagnostics } from "./failure-diagnostics.mjs";
 
 const started = Date.now();
+
+/**
+ * One identity for the whole run, inherited by every vitest fork.
+ *
+ * The Postgres harness names its shared container and its per-suite databases
+ * from this. Without a shared value each fork would mint its own and boot its
+ * own server, which is the nine-container arrangement that destabilised Docker
+ * Desktop in the first place.
+ */
+process.env["ACALYS_TEST_RUN_ID"] ??= randomUUID();
 
 function run(command, args, phase) {
   return new Promise((resolve) => {
@@ -70,6 +81,43 @@ if (failed) {
       "flaky suite. Read the bundle before raising any timeout: a longer wait " +
       "turns a deadlock or a resource exhaustion bug into a slower flaky suite.",
   );
+}
+
+// The run's container, removed once every fork has finished with it.
+//
+// Suites drop their own databases; only the parent knows when the last one is
+// done, so the container is the parent's to remove. Selected by this run's
+// label — never by "looks like a test container", which is the rule the 62GB
+// volume incident paid for.
+//
+// `docker rm` takes ids, not filters. The first version passed `--filter`
+// straight to it and printed `Run 'docker rm --help'` while leaving the
+// container and its anonymous volume behind — the leak this checkpoint exists
+// to reduce, reintroduced by its own cleanup.
+try {
+  const ids = execFileSync(
+    "docker",
+    [
+      "ps",
+      "-aq",
+      "--filter",
+      `label=acalys.run=${process.env["ACALYS_TEST_RUN_ID"] ?? "none"}`,
+    ],
+    { encoding: "utf8", timeout: 15_000 },
+  )
+    .trim()
+    .split("\n")
+    .filter(Boolean);
+
+  if (ids.length > 0) {
+    execFileSync("docker", ["rm", "-f", "-v", "--", ...ids], {
+      stdio: "ignore",
+      timeout: 30_000,
+    });
+  }
+} catch {
+  // Best effort. The next run reaps by run label on its way in, which is the
+  // path that has to work anyway — SIGKILL never reaches this line.
 }
 
 process.exit(failed ? (outcome.code ?? 1) : 0);

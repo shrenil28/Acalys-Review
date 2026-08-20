@@ -36,17 +36,56 @@ import { withStartupSlot } from "./startup-limit.js";
 const run = promisify(execFile);
 
 /**
- * Identifies this process's containers.
+ * Identifies this test RUN — every vitest fork of it, not each process.
  *
- * Distinct per run, so `acalys.run!=RUN_ID` selects exactly the resources an
- * earlier run abandoned — which is the set stale reaping should target, and
- * nothing wider.
+ * Read from the environment so that the forks share one value. A per-process
+ * id would have each fork believing it owned a different server, which is the
+ * nine-container arrangement this checkpoint exists to remove.
+ *
+ * The fallback matters for a developer running one suite directly: they get a
+ * private server rather than joining or reaping someone else's.
  */
-const RUN_ID = randomUUID();
+const RUN_ID = process.env["ACALYS_TEST_RUN_ID"] ?? randomUUID();
+
+/**
+ * One Postgres server for the whole run.
+ *
+ * ```
+ * before                         after
+ * suite A → container            ┌──────── one container ────────┐
+ * suite B → container            │  db_run_A   db_run_B   db_…   │
+ * …          (nine boots)        └───────────────────────────────┘
+ * ```
+ *
+ * The expensive, and destabilising, operation was never the database — it was
+ * booting nine container processes and nine Postgres initialisations at once
+ * inside Docker Desktop's qemu VM. `CREATE DATABASE` inside an already-running
+ * server costs milliseconds.
+ *
+ * The invariant being preserved is **not** "one suite, one container". It is:
+ *
+ * > no suite can observe, modify, migrate, drop or corrupt another suite's
+ * > state
+ *
+ * which a database boundary gives, and which the two-suites-one-table-name
+ * test proves rather than asserts.
+ *
+ * What a shared server does NOT isolate — roles, server configuration,
+ * shared-state extensions, connection limits, and the Postgres process itself
+ * dying — is genuinely shared. A test that needs process-level isolation must
+ * ask for its own container; none does today, and nine were not worth paying
+ * for one that might.
+ */
+const SHARED_CONTAINER = `acalys-test-postgres-${RUN_ID.slice(0, 12)}`;
 
 const IMAGE = "postgres:16-alpine";
 const PASSWORD = "acalys-test";
-const DATABASE = "acalys_test";
+/**
+ * The database `CREATE DATABASE` is issued from.
+ *
+ * Deliberately not a suite's database, and never handed to suite code.
+ */
+const MAINTENANCE_DATABASE = "postgres";
 
 /**
  * Whether integration tests may be skipped at all.
@@ -135,7 +174,15 @@ export function dockerAvailable(): boolean {
  * container fails still fails, and full test parallelism is unchanged for
  * everything that is not booting a database.
  */
-const MAX_CONCURRENT_STARTUPS = 2;
+/**
+ * How many Postgres SERVERS may be booting at once, machine-wide.
+ *
+ * One, now that a run needs exactly one. The value used to be two because
+ * nine suites each booted their own; with a single shared server the permit
+ * exists to make the boot single-flight — eight forks arriving together
+ * produce one container rather than eight.
+ */
+const MAX_CONCURRENT_STARTUPS = 1;
 
 let volumeBaseline: ReadonlySet<string> | undefined;
 
@@ -247,7 +294,7 @@ async function waitForReady(
         "-U",
         "postgres",
         "-d",
-        DATABASE,
+        MAINTENANCE_DATABASE,
       ]);
 
       // And confirm from outside the container, which is where the tests run.
@@ -256,7 +303,7 @@ async function waitForReady(
         port,
         user: "postgres",
         password: PASSWORD,
-        database: DATABASE,
+        database: MAINTENANCE_DATABASE,
         connectionTimeoutMillis: 3_000,
       });
       await probe.connect();
@@ -299,24 +346,53 @@ export interface TestDatabase {
  * belongs to a concurrent run, and removing it would delete a live database
  * out from under another vitest file.
  */
-async function staleContainers(label: string): Promise<readonly string[]> {
-  try {
-    const { stdout } = await run("docker", [
-      "ps",
-      "-aq",
-      "--filter",
-      `label=acalys.suite=${label}`,
-      "--filter",
-      "status=exited",
-      "--filter",
-      "status=created",
-      "--filter",
-      "status=dead",
-    ]);
-    return stdout.split("\n").filter((id) => id.trim() !== "");
-  } catch {
-    return [];
+/**
+ * How long a container from another run must have existed before it counts as
+ * abandoned.
+ *
+ * "A different run id" is not enough on its own, and that cost four suites.
+ * The shared-server probe spawns processes with their own run id, so from
+ * their perspective the MAIN run's container was another run's — and they
+ * deleted it, mid-test, producing `Connection terminated unexpectedly` in
+ * four unrelated suites.
+ *
+ * A concurrent run's container is seconds old. One a crashed run left behind
+ * is not. Age plus foreign ownership is the pair; either alone deletes
+ * something someone is using.
+ */
+const ABANDONED_AFTER_MS = 30 * 60 * 1000;
+
+/**
+ * Containers this machine's EARLIER runs abandoned.
+ *
+ * Foreign run id AND old enough that no live run could own it. Precise
+ * ownership rather than "looks temporary", which is the rule the 62GB volume
+ * incident paid for and which keeps needing to be relearned somewhere new.
+ */
+async function abandonedContainers(): Promise<readonly string[]> {
+  const listed = await run("docker", [
+    "ps",
+    "-aq",
+    "--filter",
+    "label=acalys.test=true",
+  ]).catch(() => ({ stdout: "" }));
+
+  const abandoned: string[] = [];
+  for (const id of listed.stdout.trim().split("\n").filter(Boolean)) {
+    const inspected = await run("docker", [
+      "inspect",
+      "--format",
+      '{{index .Config.Labels "acalys.run"}} {{.Created}}',
+      id,
+    ]).catch(() => ({ stdout: "" }));
+
+    const [label, created] = inspected.stdout.trim().split(" ");
+    if (label === undefined || label === RUN_ID) continue;
+
+    const age = Date.now() - Date.parse(created ?? "");
+    if (Number.isFinite(age) && age > ABANDONED_AFTER_MS) abandoned.push(id);
   }
+  return abandoned;
 }
 
 /**
@@ -343,147 +419,150 @@ async function publishedPort(container: string): Promise<number> {
   return port;
 }
 
-export async function startPostgres(label = "default"): Promise<TestDatabase> {
-  const CONTAINER = `acalys-test-postgres-${label}`;
-  // Removed first, so a container left by an interrupted run does not make the
-  // next one fail with a stale schema.
-  // `-v`, on every removal in this file.
-  //
-  // The Postgres image declares `/var/lib/postgresql/data` as a VOLUME, so each
-  // container creates an anonymous volume. `docker rm -f` deletes the container
-  // and leaves the volume, and nothing ever refers to it again.
-  //
-  // The container reaping added earlier was therefore only half a fix: it
-  // stopped containers accumulating while every run kept adding ~70MB of
-  // orphaned volume. It reached **872 volumes and 62GB**, the disk filled, and
-  // Postgres containers stopped becoming reachable — which surfaced as nine
-  // integration suites failing to start, not as a disk error.
-  //
-  // The suites failed rather than skipping, which is the fail-closed rule
-  // working. But an infrastructure leak that presents as a product test failure
-  // costs an investigation every time, so the leak is closed at the source.
-  await run("docker", ["rm", "-f", "-v", CONTAINER]).catch(() => undefined);
+/**
+ * Boots the shared server if nobody has, then hands back a private database.
+ *
+ * Single-flight: the boot runs under a machine-wide permit of one, so eight
+ * forks arriving together produce one container rather than eight. The permit
+ * is held across readiness, not just creation — a second fork that saw the
+ * container exist but not yet serve would otherwise start its own.
+ */
+async function ensureSharedServer(): Promise<number> {
+  return await withStartupSlot(
+    MAX_CONCURRENT_STARTUPS,
+    async () => {
+      const existing = await run("docker", [
+        "ps",
+        "-q",
+        "--filter",
+        `name=^${SHARED_CONTAINER}$`,
+      ]).catch(() => ({ stdout: "" }));
 
-  // Held across creation AND readiness, because the burst that crashes the
-  // backend VM is several containers *booting* at once, not several `docker
-  // run` calls returning at once.
-  return await withStartupSlot(MAX_CONCURRENT_STARTUPS, async () => {
-    await run("docker", [
-      "run",
-      "-d",
-      "--name",
-      CONTAINER,
-      // Labels are what make an abandoned container findable later. A name alone
-      // only helps if the next run happens to use the same one.
-      "--label",
-      "acalys.test=true",
-      "--label",
-      `acalys.suite=${label}`,
-      // Run attribution, so stale reaping can target resources this machine's
-      // EARLIER runs left behind without touching the run in progress.
-      //
-      // The rule this enforces: test infrastructure may delete only what it can
-      // positively attribute to an Acalys test run. "Dangling" is Docker's
-      // ownership concept, not ours — a developer's stopped compose database is
-      // dangling, and a sweep that reclaims disk by deleting what it does not
-      // recognise is a hazard rather than a cleanup.
-      "--label",
-      `acalys.run=${RUN_ID}`,
-      "-e",
-      `POSTGRES_PASSWORD=${PASSWORD}`,
-      "-e",
-      `POSTGRES_DB=${DATABASE}`,
-      "-p",
-      // Docker picks the host port.
-      //
-      // This used to be derived from the label — `55_400 + charCodeSum % 90` —
-      // which is a 90-slot hash over arbitrary strings, so collisions were a
-      // matter of when. "hardening" collided with an existing suite and the
-      // container failed to start; vitest reported the ten tests inside as
-      // *skipped* while the suite itself failed, which is the exact shape of the
-      // three vacuous-test bugs this project has already shipped.
-      //
-      // Deterministic ports existed so a stale container could be found and
-      // removed. The container **name** already does that, and it is derived from
-      // the label too — so the port was buying nothing and costing a collision
-      // class. Letting Docker assign one removes the class rather than making it
-      // less likely.
-      "0:5432",
-      IMAGE,
-      // fsync off: this database is discarded, and durability of the *test*
-      // database is not what is under test. The transaction semantics that are
-      // under test are unaffected.
-      "-c",
-      "fsync=off",
-    ]);
+      if (existing.stdout.trim() === "") {
+        await captureVolumeBaseline();
 
-    // Reap containers abandoned by earlier runs, before starting a new one.
-    //
-    // Process handlers cannot cover SIGKILL, a machine crash, or the daemon
-    // dying, so cleanup must not depend on this process getting a chance to run.
-    // Every container is labelled, and each run sweeps the ones a previous run
-    // left behind — which is what stops abandoned resources repeatedly inflating
-    // Docker's internal high-water mark.
-    //
-    // Scoped to this suite's label so parallel vitest files cannot destroy each
-    // other's databases: the failure that would cause is a suite whose tables
-    // vanish mid-run, which reads as a product bug rather than a harness one.
-    await captureVolumeBaseline();
-    await run("docker", [
-      "rm",
-      "-f",
-      "-v",
-      "--",
-      ...(await staleContainers(label)),
-    ]).catch(() => undefined);
+        // Reaped on first boot, not on every suite: containers an earlier run
+        // abandoned, identified by run label. Process handlers cannot cover
+        // SIGKILL or a dead daemon, so recovery has to happen on the way in.
+        const abandoned = await abandonedContainers();
+        if (abandoned.length > 0) {
+          await run("docker", ["rm", "-f", "-v", "--", ...abandoned]).catch(
+            () => undefined,
+          );
+        }
 
-    // NOT `docker volume prune`.
-    //
-    // That was here, and it was destructive: a developer's local compose database
-    // whose stack happens to be stopped is a dangling volume, and pruning would
-    // delete it. `acalys-local_acalys-postgres-data` sat one command away from
-    // being wiped by running the test suite.
-    //
-    // `rm -f -v` above already removes the anonymous volume belonging to each
-    // reaped container, which closes the leak at its source and touches nothing
-    // else. A sweep that reclaims disk by deleting whatever it does not recognise
-    // is not a cleanup, it is a hazard.
-
-    // Removed on an abrupt exit too, not only on a clean `stop()`.
-    //
-    // An interrupted run — Ctrl-C, a crashed worker, a killed CI job — used to
-    // leave its container behind. Each one is small, but Docker Desktop's disk
-    // image only ever grows to its high-water mark, so the leak is permanent
-    // even after the container is gone. Dozens of aborted runs is how a test
-    // harness quietly consumes a third of a laptop.
-    const reap = (): void => {
-      try {
-        execFileSync("docker", ["rm", "-f", "-v", CONTAINER], {
-          stdio: "ignore",
-          timeout: 10_000,
-        });
-      } catch {
-        // Best effort: the process is already on its way out.
+        await run("docker", ["rm", "-f", "-v", SHARED_CONTAINER]).catch(
+          () => undefined,
+        );
+        await run("docker", [
+          "run",
+          "-d",
+          "--name",
+          SHARED_CONTAINER,
+          "--label",
+          "acalys.test=true",
+          "--label",
+          `acalys.run=${RUN_ID}`,
+          "-e",
+          `POSTGRES_PASSWORD=${PASSWORD}`,
+          "-e",
+          `POSTGRES_DB=${MAINTENANCE_DATABASE}`,
+          "-p",
+          "0:5432",
+          IMAGE,
+        ]);
       }
-    };
-    process.once("SIGINT", reap);
-    process.once("SIGTERM", reap);
-    process.once("exit", reap);
 
-    const PORT = await publishedPort(CONTAINER);
-    await waitForReady(CONTAINER, PORT);
-    return await connect(CONTAINER, PORT);
-  });
+      const port = await publishedPort(SHARED_CONTAINER);
+      await waitForReady(SHARED_CONTAINER, port);
+      return port;
+    },
+    // Overridable so a test that spawns its own harness processes can take a
+    // private lock. The shared-server probe needs to boot a server of its own,
+    // and against the default root it competed with the real suites for the
+    // single permit — starving four of them into failure while booting a
+    // second container. A probe must not contend on the resource it measures.
+    process.env["ACALYS_STARTUP_LOCK_ROOT"],
+  );
 }
 
-/** Everything after the container is serving, outside the startup gate. */
-async function connect(CONTAINER: string, PORT: number): Promise<TestDatabase> {
-  const pool = new pg.Pool({
+/**
+ * A database of this suite's own, inside the shared server.
+ *
+ * The name carries the run and the suite, so cleanup can drop **exactly** what
+ * this run created. Never `DROP DATABASE LIKE 'acalys_test_%'`: the Docker
+ * volume incident already taught that lesson at a cost of 62GB, and the rule
+ * transfers unchanged —
+ *
+ * > never replace precise ownership with "looks temporary"
+ */
+export async function startPostgres(label = "default"): Promise<TestDatabase> {
+  const port = await ensureSharedServer();
+  const database = `acalys_test_${RUN_ID.slice(0, 12)}_${label}`.replace(
+    /[^a-z0-9_]/gi,
+    "_",
+  );
+
+  // Connected to the maintenance database only long enough to create the
+  // suite's own. Suite code never receives this connection: a handle that can
+  // reach every other suite's database is the isolation boundary with a hole
+  // in it.
+  const admin = new pg.Pool({
     host: "127.0.0.1",
-    port: PORT,
+    port,
     user: "postgres",
     password: PASSWORD,
-    database: DATABASE,
+    database: MAINTENANCE_DATABASE,
+    max: 2,
+  });
+
+  try {
+    await admin.query(`DROP DATABASE IF EXISTS "${database}"`);
+    await admin.query(`CREATE DATABASE "${database}"`);
+  } finally {
+    await admin.end();
+  }
+
+  // Removed on abrupt exit too. The container is shared and outlives any one
+  // suite, so what a dying process must clean up is its DATABASE — dropping
+  // the container here would take the other suites down with it.
+  const reap = (): void => {
+    try {
+      execFileSync(
+        "docker",
+        [
+          "exec",
+          SHARED_CONTAINER,
+          "psql",
+          "-U",
+          "postgres",
+          "-d",
+          MAINTENANCE_DATABASE,
+          "-c",
+          `DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`,
+        ],
+        { stdio: "ignore", timeout: 10_000 },
+      );
+    } catch {
+      // Best effort: the process is already on its way out, and the next run
+      // reaps the whole container by run label anyway.
+    }
+  };
+  process.once("SIGINT", reap);
+  process.once("SIGTERM", reap);
+  process.once("exit", reap);
+
+  return await connect(port, database);
+}
+
+async function connect(port: number, database: string): Promise<TestDatabase> {
+  const pool = new pg.Pool({
+    host: "127.0.0.1",
+    port,
+    user: "postgres",
+    password: PASSWORD,
+    // This suite's database, and only this one.
+    database,
     max: 20,
   });
 
@@ -527,7 +606,24 @@ async function connect(CONTAINER: string, PORT: number): Promise<TestDatabase> {
     reset: apply,
     async stop() {
       await pool.end();
-      await run("docker", ["rm", "-f", "-v", CONTAINER]).catch(() => undefined);
+      // The suite's own database, by exact name. The container is shared and
+      // stays: another suite is very likely still using it.
+      const admin = new pg.Pool({
+        host: "127.0.0.1",
+        port,
+        user: "postgres",
+        password: PASSWORD,
+        database: MAINTENANCE_DATABASE,
+        max: 1,
+      });
+      try {
+        await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
+      } catch {
+        // A suite that cannot drop its database must not fail the suite that
+        // passed; the run-scoped container is removed wholesale afterwards.
+      } finally {
+        await admin.end();
+      }
     },
   };
 }

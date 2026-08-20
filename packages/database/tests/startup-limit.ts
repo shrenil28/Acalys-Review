@@ -27,7 +27,13 @@
  * subsequent run.
  */
 
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -93,6 +99,17 @@ function alive(pid: number): boolean {
   }
 }
 
+/** Whether an unstamped slot directory is old enough to be debris. */
+function unstampedAndOld(slot: string): boolean {
+  try {
+    return Date.now() - statSync(slot).mtimeMs > STALE_AFTER_MS;
+  } catch {
+    // Gone between the failed mkdir and this check — someone else released it,
+    // and the next attempt will take it cleanly.
+    return false;
+  }
+}
+
 function tryTake(slot: string): boolean {
   try {
     mkdirSync(slot, { recursive: false });
@@ -101,9 +118,22 @@ function tryTake(slot: string): boolean {
     // pids are reused, and a fresh slot whose pid happens to match a dead one
     // would otherwise be stolen from a live startup.
     const holder = readHolder(slot);
+
+    // A slot with no stamp yet is NOT free.
+    //
+    // `mkdir` is the atomic step and the stamp is written just after it, so
+    // there is a window in which the directory exists and `holder.json` does
+    // not. Treating that as expired let a second process delete the directory
+    // and recreate it while the first believed it held the slot — peak overlap
+    // 3 against a limit of 2, which the probe caught.
+    //
+    // The directory's own mtime is the fallback age: created moments ago means
+    // someone is mid-acquisition, and only a genuinely old unstamped directory
+    // is debris.
     const expired =
-      holder === undefined ||
-      (Date.now() - holder.takenAt > STALE_AFTER_MS && !alive(holder.pid));
+      holder === undefined
+        ? unstampedAndOld(slot)
+        : Date.now() - holder.takenAt > STALE_AFTER_MS && !alive(holder.pid);
     if (!expired) return false;
 
     try {
@@ -139,6 +169,7 @@ export async function withStartupSlot<T>(
   work: () => Promise<T>,
   root: string = DEFAULT_ROOT,
 ): Promise<T> {
+  root = root === "" ? DEFAULT_ROOT : root;
   try {
     mkdirSync(root, { recursive: true });
   } catch (error) {
