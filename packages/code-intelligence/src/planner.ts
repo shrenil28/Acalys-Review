@@ -323,6 +323,20 @@ export interface PlannerInstructionFacts {
   readonly targets: readonly PlannerInstructionTarget[];
 }
 
+export const PLANNER_FACT_FAMILIES = [
+  "structural_index",
+  "binding",
+  "test_relationship",
+  "config_governance",
+  "instruction_governance",
+] as const;
+
+export type PlannerFactFamily = (typeof PLANNER_FACT_FAMILIES)[number];
+
+export type PlannerFactFamilyAvailability = Readonly<
+  Record<PlannerFactFamily, boolean>
+>;
+
 export interface PlannerInput {
   readonly changed: readonly ChangedFileInput[];
   /** Every file the planner may draw on, including the changed ones. */
@@ -352,6 +366,18 @@ export interface PlannerInput {
   readonly configFacts?: ConfigFacts | undefined;
   /** Canonical identity of the configuration facts above. */
   readonly configFactsIdentity?: string | undefined;
+  /**
+   * Optional measurement seam for repository-intelligence A/B runs.
+   * Omission preserves the production all-families-enabled behavior.
+   */
+  readonly factFamilyAvailability?: PlannerFactFamilyAvailability | undefined;
+}
+
+function factFamilyEnabled(
+  input: PlannerInput,
+  family: PlannerFactFamily,
+): boolean {
+  return input.factFamilyAvailability?.[family] ?? true;
 }
 
 /**
@@ -475,10 +501,10 @@ export function generateCandidates(
   const byPath = new Map(input.repository.map((file) => [file.path, file]));
 
   const selectedConfigurations = new Map(
-    (input.configFacts?.governance ?? []).map((relationship) => [
-      relationship.projectPath,
-      relationship,
-    ]),
+    (factFamilyEnabled(input, "config_governance")
+      ? (input.configFacts?.governance ?? [])
+      : []
+    ).map((relationship) => [relationship.projectPath, relationship]),
   );
   for (const relationship of [...selectedConfigurations.values()].sort(
     (left, right) =>
@@ -504,7 +530,9 @@ export function generateCandidates(
     });
   }
 
-  candidates.push(...factualInstructionCandidates(input.instructionFacts));
+  if (factFamilyEnabled(input, "instruction_governance")) {
+    candidates.push(...factualInstructionCandidates(input.instructionFacts));
+  }
 
   for (const instruction of input.instructions ?? []) {
     candidates.push({
@@ -561,7 +589,9 @@ export function generateCandidates(
     // Where the index has nothing — it failed, the language is unsupported,
     // the module did not parse — the syntactic candidate stands. Degrading to
     // a weaker fact is right; degrading to no context is not.
-    const indexed = indexedContainers(input.index, changed);
+    const indexed = factFamilyEnabled(input, "structural_index")
+      ? indexedContainers(input.index, changed)
+      : [];
 
     for (const symbol of containers.values()) {
       candidates.push({
@@ -630,7 +660,9 @@ export function generateCandidates(
     // Same precedence rule as L.1: an indexed answer replaces the syntactic
     // one for the same span, and where no binding is established the syntactic
     // candidate stands.
-    for (const record of boundCallees(input.index, changed.path)) {
+    for (const record of factFamilyEnabled(input, "binding")
+      ? boundCallees(input.index, changed.path)
+      : []) {
       const source = input.sources.get(record.declaration.moduleId);
       if (source === undefined) continue;
       candidates.push({
@@ -697,7 +729,11 @@ export function generateCandidates(
     // precedence rule L.1 established; where the index has nothing, the
     // syntactic guess still stands.
     const indexedDependants = new Set<string>();
-    if (input.index !== undefined && isUsable(input.index)) {
+    if (
+      factFamilyEnabled(input, "binding") &&
+      input.index !== undefined &&
+      isUsable(input.index)
+    ) {
       for (const dependant of modulesReferencing(input.index, changed.path)) {
         const source = input.sources.get(dependant.moduleId);
         if (source === undefined) continue;
@@ -752,6 +788,7 @@ export function generateCandidates(
         // so the next person adds a case rather than asking whether the branch
         // is reachable.
         if (
+          factFamilyEnabled(input, "binding") &&
           input.index !== undefined &&
           isUsable(input.index) &&
           input.index.modules.some(
@@ -789,7 +826,9 @@ export function generateCandidates(
     // test the index already related, under the same precedence rule L.1
     // established: the indexed answer dominates when positively established.
     const indexedTests = new Set<string>();
-    for (const relationship of relatedTests(input.index, changed.path)) {
+    for (const relationship of factFamilyEnabled(input, "test_relationship")
+      ? relatedTests(input.index, changed.path)
+      : []) {
       const source = input.sources.get(relationship.testModuleId);
       if (source === undefined) continue;
       indexedTests.add(relationship.testModuleId);
@@ -1377,17 +1416,33 @@ export function assembleContext(
   return { items, omissions, budget: { limit: budgetTokens, consumed } };
 }
 
+export interface ContextPlanningTrace {
+  readonly offered: readonly ContextCandidate[];
+  readonly scored: readonly ScoredCandidate[];
+  readonly context: AssembledContext;
+}
+
+/** Generate, score and assemble while retaining each observable stage. */
+export function planContextWithTrace(
+  input: PlannerInput,
+  budgetTokens: number,
+): ContextPlanningTrace {
+  const generated = new Set(
+    input.repository.filter((file) => file.generated).map((file) => file.path),
+  );
+  const offered = generateCandidates(input);
+  const scored = scoreCandidates(offered);
+  return {
+    offered,
+    scored,
+    context: assembleContext(scored, budgetTokens, generated),
+  };
+}
+
 /** Generate, score and assemble in one call. */
 export function planContext(
   input: PlannerInput,
   budgetTokens: number,
 ): AssembledContext {
-  const generated = new Set(
-    input.repository.filter((file) => file.generated).map((file) => file.path),
-  );
-  return assembleContext(
-    scoreCandidates(generateCandidates(input)),
-    budgetTokens,
-    generated,
-  );
+  return planContextWithTrace(input, budgetTokens).context;
 }

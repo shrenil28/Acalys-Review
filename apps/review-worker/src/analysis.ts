@@ -47,6 +47,7 @@ import {
   type InstructionDiscoveryResult,
   type InstructionPrecedenceTrustAnalysis,
   type InstructionTraversal,
+  type PlannerInput,
   type RepositoryIndex,
 } from "@acalys/code-intelligence";
 import { gitObjectId, isRepositoryPath } from "@acalys/contracts/domain";
@@ -236,6 +237,14 @@ export interface RealAnalysisOptions {
   readonly source: AnalysisSource;
   readonly contextTokenBudget?: number | undefined;
   readonly limits?: Partial<ExecutionLimits> | undefined;
+  /**
+   * Measurement-only planner seam. Omission uses the production planner
+   * unchanged; L.5 supplies a traced planner with an explicit fact-family
+   * availability input.
+   */
+  readonly contextPlanner?:
+    | ((input: PlannerInput, budgetTokens: number) => AssembledContext)
+    | undefined;
 }
 
 export interface RealAnalysisOutcome {
@@ -333,7 +342,7 @@ export async function runRealAnalysis(
   // question of an index from a different revision answering for this one.
   const { index, indexStats } = buildIndexFor(options, repository);
 
-  const context = planContext(
+  const context = (options.contextPlanner ?? planContext)(
     {
       changed: changed.map((file) => ({
         path: file.path,
