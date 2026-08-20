@@ -190,3 +190,86 @@ describe("Zero rows has more than one cause", () => {
     expect(toFindingViews(outcomes.allSuperseded.value.items)).toEqual([]);
   });
 });
+
+/**
+ * An aborted request is a cancellation, not a failure.
+ *
+ * Without this distinction, ordinary navigation flashes "could not load"
+ * because React cleaned up an effect — and, worse, a late response from a
+ * superseded request can overwrite the current one.
+ */
+describe("Cancellation is not failure", () => {
+  it("reports an abort as transport, for the caller to ignore by signal", async () => {
+    const controller = new AbortController();
+    const aborting = vi.fn().mockImplementation(() => {
+      controller.abort();
+      return Promise.reject(
+        Object.assign(new Error("The operation was aborted"), {
+          name: "AbortError",
+        }),
+      );
+    });
+
+    const result = await listReviewFindings(
+      client(aborting as never),
+      "r",
+      { signal: controller.signal },
+    );
+
+    // The client cannot know whether an abort was deliberate; the caller can,
+    // because it owns the controller. So the client reports, and the hook
+    // checks `signal.aborted` before setting state.
+    expect(result.kind).toBe("transport");
+    expect(controller.signal.aborted).toBe(true);
+  });
+
+  it("lets a caller distinguish its own abort from a real network failure", async () => {
+    const controller = new AbortController();
+    const offline = await listReviewFindings(
+      client(vi.fn().mockRejectedValue(new Error("offline")) as never),
+      "r",
+      { signal: controller.signal },
+    );
+
+    expect(offline.kind).toBe("transport");
+    // Not aborted: this one really is a failure, and the hook will surface it.
+    expect(controller.signal.aborted).toBe(false);
+  });
+});
+
+describe("Rejections carry a remedy, not just a number", () => {
+  it("categorises statuses a page would respond to differently", async () => {
+    const expected = [
+      [401, "unauthorized"],
+      [403, "forbidden"],
+      [404, "absent"],
+      [409, "conflict"],
+      [429, "throttled"],
+      [503, "server"],
+      [418, "other"],
+    ] as const;
+
+    for (const [status, category] of expected) {
+      const result = await listReviewFindings(
+        client(respondWith({}, status)),
+        "r",
+      );
+      expect(result, String(status)).toMatchObject({
+        kind: "rejected",
+        status,
+        category,
+      });
+    }
+  });
+
+  it("never puts the response body in the result", async () => {
+    // A body can contain anything a misconfigured server decided to include,
+    // including a credential echoed back in an error envelope.
+    const result = await listReviewFindings(
+      client(respondWith({ secret: "sk-live-abcdef" }, 500)),
+      "r",
+    );
+    expect(result.kind).toBe("rejected");
+    expect(JSON.stringify(result)).not.toContain("sk-live");
+  });
+});

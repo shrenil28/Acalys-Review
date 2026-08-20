@@ -26,7 +26,7 @@ import { deepScanFindings, type DeepScanFinding } from "@/data/security";
 import { toFindingViews, type FindingView } from "@/lib/findings";
 
 import { createApiClient } from "./client.js";
-import { apiBaseUrl } from "./config.js";
+import { resolveDataMode } from "./config.js";
 import { listReviewFindings } from "./reviewFindings.js";
 
 export type DeepScanState =
@@ -39,7 +39,14 @@ export type DeepScanState =
    * success the product reports proudly, and reaching it from a failure would
    * make an outage indistinguishable from good news.
    */
-  | { readonly status: "failed"; readonly detail: string };
+  | { readonly status: "failed"; readonly detail: string }
+  /**
+   * The build does not say where its data comes from.
+   *
+   * Its own state rather than `failed`, because the remedy is a deployment
+   * variable and not a retry — and because it must never resolve to fixtures.
+   */
+  | { readonly status: "misconfigured"; readonly detail: string };
 
 /**
  * Fills the fields the API does not yet carry.
@@ -70,20 +77,30 @@ export function useDeepScanFindings(reviewId?: string): DeepScanState {
   const [state, setState] = useState<DeepScanState>({ status: "loading" });
 
   useEffect(() => {
-    const baseUrl = apiBaseUrl();
+    const mode = resolveDataMode();
 
-    if (baseUrl === undefined || reviewId === undefined) {
-      // No backend to ask. The app renders what it has always rendered.
+    if (mode.kind === "misconfigured") {
+      // Never fixtures. A build that cannot say where its data comes from must
+      // not pick the option that looks like working software.
+      setState({ status: "misconfigured", detail: mode.detail });
+      return;
+    }
+
+    if (mode.kind === "fixtures" || reviewId === undefined) {
       setState({ status: "ready", findings: deepScanFindings });
       return;
     }
 
     const controller = new AbortController();
-    const client = createApiClient({ baseUrl });
+    const client = createApiClient({ baseUrl: mode.baseUrl });
 
     void listReviewFindings(client, reviewId, {
       signal: controller.signal,
     }).then((result) => {
+      // Aborted means this request was superseded or the component unmounted.
+      // Neither is a failure, and rendering one would flash "could not load"
+      // during ordinary navigation — and would let a late response from a
+      // previous request overwrite the current one.
       if (controller.signal.aborted) return;
       setState(
         result.kind === "ok"

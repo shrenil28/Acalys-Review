@@ -535,6 +535,77 @@ const MUTATIONS = [
     replace: "const MAX_CONCURRENT_STARTUPS = 99;",
     suite: "packages/database/tests/shared-server.test.ts",
   },
+  // ── frontend semantic boundary ─────────────────────────────────────────
+  //
+  // Aimed at meaning, never at presentation. Mutating a Tailwind class would
+  // cost a full run and prove nothing; these change what a developer is told
+  // about their code.
+  {
+    id: 61,
+    name: "a verified-but-withheld finding is shown as Open",
+    file: "apps/web/src/lib/findings.ts",
+    find: '      return { visibility: "visible", status: "In review" };\n    case "published":',
+    replace:
+      '      return { visibility: "visible", status: "Open" };\n    case "published":',
+    suite: "apps/web/tests/findings.test.ts",
+  },
+  {
+    id: 62,
+    name: "a superseded finding becomes visible",
+    file: "apps/web/src/lib/findings.ts",
+    find: '      return { visibility: "hidden", reason: "superseded" };',
+    replace: '      return { visibility: "visible", status: "Open" };',
+    suite: "apps/web/tests/findings.test.ts",
+  },
+  {
+    id: 63,
+    name: "a stale finding is reported as fixed",
+    file: "apps/web/src/lib/findings.ts",
+    find: '    case "stale":\n      // The code beneath it moved',
+    replace:
+      '    case "stale":\n      return { visibility: "visible", status: "Fixed" };\n    // The code beneath it moved',
+    suite: "apps/web/tests/findings.test.ts",
+  },
+  {
+    id: 64,
+    name: "a hidden finding is dropped without its reason",
+    file: "apps/web/src/lib/findings.ts",
+    find: '    if (presentation.visibility === "hidden") continue;',
+    replace: "    if (false) continue;",
+    suite: "apps/web/tests/findings.test.ts",
+  },
+  {
+    id: 65,
+    name: "a failed request validates as an empty success",
+    file: "apps/web/src/lib/api/client.ts",
+    find: "      if (!response.ok) {",
+    replace: "      if (false) {",
+    suite: "apps/web/tests/api-client.test.ts",
+  },
+  {
+    id: 66,
+    name: "an unvalidated response is accepted",
+    file: "apps/web/src/lib/api/client.ts",
+    find: "      if (!parsed.success) {",
+    replace: "      if (false) {",
+    suite: "apps/web/tests/api-client.test.ts",
+  },
+  {
+    id: 67,
+    name: "missing configuration silently becomes fixtures",
+    file: "apps/web/src/lib/api/config.ts",
+    find: "  if (isProduction) {",
+    replace: "  if (false) {",
+    suite: "apps/web/tests/data-mode.test.ts",
+  },
+  {
+    id: 68,
+    name: "the backend's finding identity is replaced by position",
+    file: "apps/web/src/lib/findings.ts",
+    find: "      id: finding.id,",
+    replace: "      id: String(views.length),",
+    suite: "apps/web/tests/findings.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",

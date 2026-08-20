@@ -27,6 +27,7 @@
 
 import type { z } from "zod";
 
+import { categorize } from "./result.js";
 import type { ApiResult } from "./result.js";
 
 export interface ApiClientOptions {
@@ -82,6 +83,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         return {
           kind: "rejected",
           status: response.status,
+          category: categorize(response.status),
           // The status, not the body. A body can contain anything a
           // misconfigured server decided to include.
           detail: `the server responded ${String(response.status)}`,

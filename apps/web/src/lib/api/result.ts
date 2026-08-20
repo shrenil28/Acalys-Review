@@ -34,8 +34,57 @@ export type ApiResult<T> =
    * they are exchanging. Rendering either as an empty list hides both.
    */
   | { readonly kind: "contract"; readonly detail: string }
-  /** An error status the endpoint declares, such as 404. */
-  | { readonly kind: "rejected"; readonly status: number; readonly detail: string };
+  /**
+   * The server answered with a status it declines to serve on.
+   *
+   * Carries a `category` as well as the number, so a page can choose a remedy
+   * without parsing a message. These want different responses and only one of
+   * them is worth retrying:
+   *
+   * ```
+   * unauthorized  sign in again
+   * forbidden     ask for access
+   * absent        the thing is gone; navigate away
+   * conflict      state moved under you; refetch
+   * throttled     wait
+   * server        report it
+   * ```
+   *
+   * They do not need six visual designs. They need enough structure that the
+   * choice is available later without a string comparison.
+   */
+  | {
+      readonly kind: "rejected";
+      readonly status: number;
+      readonly category: RejectionCategory;
+      readonly detail: string;
+    };
+
+export type RejectionCategory =
+  | "unauthorized"
+  | "forbidden"
+  | "absent"
+  | "conflict"
+  | "throttled"
+  | "server"
+  | "other";
+
+export function categorize(status: number): RejectionCategory {
+  switch (status) {
+    case 401:
+      return "unauthorized";
+    case 403:
+      return "forbidden";
+    case 404:
+      return "absent";
+    case 409:
+      return "conflict";
+    case 429:
+      return "throttled";
+    default:
+      return status >= 500 ? "server" : "other";
+  }
+}
 
 /** Whether a result carries an answer. Never use truthiness for this. */
 export function isOk<T>(
