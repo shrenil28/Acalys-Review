@@ -250,6 +250,39 @@ module.exports = {
         reachable: false,
       },
     })),
+    // The same rule for the frontend, whose entry graph is a browser bundle
+    // rather than a package export.
+    //
+    // Vite's root is `index.html`, which loads exactly one module. So
+    // reachability here means: reachable from the thing the browser actually
+    // runs. `no-orphans` does not cover it, for the same reason it did not
+    // cover `src/src` in the review engine — a duplicated subtree whose files
+    // import each other is not orphaned.
+    //
+    // Written separately rather than folded into the generator above because
+    // the shapes genuinely differ: a library has several published entry
+    // points, an application has one.
+    {
+      name: "no-unreachable-in-web",
+      severity: "error",
+      comment:
+        "Every module under apps/web/src must be reachable from `main.tsx`, " +
+        "the single module `index.html` loads. A module the bundle cannot " +
+        "reach is dead code or an accident — and a duplicated component tree " +
+        "is both.",
+      from: { path: "^apps/web/src/main\\.tsx$" },
+      to: {
+        path: "^apps/web/src/.+\\.tsx?$",
+        pathNot: [
+          "\\.d\\.ts$",
+          "^apps/web/src/main\\.tsx$",
+          // Tests are entry points of their own: the runner loads them, and
+          // nothing in the bundle imports them.
+          "^apps/web/tests/",
+        ],
+        reachable: false,
+      },
+    },
     {
       name: "no-orphans",
       // An error, not a warning. This rule already existed and already would
