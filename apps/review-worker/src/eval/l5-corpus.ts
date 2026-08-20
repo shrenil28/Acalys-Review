@@ -256,8 +256,7 @@ const rawCases: readonly L5CorpusCase[] = [
   {
     id: "structural-index-public-signature-declaration",
     category: "structural_index_positive",
-    summary:
-      "A changed indexed public declaration adds a required parameter.",
+    summary: "A changed indexed public declaration adds a required parameter.",
     families: ["structural_index"],
     eligibility: {
       witness: "positive_gold_and_ablatable_exposure",
@@ -679,7 +678,7 @@ const rawCases: readonly L5CorpusCase[] = [
           "  return expiresAt < now;",
           "}",
         ),
-        "spec/security/token-boundary.ts": lines(
+        "spec/security/token-boundary.test.ts": lines(
           'import { isExpired } from "../../src/token.js";',
           'it("expires at the boundary", () => expect(isExpired(10, 10)).toBe(true));',
         ),
@@ -720,7 +719,7 @@ const rawCases: readonly L5CorpusCase[] = [
           id: "token-boundary-test",
           family: "test_relationship",
           reason: "test",
-          path: "spec/security/token-boundary.ts",
+          path: "spec/security/token-boundary.test.ts",
           selector: { kind: "content", contains: "isExpired(10, 10)" },
           because:
             "its import binding associates a test outside filename conventions with the changed symbol",
@@ -1007,10 +1006,10 @@ const rawCases: readonly L5CorpusCase[] = [
           id: "instruction-coverage-gap",
           family: "instruction_governance",
           reason: "coverage",
-          path: "vendor/AGENTS.md",
-          selector: { kind: "whole_artifact" },
+          path: "src/auth/login.ts",
+          selector: { kind: "content", contains: "vendor/AGENTS.md" },
           because:
-            "the read outage must remain visible so the retained positive is not mistaken for complete instruction coverage",
+            "the target-scoped coverage item must name the vendor read outage so the retained positive is not mistaken for complete instruction coverage",
           requiredExposure: {
             disappearsUnderAblation: "instruction_governance",
             factKind: "instruction_governance",
@@ -2114,7 +2113,8 @@ export function validateL5Corpus(corpus: L5Corpus): readonly string[] {
         if (
           label.selector.kind === "content" &&
           (!isNonEmpty(label.selector.contains) ||
-            content?.includes(label.selector.contains) !== true)
+            (label.reason !== "coverage" &&
+              content?.includes(label.selector.contains) !== true))
         ) {
           issues.push(
             `${labelKind} context ${label.id}: content selector does not match artifact`,

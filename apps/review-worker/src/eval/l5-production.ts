@@ -18,13 +18,18 @@ import {
 } from "@acalys/code-intelligence";
 import { canonicalJson } from "@acalys/contracts/domain";
 import {
+  ANALYZER_ID,
+  ANALYZER_VERSION,
   ALL_ANALYZER_IDS,
   DEFAULT_LIMITS,
+  SIGNATURE_ANALYZER_ID,
+  SIGNATURE_ANALYZER_VERSION,
+  SWALLOWED_ERROR_ANALYZER_ID,
+  SWALLOWED_ERROR_VERSION,
   type ExecutionLimits,
 } from "@acalys/review-engine";
 
 import {
-  REVIEW_PROCEDURE_VERSION,
   runRealAnalysis,
   type AnalysisInstructionObservation,
   type AnalysisSource,
@@ -62,6 +67,18 @@ export const L5_PRODUCTION_PLANNER_SCHEMA_VERSION =
   "acalys.planner.fact-family-availability/v1" as const;
 export const L5_PRODUCTION_ADAPTER_SCHEMA_VERSION =
   "acalys.p1-l5.production-adapter/v1" as const;
+
+const L5_PRODUCTION_ANALYZERS = [
+  { id: ANALYZER_ID, procedureVersion: ANALYZER_VERSION },
+  {
+    id: SIGNATURE_ANALYZER_ID,
+    procedureVersion: SIGNATURE_ANALYZER_VERSION,
+  },
+  {
+    id: SWALLOWED_ERROR_ANALYZER_ID,
+    procedureVersion: SWALLOWED_ERROR_VERSION,
+  },
+] as const;
 
 export const L5_PRODUCTION_STAGE_CAPABILITY = Object.freeze({
   candidates: true,
@@ -273,10 +290,7 @@ export function adaptL5CorpusCase(
     goldFindingLabels: [...corpusCase.gold.expectedFindings],
     requiredContextLabels: [...corpusCase.gold.requiredContext],
     forbiddenContextLabels: [...corpusCase.gold.forbiddenContext],
-    analyzers: ALL_ANALYZER_IDS.map((id) => ({
-      id,
-      procedureVersion: REVIEW_PROCEDURE_VERSION,
-    })),
+    analyzers: L5_PRODUCTION_ANALYZERS,
     verifierPolicyVersion: options.policies.verifierPolicyVersion,
     publicationPolicy: options.policies.publicationPolicy,
     premergePolicy: options.policies.premergePolicy,
@@ -908,4 +922,15 @@ export function assertPlannerFamilyNamesAreExact(): void {
   }
 }
 
+export function assertProductionAnalyzerListIsExact(): void {
+  const production = [...ALL_ANALYZER_IDS].sort();
+  const measured = L5_PRODUCTION_ANALYZERS.map(
+    (analyzer) => analyzer.id,
+  ).sort();
+  if (canonicalJson(production) !== canonicalJson(measured)) {
+    throw new Error("Production and L.5 analyzer lists differ");
+  }
+}
+
 assertPlannerFamilyNamesAreExact();
+assertProductionAnalyzerListIsExact();

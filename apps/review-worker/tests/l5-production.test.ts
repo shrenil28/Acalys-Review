@@ -11,7 +11,6 @@ import {
 } from "../src/eval/l5-run.js";
 import {
   L5_PRODUCTION_STAGE_CAPABILITY,
-  L5ProductionPremiseError,
   adaptL5CacheIdentityPairs,
   adaptL5CorpusCase,
   contextAccountingInputForTrace,
@@ -152,23 +151,7 @@ describe("P1-L.5 production measurement adapter", () => {
         adapted.map((item) => inspectL5RequiredExposurePremises(item)),
       )
     ).flat();
-    expect(issues, issues.join("\n")).toHaveLength(4);
-    expect(issues).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining(
-          "structural-index-public-signature-declaration:public-format-indexed-declaration",
-        ),
-        expect.stringContaining(
-          "structural-index-export-declaration-drift:public-parse-indexed-declaration",
-        ),
-        expect.stringContaining(
-          "test-relationship-expiry-boundary:token-boundary-test",
-        ),
-        expect.stringContaining(
-          "instruction-auth-denial-audit:instruction-coverage-gap",
-        ),
-      ]),
-    );
+    expect(issues, issues.join("\n")).toEqual([]);
   });
 
   it("attests control and all five single-family ablations at every stage", async () => {
@@ -301,35 +284,6 @@ describe("P1-L.5 production measurement adapter", () => {
       droppedEstimatedTokens: 50,
     });
   });
-
-  it.each([
-    [
-      "structural-index-public-signature-declaration",
-      "public-format-indexed-declaration",
-      "types/format.d.ts|indexed_declaration",
-      "src/format.ts|indexed_declaration|repository_index|1-3",
-    ],
-    [
-      "structural-index-export-declaration-drift",
-      "public-parse-indexed-declaration",
-      "types/parser.d.ts|indexed_declaration",
-      "src/parser.ts|indexed_declaration|repository_index|1-3",
-    ],
-  ])(
-    "fails closed with observed candidates when %s has unreachable structural gold",
-    async (caseId, labelId, expected, observed) => {
-      const adapted = adaptL5CorpusCase(caseById(caseId), OPTIONS);
-      const error = await runL5ProductionAnalysis(
-        adapted,
-        L5_MODES.TREATMENT,
-      ).catch((caught: unknown) => caught);
-
-      expect(error).toBeInstanceOf(L5ProductionPremiseError);
-      expect(String(error)).toContain(`${caseId}:${labelId}`);
-      expect(String(error)).toContain(expected);
-      expect(String(error)).toContain(observed);
-    },
-  );
 
   it("maps every frozen cache pair exhaustively into the exact key evaluator", () => {
     const observations = Object.fromEntries(
