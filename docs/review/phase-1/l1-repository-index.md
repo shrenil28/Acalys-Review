@@ -274,9 +274,9 @@ itself.
 ## Evidence
 
 ```
-mechanism witness   45 tests   packages/code-intelligence/tests/repository-index.test.ts
+mechanism witness   46 tests   packages/code-intelligence/tests/repository-index.test.ts
 wiring witness       9 tests   apps/review-worker/tests/index-wiring.test.ts
-repository total  1,924 tests   0 skipped
+repository total  1,925 tests   0 skipped
 depcruise           299 modules, 0 violations
 ```
 
@@ -338,6 +338,106 @@ observe the code being wrong.
 
 The split is the checkpoint's point. 77–85 dying proves the facts are correct.
 Only 86–88 dying proves anything uses them.
+
+---
+
+## Mutation closure
+
+Reported in two stages, because `0 invalid` is only meaningful if it was not
+produced by filtering malformed definitions out of the denominator.
+
+**Pre-run validity** (`scripts/mutate-p1i.mjs --preflight-only`):
+
+```
+92 declared
+92 matched uniquely
+92 change source
+ 0 structurally invalid
+```
+
+**Execution:**
+
+```
+92 killed
+ 0 survived
+ 0 runtime-invalid
+```
+
+Of the 92 kills, **91 were killed by a failed semantic assertion** with
+`executed > 0` and `skipped 0`. One was not, and it is recorded rather than
+folded in:
+
+```
+#58  every suite shares one database name
+     executed 0   skipped 5   failed 0
+     verdict  KILLED — suite could not run
+```
+
+That is a documented kill class, and it exists because the opposite was once a
+harness bug: Vitest reports a test whose `beforeAll` threw as "skipped", an
+earlier parser counted those as executed, and a mutation that broke setup
+outright read as SURVIVED. A mutation that makes its suite unable to start has
+been detected. But it is a **weaker** kill than an assertion failure — it
+proves the mutation is detectable, not that a specific expectation caught the
+specific wrong behaviour — so it is counted separately and not described as
+"0 skipped".
+
+### The seventeen L.1 mutations
+
+Every one killed on a failed assertion, `skipped 0`:
+
+```
+77  index identity ignores the revision                        exec 46  fail 1
+78  extractor version leaves the digest preimage               exec 46  fail 1
+79  symbols grouped by name, not by the checker's symbol       exec 46  fail 3
+80  not_indexed collapses into absent                          exec 46  fail 1
+81  canonical form follows the array order it was handed       exec 46  fail 1
+82  the digest drops its length prefixes                       exec 46  fail 3
+83  unsupported language skipped rather than recorded          exec 46  fail 1
+84  a module that failed to parse recorded as indexed          exec 46  fail 3
+85  unavailable index built as an ordinary empty one           exec 46  fail 1
+
+86  production plans without the repository index              exec  9  fail 6
+87  index built for a revision that is not the head            exec  9  fail 3
+88  index-derived item claims direct-source provenance         exec  9  fail 6
+
+89  declaration multiplicity reported as resolution ambiguity  exec 46  fail 2
+90  an unscoped index reports itself as persistable            exec 46  fail 2
+91  the syntactic representation wins over the indexed one     exec 46  fail 1
+92  an unusable index still suppresses the syntactic fallback  exec 46  fail 1
+93  an absent field is encoded as an empty one                 exec 46  fail 1
+```
+
+86–88 are the wiring mutations. Their suite is the nine-test production
+witness, which is why `exec 9` rather than 46 — and six of nine failing on
+86 and 88 is the seam being genuinely load-bearing rather than decorative.
+
+### The three that failed the first attempt
+
+The first full run returned 89 killed, 2 survived, 1 invalid. All three were
+in this checkpoint's own new evidence, and all three are now killed:
+
+```
+79  stale mutation definition
+    a retarget's anchor rotted after reformatting and nobody knew until a
+    full run finished
+    -> preflight now refuses in ~40ms; killed, 3 tests failing
+
+92  a guard test masked by empty records
+    `unavailableIndex` holds no records, so the lookup returned nothing
+    whether or not the guard ran
+    -> a populated index with `availability: invariant_failed` makes the
+       branches differ; both premises asserted before the conclusion; killed
+
+93  an equivalent mutant
+    it targeted the absence sentinel's spelling, which is unobservable
+    -> retargeted at `line`'s absent branch, which carries the property;
+       killed
+```
+
+The failed run improved the checkpoint. Two of the three were weaknesses in
+the _proofs_, not the implementation — which is the outcome a mutation gate
+exists to produce.
 
 ---
 
