@@ -1191,10 +1191,8 @@ const ALL_MUTATIONS = [
   // ---------------------------------------------------------------------
   // P1-L.4.2 Wave 2 / Agent F — config red-team band.
   //
-  // 133-142 are contiguous by reservation. The production planner does not
-  // consume ConfigFacts at this frozen parent, so that missing seam is a
-  // non-claim rather than an invented mutation. These targets exercise only
-  // code that exists and has a declared, runnable suite.
+  // 133-144 are contiguous by reservation. These targets exercise only code
+  // that exists and has a declared, runnable suite.
   // ---------------------------------------------------------------------
   {
     id: 133,
@@ -1280,6 +1278,22 @@ const ALL_MUTATIONS = [
     find: "      contextDigest: input.contextDigest,",
     replace: '      contextDigest: "ignored",',
     suite: "apps/review-worker/tests/analysis.test.ts",
+  },
+  {
+    id: 143,
+    name: "the production planner ignores ConfigFacts governance",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "    (input.configFacts?.governance ?? []).map((relationship) => [",
+    replace: "    [].map((relationship) => [",
+    suite: "apps/review-worker/tests/config-wiring.test.ts",
+  },
+  {
+    id: 144,
+    name: "a config-only change leaves analyzer identity unchanged",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "    configFactsDigest: config.digest,",
+    replace: '    configFactsDigest: "ignored",',
+    suite: "apps/review-worker/tests/config-wiring.test.ts",
   },
   {
     id: 17,
