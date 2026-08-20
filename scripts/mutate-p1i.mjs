@@ -1683,6 +1683,64 @@ const ALL_MUTATIONS = [
     suite: "apps/review-worker/tests/l5-production.test.ts",
   },
   {
+    id: 183,
+    name: "candidate claim is omitted from L5 substantive recorder identity",
+    file: "apps/review-worker/src/eval/l5-production.ts",
+    find: "        claim: finding.claim,",
+    replace: '        claim: "",',
+    suite: "apps/review-worker/tests/l5-production.test.ts",
+  },
+  {
+    id: 184,
+    name: "production direct-source attestation reuses the control trace",
+    file: "apps/review-worker/src/eval/l5-production.ts",
+    find:
+      "    directSourceCandidateIdentitiesBeforeCompetition: stageCandidateIds(\n" +
+      "      trace.offered,\n" +
+      "      trace.offered.filter(",
+    replace:
+      "    directSourceCandidateIdentitiesBeforeCompetition: stageCandidateIds(\n" +
+      "      traces.CONTROL.offered,\n" +
+      "      traces.CONTROL.offered.filter(",
+    suite: "apps/review-worker/tests/l5-production.test.ts",
+  },
+  {
+    id: 185,
+    name: "ambiguous candidate fingerprints remain quality-scorable",
+    file: "apps/review-worker/src/eval/l5-production.ts",
+    find: "    if (previous !== undefined) {",
+    replace: "    if (false) {",
+    suite: "apps/review-worker/tests/l5-production.test.ts",
+  },
+  {
+    id: 186,
+    name: "authored cache reuse changes production head identity",
+    file: "apps/review-worker/src/eval/l5-corpus.ts",
+    find: "      bindingReuse.syntheticRevision,\n      { files: reverseTraversalOrder(bindingReuse.files) },",
+    replace:
+      '      "l5/cache/reuse-binding/different-head",\n      { files: reverseTraversalOrder(bindingReuse.files) },',
+    suite: "apps/review-worker/tests/l5-production-cache.test.ts",
+  },
+  {
+    id: 187,
+    name: "thrown incremental pair failures disappear from the report",
+    file: "apps/review-worker/src/eval/l5-production-incremental.ts",
+    find: "    } catch (error) {\n      invalidOrExcluded.push({",
+    replace:
+      "    } catch (error) {\n      throw error;\n      invalidOrExcluded.push({",
+    suite: "apps/review-worker/tests/l5-production-incremental.test.ts",
+  },
+  {
+    id: 188,
+    name: "cache after-context observation reuses the before digest",
+    file: "apps/review-worker/src/eval/l5-production-cache.ts",
+    find:
+      "      afterContextDigest: (await observeL5ProductionContext(after))\n" +
+      "        .contextDigest,",
+    replace: "      afterContextDigest: beforeContextDigest,",
+    suite: "apps/review-worker/tests/l5-production-cache.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",

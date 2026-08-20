@@ -34,6 +34,7 @@ import {
   planVerificationContext,
   promoteVerified,
   toVerificationInput,
+  toFindingView,
   verifyDeterministically,
   type CandidateFinding,
   type ExecutionLimits,
@@ -48,6 +49,7 @@ import {
 
 import {
   candidateFingerprint,
+  REVIEW_PROCEDURE_VERSION,
   runRealAnalysis,
   type AnalysisInstructionObservation,
   type AnalysisSource,
@@ -70,7 +72,16 @@ import type {
   L5CacheIdentityCategory,
   L5CacheIdentityPair,
 } from "./l5-identity.js";
-import type { GoldFinding, QualityCandidate } from "./l5-quality.js";
+import {
+  substantiveOutcomeHashes,
+  type L5PromotionSubstance,
+  type L5SubstantiveOutcome,
+} from "./l5-identity.js";
+import {
+  candidateSemanticIdentityKey,
+  type GoldFinding,
+  type QualityCandidate,
+} from "./l5-quality.js";
 import {
   L5_FACT_FAMILIES,
   L5_MODES,
@@ -166,12 +177,17 @@ export interface L5ProductionAnalysisOutcome {
 }
 
 export interface L5ProductionFunnelOutcome extends L5ProductionAnalysisOutcome {
+  readonly analysisCacheAttestation: {
+    readonly kind: "not_applicable";
+    readonly because: string;
+  };
   readonly verifiedCandidates: readonly VerifiedCandidate[];
   readonly promotion: PromotionOutcome;
   readonly publication: PublicationPlan | null;
   readonly premerge: readonly PreMergeCheckPlan[] | null;
   readonly qualityCandidates: readonly QualityCandidate[];
   readonly goldFindings: readonly GoldFinding[];
+  readonly substantiveOutcome: L5SubstantiveOutcome;
 }
 
 export class L5ProductionPremiseError extends Error {
@@ -564,8 +580,11 @@ export function modeAttestationForTrace(
       selected: familyCounts(trace.context.items),
     },
     directSourceCandidateIdentitiesBeforeCompetition: stageCandidateIds(
-      traces.CONTROL.offered,
-      traces.CONTROL.offered,
+      trace.offered,
+      trace.offered.filter(
+        (candidate) =>
+          (candidate.provenance?.source ?? "direct_source") === "direct_source",
+      ),
     ),
   };
 }
@@ -861,10 +880,48 @@ export async function runL5ProductionAnalysis(
   };
 }
 
+/** Observes the frozen case's authored context-selection policy without gold. */
+export async function observeL5ProductionContext(
+  adapted: L5AdaptedProductionCase,
+): Promise<RealAnalysisOutcome> {
+  const enabled = new Set(adapted.corpusCase.contextSelection.enabledFamilies);
+  return runRealAnalysis({
+    ...adapted.analysisOptions,
+    contextPlanner: (input, budgetTokens) =>
+      planContextWithTrace(
+        {
+          ...input,
+          factFamilyAvailability: Object.fromEntries(
+            L5_FACT_FAMILIES.map((family) => [family, enabled.has(family)]),
+          ) as unknown as PlannerFactFamilyAvailability,
+        },
+        budgetTokens,
+      ).context,
+  });
+}
+
 interface OrderedProductionCandidate {
   readonly candidateId: string;
   readonly finding: CandidateFinding;
   readonly fingerprint: string;
+}
+
+export function assertL5CandidateFingerprintsAreInjective(
+  candidates: readonly Pick<
+    OrderedProductionCandidate,
+    "candidateId" | "fingerprint"
+  >[],
+): void {
+  const candidateByFingerprint = new Map<string, string>();
+  for (const candidate of candidates) {
+    const previous = candidateByFingerprint.get(candidate.fingerprint);
+    if (previous !== undefined) {
+      throw new L5ProductionPremiseError([
+        `candidate fingerprint ${candidate.fingerprint} is shared by ${previous} and ${candidate.candidateId}; occurrence-level promotion/publication attribution is ambiguous`,
+      ]);
+    }
+    candidateByFingerprint.set(candidate.fingerprint, candidate.candidateId);
+  }
 }
 
 function orderedProductionCandidates(
@@ -995,17 +1052,183 @@ function qualityCandidatesFor(
   });
 }
 
+function substantiveOutcomeFor(
+  analysisOutcome: L5ProductionAnalysisOutcome,
+  candidates: readonly OrderedProductionCandidate[],
+  qualityCandidates: readonly QualityCandidate[],
+  verifiedCandidates: readonly VerifiedCandidate[],
+  promotion: PromotionOutcome,
+  publication: PublicationPlan | null,
+  premerge: readonly PreMergeCheckPlan[] | null,
+): L5SubstantiveOutcome {
+  const qualityById = new Map(
+    qualityCandidates.map((candidate) => [
+      candidateSemanticIdentityKey(candidate),
+      candidate,
+    ]),
+  );
+  const attemptById = new Map(
+    verifiedCandidates.map((candidate) => [
+      candidate.candidateId,
+      candidate.attempt,
+    ]),
+  );
+  const promotedByFingerprint = new Map<
+    string,
+    {
+      findingId: string;
+      fingerprint: string;
+      severity: VerifiedCandidate["severity"];
+      category: string;
+      path: string;
+    }[]
+  >();
+  if (promotion.kind === "promoted") {
+    for (const finding of promotion.findings) {
+      const entries = promotedByFingerprint.get(finding.fingerprint) ?? [];
+      entries.push(finding);
+      promotedByFingerprint.set(finding.fingerprint, entries);
+    }
+  }
+
+  const candidateSubstance = candidates.map(
+    ({ candidateId, finding, fingerprint }) => {
+      const view = toFindingView(finding);
+      const semanticCandidate = qualityCandidates.find(
+        (candidate) =>
+          candidate.ruleId === finding.ruleId &&
+          candidate.family === finding.family &&
+          candidate.category === finding.category &&
+          candidate.path === finding.location.path &&
+          candidate.startLine === finding.location.startLine &&
+          candidate.endLine === finding.location.endLine &&
+          candidate.analyzerIdentityHint === finding.identityHint,
+      );
+      if (semanticCandidate === undefined) {
+        throw new Error(`Missing quality projection for ${candidateId}`);
+      }
+      const semanticIdentity = candidateSemanticIdentityKey(semanticCandidate);
+      if (!qualityById.has(semanticIdentity)) {
+        throw new Error(`Missing semantic identity for ${candidateId}`);
+      }
+      return {
+        semanticIdentity,
+        producerId: finding.ruleId.split("/")[0] ?? finding.ruleId,
+        producerVersion: REVIEW_PROCEDURE_VERSION,
+        inputDigest: analysisOutcome.analysis.cacheKey,
+        ruleId: finding.ruleId,
+        family: finding.family,
+        category: finding.category,
+        claim: finding.claim,
+        explanation: `${view.detail}\n\nRemediation: ${view.remediation}`,
+        proposedSeverity: finding.proposedSeverity,
+        confidenceScore: finding.confidenceScore,
+        path: finding.location.path,
+        startLine: finding.location.startLine,
+        endLine: finding.location.endLine,
+        fingerprintValue: fingerprint,
+      };
+    },
+  );
+  const verificationDecisions = candidates.map(({ candidateId }, index) => {
+    const semanticIdentity = candidateSubstance[index]?.semanticIdentity;
+    const attempt = attemptById.get(candidateId);
+    if (semanticIdentity === undefined) {
+      throw new Error(`Missing candidate substance for ${candidateId}`);
+    }
+    if (attempt === undefined) {
+      return {
+        candidateSemanticIdentity: semanticIdentity,
+        status: "missing" as const,
+      };
+    }
+    return attempt.status === "unavailable"
+      ? {
+          candidateSemanticIdentity: semanticIdentity,
+          status: "unavailable" as const,
+          failure: attempt.failure,
+        }
+      : {
+          candidateSemanticIdentity: semanticIdentity,
+          status: "completed" as const,
+          decision: attempt.decision,
+          reasons: attempt.reasons,
+          confidence: attempt.confidence,
+          severity: attempt.severity,
+        };
+  });
+  const promotions = candidates.map(
+    ({ candidateId, finding, fingerprint }, index): L5PromotionSubstance => {
+      const candidateSemanticIdentity =
+        candidateSubstance[index]?.semanticIdentity;
+      if (candidateSemanticIdentity === undefined) {
+        throw new Error(`Missing candidate substance for ${candidateId}`);
+      }
+      if (promotion.kind === "blocked") {
+        return {
+          candidateSemanticIdentity,
+          outcome: "blocked",
+          reason: promotion.block,
+        };
+      }
+      const promoted = promotedByFingerprint.get(fingerprint)?.shift();
+      if (promoted !== undefined) {
+        const view = toFindingView(finding);
+        return {
+          candidateSemanticIdentity,
+          outcome: "promoted",
+          fingerprintValue: promoted.fingerprint,
+          severity: promoted.severity,
+          category: promoted.category,
+          path: promoted.path,
+          startLine: finding.location.startLine,
+          endLine: finding.location.endLine,
+          title: view.summary,
+          explanation: `${view.detail}\n\nRemediation: ${view.remediation}`,
+        };
+      }
+      const attempt = attemptById.get(candidateId);
+      if (attempt?.status !== "completed" || attempt.decision === "verified") {
+        throw new Error(`Promotion did not account for ${candidateId}`);
+      }
+      return {
+        candidateSemanticIdentity,
+        outcome: "not_promoted",
+        reason: attempt.decision,
+      };
+    },
+  );
+
+  return {
+    candidates: candidateSubstance,
+    verificationDecisions,
+    promotions,
+    publicationDecisions:
+      publication?.decisions.map((decision) => ({
+        findingFingerprint: decision.findingId,
+        decision: decision.decision,
+        reason: decision.reason,
+      })) ?? [],
+    premergeDecisions: premerge ?? [],
+  };
+}
+
 /** Runs the existing pure production decision kernels without persistence. */
 export async function runL5ProductionFunnel(
   adapted: L5AdaptedProductionCase,
   mode: L5ModeDefinition,
   recorder?: L5Recorder,
+  analysisCache?: ReadonlyMap<string, unknown>,
 ): Promise<L5ProductionFunnelOutcome> {
+  if (analysisCache !== undefined && analysisCache.size !== 0) {
+    throw new Error("L.5 production execution requires a fresh empty cache");
+  }
   const analysisOutcome = await runL5ProductionAnalysis(adapted, mode);
   const candidates = orderedProductionCandidates(
     adapted,
     analysisOutcome.analysis.report.findings,
   );
+  assertL5CandidateFingerprintsAreInjective(candidates);
   recordStage(recorder, {
     caseId: adapted.corpusCase.id,
     modeId: mode.id,
@@ -1080,53 +1303,44 @@ export async function runL5ProductionFunnel(
     blocked: premerge === null,
   });
 
-  return {
-    ...analysisOutcome,
+  const qualityCandidates = qualityCandidatesFor(
+    adapted,
+    candidates,
+    verifiedCandidates,
+    promotion,
+    publication,
+  );
+  const substantiveOutcome = substantiveOutcomeFor(
+    analysisOutcome,
+    candidates,
+    qualityCandidates,
     verifiedCandidates,
     promotion,
     publication,
     premerge,
-    qualityCandidates: qualityCandidatesFor(
-      adapted,
-      candidates,
-      verifiedCandidates,
-      promotion,
-      publication,
-    ),
-    goldFindings: adaptL5GoldFindings(adapted.corpusCase),
-  };
-}
+  );
 
-function substantiveHash(value: unknown): string {
-  return sha256(canonicalJson(value));
+  return {
+    ...analysisOutcome,
+    analysisCacheAttestation: {
+      kind: "not_applicable",
+      because:
+        "the measured deterministic runRealAnalysis path exposes no execution-cache input; the harness still supplies and validates an empty map",
+    },
+    verifiedCandidates,
+    promotion,
+    publication,
+    premerge,
+    qualityCandidates,
+    goldFindings: adaptL5GoldFindings(adapted.corpusCase),
+    substantiveOutcome,
+  };
 }
 
 export function l5ProductionSubstantiveHashes(
   outcome: L5ProductionFunnelOutcome,
 ): L5SubstantiveHashes {
-  return {
-    candidates: substantiveHash(
-      outcome.qualityCandidates.map((candidate) => ({
-        caseId: candidate.caseId,
-        ruleId: candidate.ruleId,
-        family: candidate.family,
-        category: candidate.category,
-        path: candidate.path,
-        startLine: candidate.startLine,
-        endLine: candidate.endLine,
-        analyzerIdentityHint: candidate.analyzerIdentityHint,
-      })),
-    ),
-    verificationDecisions: substantiveHash(
-      outcome.verifiedCandidates.map((candidate) => ({
-        candidateId: candidate.candidateId,
-        attempt: candidate.attempt ?? null,
-      })),
-    ),
-    promotions: substantiveHash(outcome.promotion),
-    publicationDecisions: substantiveHash(outcome.publication),
-    premergeDecisions: substantiveHash(outcome.premerge),
-  };
+  return substantiveOutcomeHashes(outcome.substantiveOutcome);
 }
 
 const CACHE_CATEGORY_MAP = {

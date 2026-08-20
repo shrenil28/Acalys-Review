@@ -4,6 +4,7 @@ import {
   L5_PRODUCTION_INCREMENTAL_SCHEMA_VERSION,
   measureAllL5ProductionIncrementalPairs,
   measureL5ProductionIncrementalPair,
+  measureL5ProductionIncrementalPairsSafely,
 } from "../src/eval/l5-production-incremental.js";
 import { L5_CORPUS } from "../src/eval/l5-corpus.js";
 import { l5RevisionObjectId } from "../src/eval/l5-production.js";
@@ -107,6 +108,22 @@ describe("P1-L.5 production incremental economics adapter", () => {
     expect(
       instruction?.economics.incrementalStats.observations.every(
         (stats) => stats.modulesTotal === 2,
+      ),
+    ).toBe(true);
+  });
+
+  it("retains thrown pair failures as invalid report rows", () => {
+    const run = measureL5ProductionIncrementalPairsSafely(() => {
+      throw new Error("clock unavailable");
+    });
+
+    expect(run.reports).toEqual([]);
+    expect(run.invalidOrExcluded.map((row) => row.pairId)).toEqual(
+      L5_CORPUS.incrementalPairs.map((pair) => pair.id),
+    );
+    expect(
+      run.invalidOrExcluded.every((row) =>
+        row.error.includes("clock unavailable"),
       ),
     ).toBe(true);
   });

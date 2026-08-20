@@ -57,6 +57,18 @@ export interface L5ProductionIncrementalPairReport {
   readonly economics: IncrementalTimingReport;
 }
 
+export interface L5InvalidProductionIncrementalPair {
+  readonly pairId: string;
+  readonly baseCaseId: string;
+  readonly because: string;
+  readonly error: string;
+}
+
+export interface L5ProductionIncrementalRun {
+  readonly reports: readonly L5ProductionIncrementalPairReport[];
+  readonly invalidOrExcluded: readonly L5InvalidProductionIncrementalPair[];
+}
+
 const TSCONFIG_PATH = /(^|\/)tsconfig(\.[\w.-]+)?\.json$/;
 
 function productionIndexSnapshot(
@@ -195,4 +207,25 @@ export function measureAllL5ProductionIncrementalPairs(
   return L5_CORPUS.incrementalPairs.map((pair) =>
     measureL5ProductionIncrementalPair(pair, clock),
   );
+}
+
+/** Retains pair-level failures for the final report instead of dropping them. */
+export function measureL5ProductionIncrementalPairsSafely(
+  clock?: MonotonicClock,
+): L5ProductionIncrementalRun {
+  const reports: L5ProductionIncrementalPairReport[] = [];
+  const invalidOrExcluded: L5InvalidProductionIncrementalPair[] = [];
+  for (const pair of L5_CORPUS.incrementalPairs) {
+    try {
+      reports.push(measureL5ProductionIncrementalPair(pair, clock));
+    } catch (error) {
+      invalidOrExcluded.push({
+        pairId: pair.id,
+        baseCaseId: pair.baseCaseId,
+        because: pair.because,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { reports, invalidOrExcluded };
 }

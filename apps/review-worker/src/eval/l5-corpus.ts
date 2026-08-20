@@ -11,7 +11,7 @@ import {
 } from "@acalys/review-engine";
 
 export const L5_EXPERIMENT_SCHEMA_VERSION = "p1-l5-experiment/v1" as const;
-export const L5_CORPUS_VERSION = "p1-l5-corpus/2026-08-21.v1" as const;
+export const L5_CORPUS_VERSION = "p1-l5-corpus/2026-08-21.v2" as const;
 
 export const L5_CONTEXT_FAMILIES = [
   "structural_index",
@@ -1700,6 +1700,13 @@ const configOptional = caseById("config-exact-optional-assignment");
 const configIndex = caseById("config-unchecked-index-access");
 const instructionAudit = caseById("instruction-auth-denial-audit");
 const instructionPayment = caseById("instruction-payment-token-logging");
+const bindingReuse = caseById("binding-floating-reservation");
+const testReuse = caseById("test-relationship-stable-serialization");
+
+const reverseTraversalOrder = (
+  files: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(Object.entries(files).reverse());
 
 const rawCachePairs: readonly L5CacheIdentityPair[] = [
   {
@@ -1709,8 +1716,8 @@ const rawCachePairs: readonly L5CacheIdentityPair[] = [
     expectation: "reuse_expected",
     to: nextRevision(
       "binding-floating-reservation",
-      "l5/cache/reuse-binding/h2",
-      {},
+      bindingReuse.syntheticRevision,
+      { files: reverseTraversalOrder(bindingReuse.files) },
     ),
     expectationBecause:
       "the authored source, change, context, and policy inputs are byte-identical; the expectation is independent of observed cache behavior",
@@ -1722,8 +1729,8 @@ const rawCachePairs: readonly L5CacheIdentityPair[] = [
     expectation: "reuse_expected",
     to: nextRevision(
       "test-relationship-stable-serialization",
-      "l5/cache/reuse-test/h2",
-      {},
+      testReuse.syntheticRevision,
+      { files: reverseTraversalOrder(testReuse.files) },
     ),
     expectationBecause:
       "the authored source, relationships, selection, and policy inputs are unchanged, independently requiring reuse",

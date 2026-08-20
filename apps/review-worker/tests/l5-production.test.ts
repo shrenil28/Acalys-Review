@@ -21,9 +21,11 @@ import {
   adaptL5GoldFindings,
   adaptL5CacheIdentityPairs,
   adaptL5CorpusCase,
+  assertL5CandidateFingerprintsAreInjective,
   contextAccountingInputForTrace,
   inspectL5RequiredExposurePremises,
   l5ProductionSubstantiveHashes,
+  modeAttestationForTrace,
   plannerAvailabilityForMode,
   runL5ProductionAnalysis,
   runL5ProductionFunnel,
@@ -220,6 +222,38 @@ describe("P1-L.5 production measurement adapter", () => {
     }
   });
 
+  it("derives each mode's direct-source multiset from that mode independently", async () => {
+    const adapted = adaptL5CorpusCase(allFamilyCase(), OPTIONS);
+    const outcome = await runL5ProductionAnalysis(adapted, L5_MODES.TREATMENT);
+    const direct = outcome.traces.TREATMENT.offered.find(
+      (candidate) =>
+        (candidate.provenance?.source ?? "direct_source") === "direct_source",
+    );
+    if (direct === undefined) throw new Error("missing direct-source fixture");
+    const withoutDirect = {
+      ...outcome.traces.TREATMENT,
+      offered: outcome.traces.TREATMENT.offered.filter(
+        (candidate) => candidate !== direct,
+      ),
+      scored: outcome.traces.TREATMENT.scored.filter(
+        (candidate) => candidate !== direct,
+      ),
+      context: {
+        ...outcome.traces.TREATMENT.context,
+        items: outcome.traces.TREATMENT.context.items.filter(
+          (candidate) => candidate !== direct,
+        ),
+      },
+    };
+    const traces = { ...outcome.traces, TREATMENT: withoutDirect };
+    const control = modeAttestationForTrace(L5_MODES.CONTROL, traces);
+    const treatment = modeAttestationForTrace(L5_MODES.TREATMENT, traces);
+
+    expect(
+      treatment.directSourceCandidateIdentitiesBeforeCompetition,
+    ).not.toEqual(control.directSourceCandidateIdentitiesBeforeCompetition);
+  });
+
   it("preserves default runRealAnalysis substance under explicit full treatment", async () => {
     const adapted = adaptL5CorpusCase(
       withoutLabels(caseById("binding-floating-reservation")),
@@ -363,9 +397,26 @@ describe("P1-L.5 production measurement adapter", () => {
     expect(outcome.qualityCandidates).toHaveLength(
       outcome.verifiedCandidates.length,
     );
+    expect(outcome.analysisCacheAttestation.kind).toBe("not_applicable");
+    expect(outcome.substantiveOutcome.candidates[0]).toEqual(
+      expect.objectContaining({
+        claim: outcome.analysis.report.findings[0]?.claim,
+        confidenceScore: outcome.analysis.report.findings[0]?.confidenceScore,
+        inputDigest: outcome.analysis.cacheKey,
+      }),
+    );
     expect(Object.values(l5ProductionSubstantiveHashes(outcome))).toHaveLength(
       5,
     );
+  });
+
+  it("invalidates ambiguous occurrence-level fingerprint attribution", () => {
+    expect(() =>
+      assertL5CandidateFingerprintsAreInjective([
+        { candidateId: "case:a:0", fingerprint: "shared" },
+        { candidateId: "case:b:0", fingerprint: "shared" },
+      ]),
+    ).toThrow(/occurrence-level.*ambiguous/);
   });
 
   it("proves recorder non-interference through the guarded A/B harness", async () => {
@@ -385,8 +436,8 @@ describe("P1-L.5 production measurement adapter", () => {
         equivalence: adapted.equivalence,
         mode: L5_MODES.TREATMENT,
       },
-      execute: ({ case: productionCase, mode, recorder }) =>
-        runL5ProductionFunnel(productionCase, mode, recorder),
+      execute: ({ case: productionCase, mode, recorder, analysisCache }) =>
+        runL5ProductionFunnel(productionCase, mode, recorder, analysisCache),
       substantiveHashes: l5ProductionSubstantiveHashes,
       modeAttestation: (outcome) => outcome.attestation,
       createRealRecorder: () => ({
