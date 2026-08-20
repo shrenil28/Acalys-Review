@@ -1248,6 +1248,7 @@ function collapseCovered(
       item === undefined ||
       item.path !== path ||
       item.kind === "instruction" ||
+      item.kind === "coverage" ||
       item.content === content ||
       item.content === "" ||
       !content.includes(item.content)
@@ -1285,7 +1286,8 @@ export function assembleContext(
   for (const candidate of scored) {
     if (
       generatedPaths.has(candidate.path) &&
-      candidate.kind !== "instruction"
+      candidate.kind !== "instruction" &&
+      candidate.kind !== "coverage"
     ) {
       omissions.push({
         path: candidate.path,
@@ -1303,6 +1305,7 @@ export function assembleContext(
     if (
       covering !== undefined &&
       candidate.kind !== "instruction" &&
+      candidate.kind !== "coverage" &&
       candidate.content !== "" &&
       covering.includes(candidate.content)
     ) {
@@ -1343,9 +1346,13 @@ export function assembleContext(
       continue;
     }
 
-    // An instruction that does not fit is omitted whole. Truncating it would
-    // leave the reviewer following half a rule and believing it complete.
-    if (candidate.kind === "instruction" || remaining < 50) {
+    // Instructions and coverage facts are omitted whole. Partial policy or
+    // partial uncertainty would each overstate what the analyzer was told.
+    if (
+      candidate.kind === "instruction" ||
+      candidate.kind === "coverage" ||
+      remaining < 50
+    ) {
       omissions.push({
         path: candidate.path,
         reason: "budget_exceeded",

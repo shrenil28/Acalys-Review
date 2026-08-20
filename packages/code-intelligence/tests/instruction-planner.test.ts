@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assembleContext,
   isInstruction,
   plannerTrustForInstruction,
   scoreCandidates,
@@ -145,4 +146,71 @@ describe("factual instruction planner standing", () => {
       ).toBe(true);
     },
   );
+
+  it("retains complete coverage facts for generated targets", () => {
+    const coverageText =
+      "Instruction coverage is incomplete. Do not infer that no policy applies.";
+    const coverage: ContextCandidate = {
+      kind: "coverage",
+      path: "src/generated.ts",
+      reason: "instruction_coverage",
+      trust: "tool_output",
+      content: coverageText,
+      deduplicationKey: "instruction-coverage|src/generated.ts",
+    };
+
+    const generated = assembleContext(
+      scoreCandidates([coverage]),
+      100,
+      new Set(["src/generated.ts"]),
+    );
+    expect(generated.items).toEqual([
+      expect.objectContaining({
+        kind: "coverage",
+        representation: "full",
+        suppliedContent: coverageText,
+      }),
+    ]);
+    expect(generated.omissions).toEqual([]);
+
+    const constrained = assembleContext(
+      scoreCandidates([coverage]),
+      5,
+      new Set(["src/generated.ts"]),
+    );
+    expect(constrained.items).toEqual([]);
+    expect(constrained.omissions).toEqual([
+      expect.objectContaining({
+        path: "src/generated.ts",
+        reason: "budget_exceeded",
+        inclusionReason: "instruction_coverage",
+      }),
+    ]);
+    expect(constrained.omissions).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ reason: "generated_file" }),
+      ]),
+    );
+
+    const withCoveringSource = assembleContext(
+      scoreCandidates([
+        coverage,
+        {
+          kind: "source_file",
+          path: "src/generated.ts",
+          reason: "changed_hunk",
+          trust: "repository_source",
+          content: `export const note = ${JSON.stringify(coverageText)};`,
+        },
+      ]),
+      100,
+    );
+    expect(withCoveringSource.items[0]).toEqual(
+      expect.objectContaining({
+        kind: "coverage",
+        representation: "full",
+        suppliedContent: coverageText,
+      }),
+    );
+  });
 });

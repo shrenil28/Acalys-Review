@@ -89,7 +89,8 @@ describe("P1-L.4.3 Wave 2 production instruction witness", () => {
   it("changes only instruction/context/cache identity when AGENTS.md is added", async () => {
     const h1Files = { ...BASE };
     const h2Files = { ...BASE, "AGENTS.md": "Apply repository policy." };
-    const [h1, h2] = await Promise.all([run(h1Files), run(h2Files)]);
+    const h1 = await run(h1Files);
+    const h2 = await run(h2Files);
 
     expect(h1Files[TARGET]).toBe(h2Files[TARGET]);
     expect(canonicalSerialization(h1.index)).toBe(
@@ -118,7 +119,8 @@ describe("P1-L.4.3 Wave 2 production instruction witness", () => {
       "packages/api/AGENTS.md": "Nested API policy.",
     };
     const h2Files = { ...BASE, "AGENTS.md": "Root policy." };
-    const [h1, h2] = await Promise.all([run(h1Files), run(h2Files)]);
+    const h1 = await run(h1Files);
+    const h2 = await run(h2Files);
 
     expect(canonicalSerialization(h1.index)).toBe(
       canonicalSerialization(h2.index),
@@ -169,6 +171,48 @@ describe("P1-L.4.3 Wave 2 production instruction witness", () => {
     expect(instructions(outcome).map((item) => item.path)).toEqual([
       "AGENTS.md",
     ]);
+  });
+
+  it("changes analyzer identity when instruction facts change but selected text does not", async () => {
+    const files = { ...BASE, "AGENTS.md": "Stable root policy." };
+    const complete = await run(files, {
+      instructionObservation: observation({
+        files,
+        traversal: { status: "complete", paths: Object.keys(files) },
+      }),
+    });
+    const siblingOutage = await run(files, {
+      instructionObservation: observation({
+        files,
+        traversal: {
+          status: "complete",
+          paths: [...Object.keys(files), "packages/web/AGENTS.md"],
+        },
+        reads: {
+          "packages/web/AGENTS.md": {
+            status: "unreadable",
+            detail: "object read denied",
+          },
+        },
+      }),
+    });
+
+    expect(
+      instructions(complete).map((item) => ({
+        path: item.path,
+        suppliedContent: item.suppliedContent,
+      })),
+    ).toEqual(
+      instructions(siblingOutage).map((item) => ({
+        path: item.path,
+        suppliedContent: item.suppliedContent,
+      })),
+    );
+    expect(complete.instructionFactsDigest).not.toBe(
+      siblingOutage.instructionFactsDigest,
+    );
+    expect(complete.contextDigest).not.toBe(siblingOutage.contextDigest);
+    expect(complete.cacheKey).not.toBe(siblingOutage.cacheKey);
   });
 
   it("retains root and nested facts with inspectable precedence and trust", async () => {
