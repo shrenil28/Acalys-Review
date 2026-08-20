@@ -39,6 +39,14 @@
  * {@link IncrementalStats} records what happened rather than asserting a win.
  * A full rebuild reached through the fallback path is never reported as an
  * incremental success.
+ *
+ * # The candidate is checked here, and only here
+ *
+ * `validateIndexConsistency` is the production barrier. The full-rebuild
+ * equivalence oracle runs in tests and nowhere else, so its existence is not a
+ * reason to leave the consistency rules without direct coverage — a claim an
+ * earlier version of this file made and a call-graph trace disproved. See
+ * `consistency.ts`.
  */
 
 import { createHash } from "node:crypto";
@@ -50,11 +58,13 @@ import type {
   ReferenceRecord,
   RepositoryIndex,
 } from "./records.js";
+import { validateIndexConsistency } from "./consistency.js";
 import {
   deriveChangeManifest,
   planIncrementalUpdate,
   type ChangeManifest,
   type IncrementalIndexPlan,
+  type RecomputeReason,
 } from "./incremental-plan.js";
 
 /** Why an incremental update did not produce the index. Closed. */
@@ -84,6 +94,36 @@ export interface IncrementalStats {
   readonly modulesRetained: number;
   readonly modulesRecomputed: number;
   readonly modulesDeleted: number;
+  /**
+   * How many modules each recompute reason accounts for.
+   *
+   * A map rather than two counters named `invalidatedByDirectChange` and
+   * `invalidatedByDependency`, because those categories are not disjoint: a
+   * module can be modified *and* bind into something that moved. Counters
+   * would force the arithmetic to close by dropping one reason, which loses
+   * provenance exactly where an optimization decision would later need it.
+   *
+   * The planner records one reason per module today. The shape is a map so
+   * that recording several does not require changing this contract.
+   */
+  readonly recomputeReasons: Readonly<Partial<Record<RecomputeReason, number>>>;
+  /**
+   * References and bindings the extractor actually produced afresh.
+   *
+   * Counted from the candidate, not from the plan. "Planned 12, recomputed 14"
+   * is a real thing to be able to notice, and a statistic derived from
+   * intentions could never show it.
+   */
+  readonly referencesRecomputed: number;
+  readonly bindingsRecomputed: number;
+  /**
+   * The same two counts carried forward from H1 rather than re-extracted.
+   *
+   * This is what the optimization actually saved. Recorded beside the
+   * recomputed counts so the ratio is visible without arithmetic on a report.
+   */
+  readonly referencesRetained: number;
+  readonly bindingsRetained: number;
 }
 
 export interface IncrementalOutcome {
@@ -129,6 +169,11 @@ export function updateRepositoryIndex(options: {
       modulesRetained: 0,
       modulesRecomputed: snapshot.size,
       modulesDeleted: 0,
+      recomputeReasons: {},
+      referencesRecomputed: 0,
+      bindingsRecomputed: 0,
+      referencesRetained: 0,
+      bindingsRetained: 0,
     },
     ...(plan === undefined ? {} : { plan }),
   });
@@ -165,8 +210,11 @@ export function updateRepositoryIndex(options: {
   const recomputed = new Set(plan.recomputed.map((entry) => entry.moduleId));
 
   let candidate: RepositoryIndex;
+  let assembled: AssemblyCounts;
   try {
-    candidate = assemble(previous, nextIdentity, snapshot, recomputed);
+    const result = assemble(previous, nextIdentity, snapshot, recomputed);
+    candidate = result.index;
+    assembled = result.counts;
   } catch (error) {
     return fullRebuild(
       "extraction_threw",
@@ -175,9 +223,16 @@ export function updateRepositoryIndex(options: {
     );
   }
 
-  const violation = validate(candidate);
+  // The production commit barrier. Nothing else checks this candidate before
+  // it becomes H2 — the full-rebuild oracle is a test construct and does not
+  // run here — so a violation means no H2 escapes and the caller full-rebuilds.
+  const violation = validateIndexConsistency(candidate);
   if (violation !== undefined) {
-    return fullRebuild("candidate_failed_validation", violation, plan);
+    return fullRebuild(
+      "candidate_failed_validation",
+      `${violation.rule}: ${violation.detail}`,
+      plan,
+    );
   }
 
   return {
@@ -189,6 +244,16 @@ export function updateRepositoryIndex(options: {
       modulesRetained: plan.retained.length,
       modulesRecomputed: plan.recomputed.length,
       modulesDeleted: plan.deleted.length,
+      recomputeReasons: plan.recomputed.reduce<
+        Partial<Record<RecomputeReason, number>>
+      >(
+        (tally, entry) => ({
+          ...tally,
+          [entry.reason]: (tally[entry.reason] ?? 0) + 1,
+        }),
+        {},
+      ),
+      ...assembled,
     },
     plan,
   };
@@ -208,12 +273,19 @@ export function updateRepositoryIndex(options: {
  * otherwise would be the cross-revision continuity claim L.1 explicitly
  * refuses to make.
  */
+interface AssemblyCounts {
+  readonly referencesRecomputed: number;
+  readonly bindingsRecomputed: number;
+  readonly referencesRetained: number;
+  readonly bindingsRetained: number;
+}
+
 function assemble(
   previous: RepositoryIndex,
   nextIdentity: RepositoryIndexIdentity,
   snapshot: RevisionSnapshot,
   recomputed: ReadonlySet<string>,
-): RepositoryIndex {
+): { readonly index: RepositoryIndex; readonly counts: AssemblyCounts } {
   const fresh = buildRepositoryIndex({
     identity: nextIdentity,
     snapshot,
@@ -304,9 +376,18 @@ function assemble(
   }
 
   return {
-    ...fresh,
-    references: [...fresh.references, ...carriedReferences].sort(byReference),
-    bindings: [...fresh.bindings, ...carriedBindings].sort(byBinding),
+    index: {
+      ...fresh,
+      references: [...fresh.references, ...carriedReferences].sort(byReference),
+      bindings: [...fresh.bindings, ...carriedBindings].sort(byBinding),
+    },
+    // Counted from what was produced, not from what the plan asked for.
+    counts: {
+      referencesRecomputed: fresh.references.length,
+      bindingsRecomputed: fresh.bindings.length,
+      referencesRetained: carriedReferences.length,
+      bindingsRetained: carriedBindings.length,
+    },
   };
 }
 
@@ -331,82 +412,6 @@ const byReference = (a: ReferenceRecord, b: ReferenceRecord): number =>
 
 const byBinding = (a: BindingEdge, b: BindingEdge): number =>
   compare(a.referenceId, b.referenceId) || compare(a.bindingId, b.bindingId);
-
-/**
- * Checks the candidate's internal consistency before it is allowed to be H2.
- *
- * These are the invariants a correct index satisfies by construction, so a
- * violation means the assembly above produced something a full rebuild never
- * would. Returning a reason rather than throwing lets the caller record why it
- * fell back, which is the difference between a measurable fallback rate and a
- * mystery.
- *
- * **This carries no mutation coverage, and that is known rather than assumed.**
- * A mutation skipping validation entirely survives, because reaching it
- * requires the assembly above to already be wrong — and if it were, the
- * equivalence oracle would fail first and more loudly. Validation is a second
- * line for defects not yet written, which is exactly the kind of guard a
- * mutation cannot defend.
- *
- * The alternative was to delete it. Kept, because the failure it catches —
- * a candidate exposed as H2 while internally inconsistent — is the one this
- * module exists to prevent, and the cost of keeping it is one uncovered
- * function rather than a wrong index.
- */
-function validate(index: RepositoryIndex): string | undefined {
-  const declarationIds = new Set(
-    index.declarations.map((record) => record.declarationId),
-  );
-  const symbolIds = new Set(index.symbols.map((record) => record.symbolId));
-  const referenceIds = new Set(
-    index.references.map((record) => record.referenceId),
-  );
-  const revision = index.identity.revision.value;
-
-  for (const record of index.declarations) {
-    if (!symbolIds.has(record.symbolId)) {
-      return `declaration ${record.declarationId} names symbol ${record.symbolId}, which is absent`;
-    }
-    if (record.provenance.revision !== revision) {
-      return `declaration ${record.declarationId} carries revision ${record.provenance.revision}, not ${revision}`;
-    }
-  }
-
-  for (const record of index.references) {
-    if (record.provenance.revision !== revision) {
-      return `reference ${record.referenceId} carries revision ${record.provenance.revision}, not ${revision}`;
-    }
-  }
-
-  const seenReference = new Set<string>();
-  for (const edge of index.bindings) {
-    if (!referenceIds.has(edge.referenceId)) {
-      return `binding ${edge.bindingId} names reference ${edge.referenceId}, which is absent`;
-    }
-    if (seenReference.has(edge.referenceId)) {
-      return `reference ${edge.referenceId} has more than one binding`;
-    }
-    seenReference.add(edge.referenceId);
-
-    for (const declarationId of edge.declarationIds) {
-      if (!declarationIds.has(declarationId)) {
-        return `binding ${edge.bindingId} points at declaration ${declarationId}, which is absent`;
-      }
-    }
-    if (edge.symbolId !== undefined && !symbolIds.has(edge.symbolId)) {
-      return `binding ${edge.bindingId} names symbol ${edge.symbolId}, which is absent`;
-    }
-    if (edge.provenance.revision !== revision) {
-      return `binding ${edge.bindingId} carries revision ${edge.provenance.revision}, not ${revision}`;
-    }
-  }
-
-  if (seenReference.size !== index.references.length) {
-    return `${String(index.references.length)} references but ${String(seenReference.size)} bound`;
-  }
-
-  return undefined;
-}
 
 /** Convenience: build H2 incrementally from H1, deriving the manifest. */
 export function updateFromSnapshot(

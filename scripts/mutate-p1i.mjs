@@ -986,6 +986,112 @@ const MUTATIONS = [
     replace: "      return { index: outcome.index };",
     suite: "apps/review-worker/tests/incremental-wiring.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-L.3 — the production commit barrier.
+  //
+  // 112-120 target one consistency rule each; 121 removes the barrier from
+  // the production path; 122 makes the statistics describe intentions rather
+  // than what executed.
+  //
+  // These exist because a call-graph trace disproved the reason this file
+  // previously had none: the full-rebuild oracle runs only in tests, so in
+  // production `validateIndexConsistency` is the sole check before an index
+  // is labelled H2.
+  // ---------------------------------------------------------------------
+  {
+    id: 112,
+    name: "an exact binding may name no symbol",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: "        if (edge.symbolId === undefined) {",
+    replace: "        if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 113,
+    name: "an exact binding may point at no declaration",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: '        if (edge.declarationIds.length === 0) {\n          return {\n            rule: "exact_without_declarations",',
+    replace:
+      '        if (false as boolean) {\n          return {\n            rule: "exact_without_declarations",',
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 114,
+    name: "a declaration may belong to a different symbol",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: "          if (declarationOwner.get(declarationId) !== edge.symbolId) {",
+    replace: "          if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 115,
+    name: "an external binding may name an internal symbol",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: '        if (edge.symbolId !== undefined) {\n          return {\n            rule: "external_with_symbol",',
+    replace:
+      '        if (false as boolean) {\n          return {\n            rule: "external_with_symbol",',
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 116,
+    name: "an unresolved binding may name a symbol",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: '        if (edge.symbolId !== undefined) {\n          return {\n            rule: "unresolved_with_symbol",',
+    replace:
+      '        if (false as boolean) {\n          return {\n            rule: "unresolved_with_symbol",',
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 117,
+    name: "an ambiguous binding may name exactly one symbol",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: '        if (edge.symbolId !== undefined) {\n          return {\n            rule: "ambiguous_with_symbol",',
+    replace:
+      '        if (false as boolean) {\n          return {\n            rule: "ambiguous_with_symbol",',
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 118,
+    name: "a reference may carry no binding at all",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: "    if (!bound.has(record.referenceId)) {",
+    replace: "    if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 119,
+    name: "one reference may carry two bindings",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: "    if (bound.has(edge.referenceId)) {",
+    replace: "    if (false as boolean) {",
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 120,
+    name: "a record may carry another revision's stamp",
+    file: "packages/code-intelligence/src/repository-index/consistency.ts",
+    find: '    if (record.provenance.revision !== revision) {\n      return {\n        rule: "declaration_revision_mismatch",',
+    replace:
+      '    if (false as boolean) {\n      return {\n        rule: "declaration_revision_mismatch",',
+    suite: "packages/code-intelligence/tests/index-consistency.test.ts",
+  },
+  {
+    id: 121,
+    name: "the production path skips the commit barrier",
+    file: "packages/code-intelligence/src/repository-index/incremental.ts",
+    find: "  const violation = validateIndexConsistency(candidate);",
+    replace:
+      "  const violation = undefined as ReturnType<typeof validateIndexConsistency>;",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
+  {
+    id: 122,
+    name: "the stats count planned work instead of executed work",
+    file: "packages/code-intelligence/src/repository-index/incremental.ts",
+    find: "      referencesRecomputed: fresh.references.length,",
+    replace: "      referencesRecomputed: recomputed.size,",
+    suite: "packages/code-intelligence/tests/incremental-equivalence.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",

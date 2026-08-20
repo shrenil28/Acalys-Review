@@ -64,6 +64,13 @@ export {
 export { canonicalSerialization, indexDigest } from "./digest.js";
 
 export {
+  CONSISTENCY_RULES,
+  validateIndexConsistency,
+  type ConsistencyRule,
+  type ConsistencyViolation,
+} from "./consistency.js";
+
+export {
   RECOMPUTE_REASONS,
   deriveChangeManifest,
   planIncrementalUpdate,

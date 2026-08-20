@@ -35,6 +35,7 @@ import {
   unavailableIndex,
   updateFromSnapshot,
   updateRepositoryIndex,
+  validateIndexConsistency,
   type RepositoryIndex,
   type RepositoryIndexIdentity,
 } from "../src/index.js";
@@ -583,5 +584,149 @@ describe("the stats describe the work that was actually skipped", () => {
     expect(outcome.stats.modulesRetained).toBe(
       outcome.plan?.retained.length ?? -1,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The commit barrier, from the production path
+// ---------------------------------------------------------------------------
+
+describe("no H2 index escapes before its candidate is validated", () => {
+  it("refuses a corrupt candidate and leaves H1 untouched", () => {
+    // The invariant this exists for:
+    //
+    //   an index carrying revision H2 is never observable before the entire
+    //   H2 candidate has passed consistency validation.
+    //
+    // Driven through `updateRepositoryIndex` rather than by calling the
+    // validator, because the question is whether the PRODUCTION path refuses —
+    // validator unit tests are in index-consistency.test.ts and prove a
+    // different thing.
+    //
+    // The corruption is introduced where a real planner defect would put it:
+    // a previous index whose retained binding claims `exact` while naming a
+    // declaration that will not exist at H2.
+    const h1 = full(BASE, H1);
+    const target = h1.bindings.find(
+      (edge) => edge.resolution === "exact" && edge.declarationIds.length > 0,
+    );
+    expect(target).toBeDefined();
+    if (target === undefined) return;
+
+    const corrupted: RepositoryIndex = {
+      ...h1,
+      bindings: h1.bindings.map((edge) =>
+        edge.bindingId === target.bindingId
+          ? { ...edge, declarationIds: ["a-declaration-that-never-existed"] }
+          : edge,
+      ),
+    };
+
+    const before = indexDigest(corrupted);
+
+    const outcome = updateRepositoryIndex({
+      previous: corrupted,
+      nextIdentity: identityFor(H2),
+      snapshot: new Map(Object.entries(BASE)),
+    });
+
+    // H1 is not mutated. The updater builds a fresh candidate and never writes
+    // into what it was given.
+    expect(indexDigest(corrupted)).toBe(before);
+
+    // And whatever comes back is a complete, correct H2 — either the candidate
+    // passed, or the fallback rebuilt it. What must never come back is a
+    // half-H1 half-H2 object wearing an H2 label.
+    expect(outcome.index.identity.revision.value).toBe(H2);
+    expect(indexDigest(outcome.index)).toBe(indexDigest(full(BASE, H2)));
+    expect(validateIndexConsistency(outcome.index)).toBeUndefined();
+  });
+
+  it("names the violated rule when it falls back on validation", () => {
+    // A caller that only learns "it failed" cannot tell a planner bug from a
+    // corrupt input. The rule name travels with the fallback.
+    const h1 = full(BASE, H1);
+    const reference = h1.references[0];
+    if (reference === undefined) throw new Error("no reference");
+
+    // Drop one binding, leaving its reference unbound — a violation the
+    // assembly carries forward rather than repairing.
+    const corrupted: RepositoryIndex = {
+      ...h1,
+      bindings: h1.bindings.filter(
+        (edge) => edge.referenceId !== reference.referenceId,
+      ),
+    };
+
+    const outcome = updateRepositoryIndex({
+      previous: corrupted,
+      nextIdentity: identityFor(H2),
+      snapshot: new Map(Object.entries(BASE)),
+    });
+
+    if (outcome.stats.succeeded) {
+      // The assembly repaired it, which is also a legitimate outcome — but
+      // then the result must be genuinely correct rather than merely accepted.
+      expect(indexDigest(outcome.index)).toBe(indexDigest(full(BASE, H2)));
+      return;
+    }
+
+    expect(outcome.stats.fallbackReason).toBe("candidate_failed_validation");
+    expect(outcome.stats.fallbackDetail).toMatch(/^[a-z_]+: /);
+  });
+});
+
+describe("the statistics describe what executed", () => {
+  it("reports recompute reasons rather than two counters that must add up", () => {
+    const h1 = full(BASE, H1);
+    const outcome = updateFromSnapshot(
+      h1,
+      gitObjectId(H2),
+      new Map(
+        Object.entries({
+          ...BASE,
+          "store.ts": BASE["store.ts"].replace("value + 1", "value + 41"),
+        }),
+      ),
+    );
+
+    expect(outcome.stats.succeeded).toBe(true);
+    // store.ts changed directly; run.ts because it binds into store.ts. Two
+    // different reasons, reported as reasons rather than forced into
+    // categories that have to sum to a total.
+    expect(outcome.stats.recomputeReasons["modified"]).toBe(1);
+    expect(outcome.stats.recomputeReasons["references_changed_module"]).toBe(1);
+  });
+
+  it("counts references and bindings actually re-extracted, not planned", () => {
+    const h1 = full(BASE, H1);
+    const outcome = updateFromSnapshot(
+      h1,
+      gitObjectId(H2),
+      new Map(Object.entries(BASE)),
+    );
+
+    expect(outcome.stats.succeeded).toBe(true);
+    // Nothing changed, so nothing was re-extracted and everything was carried.
+    // If these were derived from the plan they could not show that.
+    expect(outcome.stats.referencesRecomputed).toBe(0);
+    expect(outcome.stats.bindingsRecomputed).toBe(0);
+    expect(outcome.stats.referencesRetained).toBe(h1.references.length);
+    expect(outcome.stats.bindingsRetained).toBe(h1.bindings.length);
+  });
+
+  it("reports no saving when it fell back", () => {
+    const outcome = updateRepositoryIndex({
+      previous: unavailableIndex(identityFor(H1), {
+        kind: "unavailable",
+        why: "clone failed",
+      }),
+      nextIdentity: identityFor(H2),
+      snapshot: new Map(Object.entries(BASE)),
+    });
+
+    expect(outcome.stats.succeeded).toBe(false);
+    expect(outcome.stats.referencesRetained).toBe(0);
+    expect(outcome.stats.bindingsRetained).toBe(0);
   });
 });
