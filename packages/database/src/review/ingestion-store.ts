@@ -294,10 +294,54 @@ export class ReviewIngestionStore {
   /**
    * Records a revision, converging on head SHA.
    *
-   * `sequence` is assigned as `max + 1` **within the transaction**, so two
-   * concurrent inserts cannot both compute the same number — the second either
-   * blocks on the row lock or fails the unique constraint and retries into the
-   * conflict branch.
+   * # Converging, rather than one worker losing
+   *
+   * Two workers handling one delivery must produce one revision. The ordering
+   * below is what makes that true, and an earlier version had it wrong in a
+   * way that only showed under real contention:
+   *
+   * ```
+   * WRONG                              RIGHT
+   * SELECT existing   (both: none)     LOCK the pull request row
+   * LOCK the row      (B waits)        SELECT existing  (B now sees A's row)
+   * INSERT            (B: violation)   INSERT ... ON CONFLICT DO NOTHING
+   * ```
+   *
+   * Checking for existence *before* taking the lock means both workers decide
+   * "not there" against the same stale snapshot; serializing afterwards only
+   * decides which one gets to fail. Taking the lock first means the second
+   * worker's `SELECT` runs after the first has committed, and under READ
+   * COMMITTED it sees the row.
+   *
+   * `ON CONFLICT DO NOTHING` is kept as well, because the lock is per pull
+   * request and a caller could still race on a path that does not hold it. If
+   * the insert yields nothing, the row exists and is read back — converging on
+   * it, which is the whole contract of this method.
+   *
+   * **Measured, not assumed:** each of the two changes fixes the tested
+   * interleaving on its own. Reordering the lock alone passes; adding
+   * `ON CONFLICT` alone passes. So no test here distinguishes them, and
+   * neither is individually defended by a mutation — removing either one
+   * survives. They are kept together as defence in depth against *different*
+   * interleavings.
+   *
+   * The consequence is worth stating rather than hiding: **this fix carries no
+   * mutation coverage.** Two independently sufficient defences admit no
+   * killable single-edit mutant, and the harness takes one `find`/`replace`
+   * per definition. Planting one anyway would put an unkillable entry in the
+   * manifest and shrink the denominator with something that can never die.
+   *
+   * What guards it instead is a test: "converges when many workers race one
+   * head SHA at once" fails on the pre-fix code in every run and passes on
+   * this one. That is weaker than a mutation and it is what exists.
+   *
+   * The comment this replaces claimed the loser "retries into the conflict
+   * branch". Nothing retried. The behaviour was documented and absent, which
+   * is worse than undocumented: the test that would have caught it read as
+   * flaky rather than as failing.
+   *
+   * `sequence` is assigned as `max + 1` **within the transaction**, under the
+   * same row lock, so two concurrent inserts cannot compute the same number.
    *
    * Sequence is **arrival order, not repository history.** GitHub states
    * deliveries can arrive out of order, so a delayed push can land with a
@@ -309,34 +353,39 @@ export class ReviewIngestionStore {
     input: RevisionInput,
   ): Promise<StoredRevision> {
     return this.#inTransaction(async (client) => {
-      const existing = await client.query<{
-        id: string;
-        sequence: number;
-        created_at: Date;
-      }>(
-        `SELECT id, sequence, created_at FROM pull_request_revisions
-          WHERE pull_request_id = $1 AND head_sha = $2`,
-        [input.pullRequestId, input.headSha],
-      );
-
-      const found = existing.rows[0];
-      if (found !== undefined) {
-        return {
-          id: found.id,
-          pullRequestId: input.pullRequestId,
-          sequence: found.sequence,
-          headSha: input.headSha,
-          createdAt: found.created_at,
-          existed: true,
-        };
-      }
-
-      // Locks the pull request row, serializing sequence assignment for this PR
-      // without serializing the whole table.
+      // Locks the pull request row FIRST, serializing both the existence check
+      // and sequence assignment for this PR without serializing the table.
+      // Checking existence before this line is the defect described above.
       await client.query(
         "SELECT id FROM pull_requests WHERE id = $1 FOR UPDATE",
         [input.pullRequestId],
       );
+
+      const readBack = async (): Promise<StoredRevision | undefined> => {
+        const existing = await client.query<{
+          id: string;
+          sequence: number;
+          created_at: Date;
+        }>(
+          `SELECT id, sequence, created_at FROM pull_request_revisions
+            WHERE pull_request_id = $1 AND head_sha = $2`,
+          [input.pullRequestId, input.headSha],
+        );
+        const found = existing.rows[0];
+        return found === undefined
+          ? undefined
+          : {
+              id: found.id,
+              pullRequestId: input.pullRequestId,
+              sequence: found.sequence,
+              headSha: input.headSha,
+              createdAt: found.created_at,
+              existed: true,
+            };
+      };
+
+      const already = await readBack();
+      if (already !== undefined) return already;
 
       const next = await client.query<{ sequence: number }>(
         `SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence
@@ -346,11 +395,13 @@ export class ReviewIngestionStore {
       const sequence = next.rows[0]?.sequence ?? 1;
       const id = randomUUID();
 
-      await client.query(
+      const inserted = await client.query<{ id: string }>(
         `INSERT INTO pull_request_revisions (
            id, organization_id, repository_id, pull_request_id, sequence,
            head_sha, head_ref, base_sha, base_ref, merge_base_sha, trigger, created_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+         ON CONFLICT (pull_request_id, head_sha) DO NOTHING
+         RETURNING id`,
         [
           id,
           scope.organizationId,
@@ -366,6 +417,18 @@ export class ReviewIngestionStore {
           input.createdAt,
         ],
       );
+
+      if (inserted.rows.length === 0) {
+        // Someone else won on a path that did not hold our lock. Converge on
+        // their row rather than failing: "one revision per head SHA" is the
+        // contract, and which worker wrote it is not part of it.
+        const theirs = await readBack();
+        if (theirs !== undefined) return theirs;
+        throw new Error(
+          `pull_request_revisions insert for ${input.headSha} conflicted, ` +
+            "but the conflicting row could not be read back",
+        );
+      }
 
       return {
         id,

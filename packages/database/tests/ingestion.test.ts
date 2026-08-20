@@ -186,6 +186,40 @@ describeWithPostgres(
         });
       });
 
+      it("converges when many workers race one head SHA at once", async () => {
+        // Two workers is not enough to observe the defect this exists to
+        // catch. `upsertRevision` once checked for an existing revision
+        // BEFORE taking the pull-request row lock, so both workers decided
+        // "not there" against the same stale snapshot and the loser's INSERT
+        // violated the unique constraint. With two callers the interleaving
+        // that exposes it is rare — the failure surfaced roughly once per
+        // three FULL suite runs, where contention is high, and never in six
+        // consecutive isolated runs of this file.
+        //
+        // A test that only fails under unrelated load reads as flaky and gets
+        // treated as noise. Twenty concurrent callers make the interleaving
+        // ordinary rather than lucky, so the guarded and unguarded paths
+        // differ observably here (invariant 7) instead of somewhere else.
+        const workers = 20;
+        const results = await Promise.all(
+          Array.from({ length: workers }, () =>
+            ingest("c".repeat(40), "k-many"),
+          ),
+        );
+
+        // Every worker gets an answer; none loses.
+        expect(results).toHaveLength(workers);
+        for (const result of results) {
+          expect(result.revisionId).toBe(results[0]?.revisionId);
+        }
+
+        expect(await counts()).toEqual({
+          pull_request_revisions: 1,
+          review_requests: 1,
+          review_runs: 1,
+        });
+      });
+
       it("property: N concurrent workers converge on one history", async () => {
         await fc.assert(
           fc.asyncProperty(fc.integer({ min: 2, max: 12 }), async (workers) => {
