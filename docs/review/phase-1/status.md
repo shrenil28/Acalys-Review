@@ -23,9 +23,20 @@ P1-L.1                canonical repository index + live witness  ✓
 P1-L.2                references, bindings, import-export         ✓
 P1-L.3                incremental invalidation + rebuild oracle   ✓
 P1-L.4.1              code-to-test, from bindings                ✓
-P1-L.4.2              code-to-config governance                 next
-P1-L.4.3              code-to-instruction                        planned
+P1-L.4.2              code-to-config governance                   ✓
+P1-L.4.3              code-to-instruction                        next
 ```
+
+`P1-L.4.2` is closed at `5b31de7`. TypeScript's project parser establishes
+membership; Acalys keeps source governance, option inheritance, and project
+references distinct, and carries incomplete or unusable fact dimensions
+without turning them into negative absence. A production witness proves that
+a config-only change leaves the repository-index serialization and digest
+unchanged while changing selected context and analyzer identity. Closing
+evidence: 2,087 tests executed, 0 skipped, under Postgres-required `verify`;
+152/152 mutations detected, with 151 semantic assertion kills, the one
+pre-existing setup kill `#58`, 0 survivors, and 0 invalid. See
+[l4-2-config-governance.md](./l4-2-config-governance.md).
 
 `P1-VERIFY-CONCURRENCY` is recorded rather than built, for the same reason
 `P1-PUBLISH-SURFACES` is. P1-I gives one invocation **result-persistence**
