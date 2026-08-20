@@ -6,6 +6,7 @@ import {
   L5_CORPUS,
   L5_CORPUS_VERSION,
   L5_EXPERIMENT_SCHEMA_VERSION,
+  L5_FAMILY_EXPOSURE_KINDS,
   L5_MINIMUM_COMPOSITION,
   validateL5Corpus,
   type L5Corpus,
@@ -115,14 +116,38 @@ describe("the frozen P1-L.5 corpus premises", () => {
           corpusCase.gold.requiredContext.some(
             (label) =>
               label.family === family &&
-              label.requiredExposure?.disappearsUnderAblation === family,
+              label.requiredExposure?.disappearsUnderAblation === family &&
+              label.requiredExposure.factKind ===
+                L5_FAMILY_EXPOSURE_KINDS[family],
           ),
           `${corpusCase.id}:${family}`,
         ).toBe(true);
       }
     }
 
-    expect(selectorKinds).toEqual(new Set(["artifact", "span", "content"]));
+    expect(selectorKinds).toEqual(
+      new Set(["whole_artifact", "line_range", "content"]),
+    );
+  });
+
+  it("uses indexed declarations, never callers, for structural-index eligibility", () => {
+    const structuralCases = L5_CORPUS.cases.filter(
+      (corpusCase) => corpusCase.category === "structural_index_positive",
+    );
+    expect(structuralCases).toHaveLength(2);
+    for (const corpusCase of structuralCases) {
+      expect(
+        corpusCase.gold.requiredContext.length,
+        corpusCase.id,
+      ).toBeGreaterThan(0);
+      for (const label of corpusCase.gold.requiredContext) {
+        expect(label.family, label.id).toBe("structural_index");
+        expect(label.reason, label.id).toBe("declaration");
+        expect(label.requiredExposure?.factKind, label.id).toBe(
+          "indexed_declaration",
+        );
+      }
+    }
   });
 
   it("contains all incremental and independently authored cache witnesses", () => {
@@ -205,7 +230,7 @@ describe("L.5 corpus validation failures", () => {
   it("detects missing referenced paths", () => {
     const target = L5_CORPUS.cases.find(
       (corpusCase) =>
-        corpusCase.id === "structural-index-required-parameter-caller",
+        corpusCase.id === "structural-index-public-signature-declaration",
     )!;
     const missingPath = replaceCase(L5_CORPUS, target.id, (corpusCase) => ({
       ...corpusCase,

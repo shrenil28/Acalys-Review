@@ -18,6 +18,16 @@ export const L5_CONTEXT_FAMILIES = [
 
 export type L5ContextFamily = (typeof L5_CONTEXT_FAMILIES)[number];
 
+export const L5_FAMILY_EXPOSURE_KINDS = {
+  structural_index: "indexed_declaration",
+  binding: "binding",
+  test_relationship: "test_relationship",
+  config_governance: "config_governance",
+  instruction_governance: "instruction_governance",
+} as const satisfies Readonly<Record<L5ContextFamily, string>>;
+
+export type L5ExposureKind = (typeof L5_FAMILY_EXPOSURE_KINDS)[L5ContextFamily];
+
 export const L5_CONTEXT_REASONS = [
   "declaration",
   "caller",
@@ -92,9 +102,9 @@ export interface L5ContextLabel {
   readonly reason: L5ContextReason;
   readonly path: string;
   readonly selector:
-    | { readonly kind: "artifact" }
+    | { readonly kind: "whole_artifact" }
     | {
-        readonly kind: "span";
+        readonly kind: "line_range";
         readonly startLine: number;
         readonly endLine: number;
       }
@@ -103,6 +113,7 @@ export interface L5ContextLabel {
   /** Present only for required exposure labels. */
   readonly requiredExposure?: {
     readonly disappearsUnderAblation: L5ContextFamily;
+    readonly factKind: L5ExposureKind;
     readonly because: string;
   };
 }
@@ -235,28 +246,26 @@ const instructionAuditFiles = {
 
 const rawCases: readonly L5CorpusCase[] = [
   {
-    id: "structural-index-required-parameter-caller",
+    id: "structural-index-public-signature-declaration",
     category: "structural_index_positive",
     summary:
-      "A changed declaration adds a required parameter used by an indexed caller.",
+      "A changed implementation diverges from an indexed public declaration.",
     families: ["structural_index"],
     eligibility: {
       witness: "positive_gold_and_ablatable_exposure",
       because:
-        "the signature break is one distinct gold opportunity with a structural caller witness",
+        "the signature divergence is one distinct gold opportunity with an indexed-declaration witness",
     },
     ...caseRevision(
-      "l5/structural-index-required-parameter-caller/h1",
+      "l5/structural-index-public-signature-declaration/h1",
       {
         "src/format.ts": lines(
           "export function format(id: string, region: string): string {",
           "  return `${region}:${id}`;",
           "}",
         ),
-        "src/profile.ts": lines(
-          'import { format } from "./format.js";',
-          "export const profileKey = (id: string): string => format(id);",
-        ),
+        "types/format.d.ts":
+          "export declare function format(id: string): string;",
         "generated/client.ts":
           "export const format = (...values: string[]): string => values.join(':');",
       },
@@ -278,30 +287,31 @@ const rawCases: readonly L5CorpusCase[] = [
     gold: {
       expectedFindings: [
         {
-          goldId: "required-region-breaks-profile-caller",
+          goldId: "format-implementation-diverges-from-public-declaration",
           ruleId: "structural-api-compatibility/v1",
           family: "structural_index",
           path: "src/format.ts",
           allowedAnchor: { startLine: 1, endLine: 1 },
           summary:
-            "The required region parameter breaks an existing one-argument caller.",
+            "The implementation now requires an argument absent from its public declaration.",
           because:
-            "the indexed profile caller still supplies only id, so the changed required parameter creates a concrete compile-time break",
+            "the indexed public declaration still promises format(id), while the changed implementation requires region and therefore no longer implements that declared surface",
         },
       ],
       requiredContext: [
         {
-          id: "profile-format-caller",
+          id: "public-format-indexed-declaration",
           family: "structural_index",
-          reason: "caller",
-          path: "src/profile.ts",
-          selector: { kind: "span", startLine: 1, endLine: 2 },
+          reason: "declaration",
+          path: "types/format.d.ts",
+          selector: { kind: "line_range", startLine: 1, endLine: 1 },
           because:
-            "this indexed caller demonstrates the exact arity broken by the declaration change",
+            "the repository index records this indexed_declaration as the public format signature against which the implementation is checked",
           requiredExposure: {
             disappearsUnderAblation: "structural_index",
+            factKind: "indexed_declaration",
             because:
-              "reverse caller discovery is offered only by the structural repository index",
+              "this indexed_declaration exposure comes from structural_index and does not require a call-site binding",
           },
         },
       ],
@@ -311,26 +321,26 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "structural_index",
           reason: "other",
           path: "generated/client.ts",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
-            "this generated same-name declaration is not a caller of the changed format export",
+            "this generated same-name value is not the indexed public declaration for the changed implementation",
         },
       ],
     },
   },
   {
-    id: "structural-index-export-removal-caller",
+    id: "structural-index-export-declaration-drift",
     category: "structural_index_positive",
     summary:
-      "Removing an export breaks an indexed importer outside the changed file.",
+      "Renaming an implementation export contradicts its indexed declaration artifact.",
     families: ["structural_index"],
     eligibility: {
       witness: "positive_gold_and_ablatable_exposure",
       because:
-        "the removed export is one distinct gold opportunity with a known structural importer",
+        "the export-name drift is one distinct gold opportunity with an independent indexed-declaration witness",
     },
     ...caseRevision(
-      "l5/structural-index-export-removal-caller/h1",
+      "l5/structural-index-export-declaration-drift/h1",
       {
         "src/parser.ts": lines(
           "function parse(raw: string): number {",
@@ -338,10 +348,8 @@ const rawCases: readonly L5CorpusCase[] = [
           "}",
           "export { parse as parseInternal };",
         ),
-        "src/cli.ts": lines(
-          'import { parse } from "./parser.js";',
-          "export const run = (raw: string): number => parse(raw);",
-        ),
+        "types/parser.d.ts":
+          "export declare function parse(raw: string): number;",
         "docs/parser.md": "The command line accepts numeric input.",
       },
       {
@@ -363,29 +371,31 @@ const rawCases: readonly L5CorpusCase[] = [
     gold: {
       expectedFindings: [
         {
-          goldId: "parse-export-removal-breaks-cli",
+          goldId: "parse-export-diverges-from-indexed-declaration",
           ruleId: "structural-api-compatibility/v1",
           family: "structural_index",
           path: "src/parser.ts",
           allowedAnchor: { startLine: 1, endLine: 4 },
-          summary: "Renaming the parse export breaks the existing CLI import.",
+          summary:
+            "The implementation no longer provides the declared parse export.",
           because:
-            "the indexed CLI imports the exact parse export, which no longer exists after the changed alias",
+            "the indexed declaration artifact promises an export named parse, while the changed implementation exports only parseInternal",
         },
       ],
       requiredContext: [
         {
-          id: "cli-parse-importer",
+          id: "public-parse-indexed-declaration",
           family: "structural_index",
-          reason: "caller",
-          path: "src/cli.ts",
-          selector: { kind: "span", startLine: 1, endLine: 2 },
+          reason: "declaration",
+          path: "types/parser.d.ts",
+          selector: { kind: "line_range", startLine: 1, endLine: 1 },
           because:
-            "the importer proves that parse is a consumed public name rather than dead local surface",
+            "the repository index records this indexed_declaration as the public export surface for parser.ts",
           requiredExposure: {
             disappearsUnderAblation: "structural_index",
+            factKind: "indexed_declaration",
             because:
-              "the reverse importer relationship is available only from the structural index",
+              "this indexed_declaration exposure belongs only to structural_index and does not depend on resolving a caller binding",
           },
         },
       ],
@@ -395,9 +405,9 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "structural_index",
           reason: "other",
           path: "docs/parser.md",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
-            "product prose neither imports parse nor establishes a structural consumer",
+            "product prose is not an indexed declaration and cannot establish the promised export name",
         },
       ],
     },
@@ -443,11 +453,12 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "binding",
           reason: "declaration",
           path: "src/inventory.ts",
-          selector: { kind: "span", startLine: 1, endLine: 3 },
+          selector: { kind: "line_range", startLine: 1, endLine: 3 },
           because:
             "only the bound declaration establishes that reserve is asynchronous",
           requiredExposure: {
             disappearsUnderAblation: "binding",
+            factKind: "binding",
             because:
               "the declaration is offered through the exact binding edge and no other family",
           },
@@ -534,11 +545,12 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "binding",
           reason: "declaration",
           path: "src/validator.ts",
-          selector: { kind: "span", startLine: 1, endLine: 4 },
+          selector: { kind: "line_range", startLine: 1, endLine: 4 },
           because:
             "the return-value contract and normalization are visible only in the bound declaration",
           requiredExposure: {
             disappearsUnderAblation: "binding",
+            factKind: "binding",
             because:
               "the exact declaration is binding-derived rather than selected by name",
           },
@@ -618,11 +630,12 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "test_relationship",
           reason: "test",
           path: "test/serialize.spec.ts",
-          selector: { kind: "span", startLine: 1, endLine: 4 },
+          selector: { kind: "line_range", startLine: 1, endLine: 4 },
           because:
             "the sorted-key requirement is authored only in the test that imports serialize",
           requiredExposure: {
             disappearsUnderAblation: "test_relationship",
+            factKind: "test_relationship",
             because:
               "the non-co-located test is offered only by its binding-derived test relationship",
           },
@@ -634,7 +647,7 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "test_relationship",
           reason: "test",
           path: "test/parser.spec.ts",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
             "this test has no binding to serialize and contributes no relevant contract",
         },
@@ -705,6 +718,7 @@ const rawCases: readonly L5CorpusCase[] = [
             "its import binding associates a test outside filename conventions with the changed symbol",
           requiredExposure: {
             disappearsUnderAblation: "test_relationship",
+            factKind: "test_relationship",
             because:
               "the test is selected through the test relationship rather than path proximity",
           },
@@ -716,7 +730,7 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "test_relationship",
           reason: "test",
           path: "spec/security/password.ts",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
             "directory proximity does not make this password test relevant to token expiry",
         },
@@ -795,6 +809,7 @@ const rawCases: readonly L5CorpusCase[] = [
             "this project admits the changed file and enables the option that makes the assignment invalid",
           requiredExposure: {
             disappearsUnderAblation: "config_governance",
+            factKind: "config_governance",
             because:
               "governing-project resolution is the only family that offers this config option",
           },
@@ -882,6 +897,7 @@ const rawCases: readonly L5CorpusCase[] = [
             "the files list proves governance and the compiler option supplies the relevant semantics",
           requiredExposure: {
             disappearsUnderAblation: "config_governance",
+            factKind: "config_governance",
             because:
               "only config governance identifies this file's project and effective option",
           },
@@ -971,6 +987,7 @@ const rawCases: readonly L5CorpusCase[] = [
             "this available trusted instruction applies repository-wide and directly defines the missing behavior",
           requiredExposure: {
             disappearsUnderAblation: "instruction_governance",
+            factKind: "instruction_governance",
             because:
               "applicability and trust are offered only by instruction governance",
           },
@@ -980,11 +997,12 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "instruction_governance",
           reason: "coverage",
           path: "vendor/AGENTS.md",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
             "the read outage must remain visible so the retained positive is not mistaken for complete instruction coverage",
           requiredExposure: {
             disappearsUnderAblation: "instruction_governance",
+            factKind: "instruction_governance",
             because:
               "instruction coverage provenance is removed with the instruction-governance family",
           },
@@ -1066,6 +1084,7 @@ const rawCases: readonly L5CorpusCase[] = [
             "its directory scope includes charge.ts and its prohibition exactly covers the changed log",
           requiredExposure: {
             disappearsUnderAblation: "instruction_governance",
+            factKind: "instruction_governance",
             because:
               "only instruction governance applies the nearest trusted path rule",
           },
@@ -1077,7 +1096,7 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "instruction_governance",
           reason: "other",
           path: "docs/payments.md",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
             "ordinary product prose has neither instruction provenance nor a rule about logging",
         },
@@ -1151,11 +1170,12 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "binding",
           reason: "declaration",
           path: "src/transport.ts",
-          selector: { kind: "span", startLine: 1, endLine: 3 },
+          selector: { kind: "line_range", startLine: 1, endLine: 3 },
           because:
             "the declaration proves that the changed call starts asynchronous work",
           requiredExposure: {
             disappearsUnderAblation: "binding",
+            factKind: "binding",
             because:
               "the exact deliver declaration is exposed only through binding",
           },
@@ -1165,11 +1185,12 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "test_relationship",
           reason: "test",
           path: "test/notify.integration.ts",
-          selector: { kind: "span", startLine: 1, endLine: 2 },
+          selector: { kind: "line_range", startLine: 1, endLine: 2 },
           because:
             "the bound test proves callers rely on delivery completing before notify resolves",
           requiredExposure: {
             disappearsUnderAblation: "test_relationship",
+            factKind: "test_relationship",
             because:
               "the integration test is exposed only through its derived test relationship",
           },
@@ -1181,7 +1202,7 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "test_relationship",
           reason: "test",
           path: "test/format.ts",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
             "this test imports neither notify nor deliver and has no timing contract",
         },
@@ -1259,6 +1280,7 @@ const rawCases: readonly L5CorpusCase[] = [
             "noUncheckedIndexedAccess makes the absent-role state explicit in the type",
           requiredExposure: {
             disappearsUnderAblation: "config_governance",
+            factKind: "config_governance",
             because:
               "the effective option is offered only by config governance",
           },
@@ -1273,6 +1295,7 @@ const rawCases: readonly L5CorpusCase[] = [
             "the nearest trusted instruction defines false as the required absent-role result",
           requiredExposure: {
             disappearsUnderAblation: "instruction_governance",
+            factKind: "instruction_governance",
             because:
               "the applicable fail-closed policy is offered only by instruction governance",
           },
@@ -1284,7 +1307,7 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "instruction_governance",
           reason: "instruction",
           path: "services/public/AGENTS.md",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
             "this sibling instruction does not apply to the policy service",
         },
@@ -1338,7 +1361,7 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "binding",
           reason: "declaration",
           path: "src/store.ts",
-          selector: { kind: "span", startLine: 1, endLine: 1 },
+          selector: { kind: "line_range", startLine: 1, endLine: 1 },
           because:
             "the imported declaration is shadowed and must not be presented as the call target",
         },
@@ -1382,7 +1405,7 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "test_relationship",
           reason: "test",
           path: "src/format-number.test.ts",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
             "the test does not import or reference the changed string formatter",
         },
@@ -1468,7 +1491,7 @@ const rawCases: readonly L5CorpusCase[] = [
           family: "instruction_governance",
           reason: "instruction",
           path: "src/admin/AGENTS.md",
-          selector: { kind: "artifact" },
+          selector: { kind: "whole_artifact" },
           because:
             "directory scope prevents this admin rule from applying to src/public/health.ts",
         },
@@ -2054,7 +2077,7 @@ export function validateL5Corpus(corpus: L5Corpus): readonly string[] {
           );
         }
         const content = corpusCase.files[label.path];
-        if (label.selector.kind === "span") {
+        if (label.selector.kind === "line_range") {
           const lineCount = content?.split("\n").length ?? 0;
           if (
             !Number.isInteger(label.selector.startLine) ||
@@ -2064,7 +2087,7 @@ export function validateL5Corpus(corpus: L5Corpus): readonly string[] {
             label.selector.endLine > lineCount
           ) {
             issues.push(
-              `${labelKind} context ${label.id}: invalid span selector`,
+              `${labelKind} context ${label.id}: invalid line-range selector`,
             );
           }
         }
@@ -2081,6 +2104,8 @@ export function validateL5Corpus(corpus: L5Corpus): readonly string[] {
           if (
             label.requiredExposure === undefined ||
             label.requiredExposure.disappearsUnderAblation !== label.family ||
+            label.requiredExposure.factKind !==
+              L5_FAMILY_EXPOSURE_KINDS[label.family] ||
             !isNonEmpty(label.requiredExposure.because)
           ) {
             issues.push(
@@ -2092,6 +2117,20 @@ export function validateL5Corpus(corpus: L5Corpus): readonly string[] {
         } else if (label.requiredExposure !== undefined) {
           issues.push(
             `forbidden context ${label.id}: must not declare required exposure`,
+          );
+        }
+        if (label.reason === "caller" && label.family !== "binding") {
+          issues.push(
+            `${labelKind} context ${label.id}: caller reason belongs to binding`,
+          );
+        }
+        if (
+          labelKind === "required" &&
+          label.family === "structural_index" &&
+          label.reason !== "declaration"
+        ) {
+          issues.push(
+            `required context ${label.id}: structural index exposure must be an indexed declaration`,
           );
         }
       }
