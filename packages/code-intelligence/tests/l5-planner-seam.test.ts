@@ -43,6 +43,7 @@ const ALL_ENABLED: PlannerFactFamilyAvailability = {
   test_relationship: true,
   config_governance: true,
   instruction_governance: true,
+  base_revision: true,
 };
 
 function plannerInput(): PlannerInput {
@@ -96,6 +97,20 @@ function plannerInput(): PlannerInput {
       extractFile(path, source),
     ),
     sources: snapshot,
+    // Supplied so the ablation property below is actually exercised for this
+    // family rather than skipped. A family with no offers in the full
+    // treatment would make its ablation assertion vacuously true.
+    baseSha: "0".repeat(40),
+    baseFactsIdentity: "l5-planner-seam-fixture",
+    baseRevisions: [
+      {
+        path: "src/service.ts",
+        resolution: {
+          kind: "present" as const,
+          content: "export const work = (value: string): string => value;",
+        },
+      },
+    ],
     index: buildRepositoryIndex({
       identity: indexIdentity({
         tenant: { kind: "tenant", tenantId: "tenant-l5" },
@@ -148,6 +163,7 @@ function familyOf(candidate: ContextCandidate): PlannerFactFamily | undefined {
       return "binding";
     }
   }
+  if (source === "base_revision_facts") return "base_revision";
   if (source === "configuration_facts") return "config_governance";
   if (source === "instruction_facts" || source === "instruction_coverage") {
     return "instruction_governance";

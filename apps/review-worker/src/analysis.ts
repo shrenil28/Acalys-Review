@@ -49,6 +49,8 @@ import {
   type InstructionTraversal,
   type PlannerInput,
   type RepositoryIndex,
+  type BaseRevisionResolution,
+  type PlannerBaseRevision,
 } from "@acalys/code-intelligence";
 import { gitObjectId, isRepositoryPath } from "@acalys/contracts/domain";
 import type { CandidateFindingRow } from "@acalys/database";
@@ -89,6 +91,14 @@ export interface ChangedFileSource {
   readonly path: string;
   readonly content: string;
   readonly changedLines: readonly number[];
+  /**
+   * This file at the base revision, in whichever of the four states applies.
+   *
+   * Omitted by sources that cannot resolve bases at all. Omission is not
+   * `absent` — see {@link AnalysisSourceSnapshot.baseSha}, which is what says
+   * whether base resolution was even attempted for this snapshot.
+   */
+  readonly base?: BaseRevisionResolution | undefined;
 }
 
 export interface AnalysisInstructionObservation {
@@ -102,6 +112,18 @@ export interface AnalysisSourceSnapshot {
   readonly repository: ReadonlyMap<string, string>;
   /** Optional failure-aware instruction observation for this same revision. */
   readonly instructionObservation?: AnalysisInstructionObservation | undefined;
+  /**
+   * The commit the base revisions were read from, when any were.
+   *
+   * Its presence is the switch: with it, base resolution was attempted and
+   * every changed file gets a resolution — a supplied one, or `not_indexed`
+   * for the paths the source did not speak to. Without it, no base context is
+   * produced at all and comparison capabilities abstain.
+   *
+   * It is also an input to {@link analyzerCacheKey}, because the same head
+   * against two bases is two different reviews.
+   */
+  readonly baseSha?: string | undefined;
 }
 
 /**
@@ -129,7 +151,7 @@ export const REVIEW_PROCEDURE_VERSION = "1";
  * the entry that matters most is the model identity:
  *
  * ```
- * code identity        repository · head commit · changed lines
+ * code identity        repository · head commit · base commit · changed lines
  * context identity     the assembled context that was actually supplied
  * procedure identity   analyzer ids and versions · procedure version
  * execution identity   model and provider, once a model is involved
@@ -147,6 +169,22 @@ export const REVIEW_PROCEDURE_VERSION = "1";
 export function analyzerCacheKey(input: {
   readonly repositoryId: string;
   readonly headSha: string;
+  /**
+   * The base commit, when the review compared against one.
+   *
+   * Not redundant with `contextDigest`. Base context is only *offered* to the
+   * planner, and the planner may omit it under budget or ablation — so two
+   * reviews of one head against different bases can assemble byte-identical
+   * context and collide on every other entry in this key. The result they
+   * would share is wrong for at least one of them: rebase a pull request, or
+   * retarget a branch from `main` onto a release branch, and the findings
+   * served are the previous base's.
+   *
+   * Present and explicitly null when no base was involved, for the same
+   * reason `model` is: a head-only result and a base-aware result must never
+   * share a key.
+   */
+  readonly baseSha?: string | undefined;
   readonly contextDigest: string;
   readonly modelIdentity?: string | undefined;
 }): string {
@@ -154,6 +192,7 @@ export function analyzerCacheKey(input: {
     JSON.stringify({
       repositoryId: input.repositoryId,
       headSha: input.headSha,
+      baseSha: input.baseSha ?? null,
       contextDigest: input.contextDigest,
       analyzers: [...ALL_ANALYZER_IDS].sort(),
       procedure: REVIEW_PROCEDURE_VERSION,
@@ -301,10 +340,70 @@ export interface RealAnalysisOutcome {
  * file it wants, so a missed finding is attributable to the planner or to the
  * analyzer and never to an unrecorded shortcut between them.
  */
+interface ResolvedBaseRevisions {
+  readonly sha: string;
+  readonly revisions: readonly PlannerBaseRevision[];
+  readonly digest: string;
+}
+
+/**
+ * Turns a snapshot's optional per-file bases into a total picture, or nothing.
+ *
+ * Total is the operative word. When a snapshot declares a `baseSha` it is
+ * claiming base resolution was attempted for this revision, so every changed
+ * path must come back with a state — including the ones the source never
+ * mentioned, which become `not_indexed` rather than quietly vanishing. A path
+ * that vanishes is a path a comparison capability will treat as "no base
+ * item", and the only safe reading of that is abstention, so the difference
+ * between "the source could not read this file" and "the source forgot this
+ * file" would be lost along with the ability to fix the latter.
+ *
+ * Returns `undefined` when no base was declared at all. That is a different
+ * statement — not "we looked and failed" but "we did not look" — and it is
+ * what keeps a head-only pipeline honest instead of having it report bases it
+ * never had.
+ */
+function resolveBaseRevisions(
+  baseSha: string | undefined,
+  changed: readonly ChangedFileSource[],
+): ResolvedBaseRevisions | undefined {
+  if (baseSha === undefined) return undefined;
+
+  const revisions: PlannerBaseRevision[] = changed
+    .map((file) => ({
+      path: file.path,
+      resolution: file.base ?? ({ kind: "not_indexed" } as const),
+    }))
+    .sort((left, right) =>
+      left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+    );
+
+  return {
+    sha: baseSha,
+    revisions,
+    // Covers content, not just the commit: a port that hands back the wrong
+    // text for the right sha must not share an identity with one that does
+    // not, or the mistake becomes uninvestigable after the fact.
+    digest: sha256(
+      JSON.stringify({
+        baseSha,
+        revisions: revisions.map((entry) => ({
+          path: entry.path,
+          kind: entry.resolution.kind,
+          content:
+            entry.resolution.kind === "present"
+              ? sha256(entry.resolution.content)
+              : null,
+        })),
+      }),
+    ),
+  };
+}
+
 export async function runRealAnalysis(
   options: RealAnalysisOptions,
 ): Promise<RealAnalysisOutcome> {
-  const { changed, repository, instructionObservation } =
+  const { changed, repository, instructionObservation, baseSha } =
     await options.source.read({
       repositoryId: options.repositoryId,
       headSha: options.headSha,
@@ -332,6 +431,8 @@ export async function runRealAnalysis(
     };
   });
 
+  const base = resolveBaseRevisions(baseSha, changed);
+
   const config = buildConfigFacts(
     repository,
     changed.map((file) => file.path),
@@ -357,6 +458,13 @@ export async function runRealAnalysis(
       index,
       configFacts: config.facts,
       configFactsIdentity: config.digest,
+      ...(base === undefined
+        ? {}
+        : {
+            baseRevisions: base.revisions,
+            baseSha: base.sha,
+            baseFactsIdentity: base.digest,
+          }),
       instructionFacts: {
         facts: instructionFacts,
         factIdentity: instructionIdentity,
@@ -422,6 +530,7 @@ export async function runRealAnalysis(
   const cacheKey = analyzerCacheKey({
     repositoryId: options.repositoryId,
     headSha: options.headSha,
+    ...(base === undefined ? {} : { baseSha: base.sha }),
     contextDigest,
   });
 

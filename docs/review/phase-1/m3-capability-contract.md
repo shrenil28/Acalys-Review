@@ -26,18 +26,18 @@ The third and fourth conditions are the gap. Both historical misses have **no
 in-repo caller**:
 
 - `…public-signature-declaration` supplies only `generated/client.ts`, a
-  same-name lookalike the case explicitly marks as *forbidden* context. There
+  same-name lookalike the case explicitly marks as _forbidden_ context. There
   is no call site to be wrong.
 - `…export-declaration-drift` is not about parameters at all. A public export
   name disappeared.
 
 So the two rules make different claims from different evidence:
 
-| | `signature-compatibility` | M.3 |
-| --- | --- | --- |
-| claim | *this in-repo caller is now wrong* | *the published surface broke relative to base* |
-| needs | an unchanged supplied caller | the base revision |
-| refuted by | the caller passing enough arguments | a base-shaped consumer still compiling |
+|            | `signature-compatibility`           | M.3                                            |
+| ---------- | ----------------------------------- | ---------------------------------------------- |
+| claim      | _this in-repo caller is now wrong_  | _the published surface broke relative to base_ |
+| needs      | an unchanged supplied caller        | the base revision                              |
+| refuted by | the caller passing enough arguments | a base-shaped consumer still compiling         |
 
 M.3 is the base-relative sibling of a head-relative rule. Neither subsumes the
 other, and M.3 does not modify `signature-compatibility`.
@@ -62,7 +62,7 @@ constituted by the comparison, so the comparison has to be available.
 
 ### Base arrives as demand-selected context, not on `subject`
 
-`subject` states *what is under review* and deliberately carries no file
+`subject` states _what is under review_ and deliberately carries no file
 content — its own documentation says so, and the reason is that an analyzer
 handed content through the subject channel starts reporting pre-existing
 defects in any file a change touched.
@@ -81,9 +81,9 @@ invariant forbids:
 ```ts
 type BaseRevision =
   | { kind: "present"; content: string }
-  | { kind: "absent" }                      // the file is new at head
+  | { kind: "absent" } // the file is new at head
   | { kind: "unavailable"; because: string } // base exists, could not be read
-  | { kind: "not_indexed" };                // this source cannot supply base
+  | { kind: "not_indexed" }; // this source cannot supply base
 ```
 
 The rules that follow, and they are not symmetric:
@@ -98,7 +98,7 @@ The rules that follow, and they are not symmetric:
 That last rule is the one worth stating twice. Concluding "nothing was removed"
 because base could not be read is a negative conclusion drawn from an outage,
 which the standing rule forbids: positive evidence survives partial outage, an
-outage may prevent only a *negative* conclusion. It is also the more dangerous
+outage may prevent only a _negative_ conclusion. It is also the more dangerous
 direction in practice, because it is silent — the funnel cannot otherwise tell
 "reviewed, found nothing" from "could not review", and both render as a clean
 review.
@@ -111,7 +111,7 @@ review.
 repositoryId · headSha · contextDigest · analyzers · procedure · model
 ```
 
-No base. That is *correct today* — analysis is head-only, so the result really
+No base. That is _correct today_ — analysis is head-only, so the result really
 is a function of head. The moment base becomes an input it is a correctness
 bug: one head reviewed against two different bases produces two different
 correct results sharing one key. Rebase a pull request, or retarget a branch
@@ -143,7 +143,7 @@ because they are adjacent is the failure mode the checkpoint forbids.
 Cheap, syntactic, fallible, and forbidden the compiler — the same prohibition
 M.2 carries and for the same reason. It compares base and head declarations by
 AST shape and reports what looks like a break. It does not ask whether the
-break is real; that question belongs to something that can answer *no*.
+break is real; that question belongs to something that can answer _no_.
 
 ## Verifier — a base-shaped consumer, compiled against head
 
@@ -175,7 +175,7 @@ consulted twice.
 
 ### Honest abstention on unannotated base parameters
 
-Synthesizing the arity consumer needs base parameter *types*. When a base
+Synthesizing the arity consumer needs base parameter _types_. When a base
 parameter carries no type annotation, the verifier returns `inconclusive`
 rather than substituting `any`. Substituting `any` would make the consumer
 compile under almost any head, silently converting a verifier into a rubber

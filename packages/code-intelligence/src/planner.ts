@@ -122,6 +122,12 @@ export const INCLUSION_REASONS = [
   "path_instruction",
   "instruction_coverage",
   "configuration",
+  // The same path at the base revision. A separate reason from
+  // `changed_hunk` because it is not part of the change under review: it is
+  // the thing the change is being compared *against*, and conflating the two
+  // would let a base revision be scored, budgeted and cited as if the author
+  // had written it.
+  "base_revision",
   "prior_finding",
   "git_history",
 ] as const;
@@ -136,6 +142,7 @@ export const CONTEXT_ITEM_KINDS = [
   "coverage",
   "test",
   "configuration",
+  "base_revision",
   "finding",
 ] as const;
 
@@ -154,6 +161,34 @@ export type ContextItemKind = (typeof CONTEXT_ITEM_KINDS)[number];
  * the gap P1-K found between a well-tested module and a production path that
  * never reached it.
  */
+/**
+ * What is known about a changed file at the base revision.
+ *
+ * Four states, never three and never one. `absent` is a *positive*
+ * determination — the file is new at head, so no export it declares can have
+ * been removed and no signature it declares can have tightened. The two
+ * failure states are not conclusions about the code at all; they are
+ * statements about our own reach, and a comparison capability must abstain on
+ * them rather than read them as "unchanged".
+ */
+export type BaseRevisionState =
+  "present" | "absent" | "unavailable" | "not_indexed";
+
+export type BaseRevisionResolution =
+  | { readonly kind: "present"; readonly content: string }
+  | { readonly kind: "absent" }
+  | { readonly kind: "unavailable"; readonly because: string }
+  | { readonly kind: "not_indexed" };
+
+/** A changed file's base revision, as resolved by whatever could resolve it. */
+export interface PlannerBaseRevision {
+  /** The path at HEAD. */
+  readonly path: string;
+  /** The path at base, when the file was renamed. */
+  readonly basePath?: string | undefined;
+  readonly resolution: BaseRevisionResolution;
+}
+
 export type ItemProvenance =
   | { readonly source: "direct_source" }
   | {
@@ -183,6 +218,30 @@ export type ItemProvenance =
         "not_indexed"
       >;
       readonly coverage: InstructionCoverage;
+    }
+  | {
+      readonly source: "base_revision_facts";
+      readonly factIdentity: string;
+      /** Names the head path this is the base of, and the base commit. */
+      readonly citation: string;
+      readonly baseSha: string;
+      /**
+       * Which of the four base states this is — carried here rather than
+       * implied by the item's presence.
+       *
+       * An `absent` base that emitted no item would be indistinguishable from
+       * a disabled fact family and from a budget omission, and those three
+       * demand opposite behaviour: a new file positively establishes that
+       * nothing was removed, while the other two establish nothing at all. A
+       * consumer that cannot tell them apart will eventually report "no
+       * break" because it failed to look, which is a negative conclusion
+       * drawn from its own blindness.
+       */
+      readonly resolution: BaseRevisionState;
+      /** Why, when the resolution is `unavailable`. */
+      readonly because?: string | undefined;
+      /** Set when the file was renamed: the path this content came from. */
+      readonly basePath?: string | undefined;
     }
   | {
       readonly source: "repository_index";
@@ -241,6 +300,10 @@ export const REASON_WEIGHT: Readonly<Record<InclusionReason, number>> = {
   caller: 650,
   referenced_symbol: 600,
   configuration: 400,
+  // Just under the changed hunk it is the counterpart of. A comparison
+  // capability is not degraded without its base, it is inoperative, so this
+  // outranks every optional enrichment below it.
+  base_revision: 890,
   prior_finding: 350,
   git_history: 200,
 };
@@ -329,6 +392,7 @@ export const PLANNER_FACT_FAMILIES = [
   "test_relationship",
   "config_governance",
   "instruction_governance",
+  "base_revision",
 ] as const;
 
 export type PlannerFactFamily = (typeof PLANNER_FACT_FAMILIES)[number];
@@ -343,6 +407,7 @@ const NO_PLANNER_FACT_FAMILIES: PlannerFactFamilyAvailability = Object.freeze({
   test_relationship: false,
   config_governance: false,
   instruction_governance: false,
+  base_revision: false,
 });
 
 export interface PlannerInput {
@@ -374,6 +439,19 @@ export interface PlannerInput {
   readonly configFacts?: ConfigFacts | undefined;
   /** Canonical identity of the configuration facts above. */
   readonly configFactsIdentity?: string | undefined;
+  /**
+   * Base revisions for the changed files, one entry per changed path.
+   *
+   * A path missing from this list is not the same as a path resolved to
+   * `absent`: the first says nothing was attempted, the second says the file
+   * is new. Callers that can resolve bases should supply an entry for every
+   * changed file, including the ones they failed to read.
+   */
+  readonly baseRevisions?: readonly PlannerBaseRevision[] | undefined;
+  /** The commit the base revisions were read from. */
+  readonly baseSha?: string | undefined;
+  /** Canonical identity of the base revision facts above. */
+  readonly baseFactsIdentity?: string | undefined;
   /**
    * Optional measurement seam for repository-intelligence A/B runs.
    * Omission preserves the production all-families-enabled behavior.
@@ -502,6 +580,71 @@ function relatedTests(
  * never generated can never be selected. Over-generation costs a scoring pass;
  * under-generation costs the finding.
  */
+/**
+ * One candidate per changed file whose base was *attempted*, in every state.
+ *
+ * Emitting only the successful reads would be the cheaper implementation and
+ * the wrong one: a consumer would then have to treat "no item" as "no base
+ * change", which is exactly the inference the four states exist to prevent.
+ * The failure states carry no content and are still worth their few tokens,
+ * because they are what lets a capability abstain honestly instead of
+ * reporting a clean review it never performed.
+ *
+ * Entries for paths that are not under review are dropped. The base of a file
+ * nobody changed is not evidence about this change, and admitting it would let
+ * the planner smuggle whole untouched files into the budget under a reason
+ * that scores just below the changed hunk.
+ */
+function baseRevisionCandidates(
+  input: PlannerInput,
+): readonly ContextCandidate[] {
+  if (!factFamilyEnabled(input, "base_revision")) return [];
+
+  const changedPaths = new Set(input.changed.map((file) => file.path));
+  const seen = new Set<string>();
+  const candidates: ContextCandidate[] = [];
+
+  for (const base of input.baseRevisions ?? []) {
+    if (!changedPaths.has(base.path)) continue;
+    // First entry wins, deterministically. Two resolutions for one path is a
+    // caller defect, and picking the "better" one would hide it.
+    if (seen.has(base.path)) continue;
+    seen.add(base.path);
+
+    const baseSha = input.baseSha ?? "unidentified";
+    const renamedFrom =
+      base.basePath === undefined || base.basePath === base.path
+        ? ""
+        : ` (renamed from ${base.basePath})`;
+
+    candidates.push({
+      kind: "base_revision",
+      path: base.path,
+      reason: "base_revision",
+      // Repository text, not authored guidance: it must never be able to
+      // instruct the reviewer, only to be compared against.
+      trust: "repository_source",
+      content:
+        base.resolution.kind === "present" ? base.resolution.content : "",
+      provenance: {
+        source: "base_revision_facts",
+        factIdentity: input.baseFactsIdentity ?? "unidentified",
+        citation: `${base.path} at base ${baseSha}${renamedFrom}`,
+        baseSha,
+        resolution: base.resolution.kind,
+        ...(base.resolution.kind === "unavailable"
+          ? { because: base.resolution.because }
+          : {}),
+        ...(base.basePath === undefined ? {} : { basePath: base.basePath }),
+      },
+    });
+  }
+
+  return candidates.sort((left, right) =>
+    left.path < right.path ? -1 : left.path > right.path ? 1 : 0,
+  );
+}
+
 export function generateCandidates(
   input: PlannerInput,
 ): readonly ContextCandidate[] {
@@ -537,6 +680,8 @@ export function generateCandidates(
       },
     });
   }
+
+  candidates.push(...baseRevisionCandidates(input));
 
   if (factFamilyEnabled(input, "instruction_governance")) {
     candidates.push(...factualInstructionCandidates(input.instructionFacts));

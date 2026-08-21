@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { INCLUSION_REASONS, type InclusionReason } from "../src/planner.js";
 import {
+  InvalidL5ContextObservationError,
   UNDEFINED_RATIO,
   accountL5Context,
   factFamilyFor,
@@ -25,7 +26,18 @@ const EXPECTED_REPORT_REASONS = {
   instruction_coverage: "coverage",
   prior_finding: "other",
   git_history: "other",
+  base_revision: "other",
 } as const satisfies Readonly<Record<InclusionReason, L5ReportReason>>;
+
+/**
+ * Production inclusion reasons that L.5 has no fact family for, on purpose.
+ *
+ * Not an exemption from coverage — the opposite. Each of these is asserted
+ * below to be *refused* by `factFamilyFor`, so the combination table stays
+ * exhaustive over everything L.5 can legitimately see, and a reason that
+ * belongs in neither list fails the coverage assertion.
+ */
+const REASONS_L5_REFUSES = ["base_revision"] as const;
 
 const VALID_PRODUCTION_COMBINATIONS = [
   ["changed_hunk", undefined, "none"],
@@ -97,7 +109,25 @@ describe("P1-L.5 production taxonomy", () => {
       coveredReasons.add(reason);
       expect(factFamilyFor(reason, provenance)).toBe(expected);
     }
-    expect(coveredReasons).toEqual(new Set(INCLUSION_REASONS));
+    expect(coveredReasons).toEqual(
+      new Set(
+        INCLUSION_REASONS.filter(
+          (reason) =>
+            !(REASONS_L5_REFUSES as readonly string[]).includes(reason),
+        ),
+      ),
+    );
+  });
+
+  it("refuses the reasons it has deliberately no family for", () => {
+    // The other half of the coverage assertion above. Without this, moving a
+    // reason into REASONS_L5_REFUSES would be a way to make an unmapped
+    // reason pass silently instead of a way to declare it out of scope.
+    for (const reason of REASONS_L5_REFUSES) {
+      expect(() => factFamilyFor(reason, "base_revision_facts")).toThrow(
+        InvalidL5ContextObservationError,
+      );
+    }
   });
 
   it("rejects new reasons, new provenance, and impossible production pairs", () => {

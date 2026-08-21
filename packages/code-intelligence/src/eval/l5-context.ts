@@ -47,6 +47,9 @@ const REPORT_REASON_BY_PRODUCTION_REASON = {
   instruction_coverage: "coverage",
   prior_finding: "other",
   git_history: "other",
+  // Mapped because the Record must be total, not because L.5 can report one.
+  // `factFamilyFor` refuses base-revision items outright; see there.
+  base_revision: "other",
 } as const satisfies Readonly<Record<InclusionReason, L5ReportReason>>;
 
 const PRODUCTION_REASON_SET = new Set<string>(INCLUSION_REASONS);
@@ -56,6 +59,7 @@ const PROVENANCE_SOURCE_MEMBERS = {
   configuration_facts: true,
   instruction_facts: true,
   instruction_coverage: true,
+  base_revision_facts: true,
 } as const satisfies Readonly<Record<ItemProvenance["source"], true>>;
 
 const PROVENANCE_SOURCES = new Set<string>(
@@ -130,6 +134,26 @@ export function factFamilyFor(
     reason === "instruction_coverage"
   ) {
     return "instruction_governance";
+  }
+
+  if (
+    reason === "base_revision" ||
+    provenanceSource === "base_revision_facts"
+  ) {
+    // Deliberately fatal rather than mapped to a new family.
+    //
+    // L.5's fact families are part of the frozen f7b49af baseline. Adding
+    // `base_revision` to them would let a run that consumed base revisions be
+    // reported in the same vocabulary as the baseline and compared against it,
+    // when the two measured different reviewers over different inputs. An
+    // observation containing a base revision is not a worse L.5 observation;
+    // it is not an L.5 observation, and saying so loudly is cheaper than
+    // discovering later that a comparison was meaningless.
+    throw new InvalidL5ContextObservationError(
+      "Base-revision context cannot appear in an L.5 observation: the L.5 " +
+        "fact families are frozen at the f7b49af baseline, which had no base " +
+        `revision input (saw ${reason}/${provenanceSource}).`,
+    );
   }
 
   throw new InvalidL5ContextObservationError(

@@ -390,6 +390,14 @@ export function plannerAvailabilityForMode(
     test_relationship: mode.families.test_relationship,
     config_governance: mode.families.config_governance,
     instruction_governance: mode.families.instruction_governance,
+    // Never on, in any L.5 mode, including TREATMENT.
+    //
+    // The L.5 modes are frozen at f7b49af and none of them had a base
+    // revision to ablate. Deriving this from `mode.families` would make it
+    // switchable the moment someone added the key, and a TREATMENT run that
+    // quietly gained a new fact family is no longer the treatment the frozen
+    // baseline measured.
+    base_revision: false,
   };
 }
 
@@ -610,6 +618,17 @@ function reportReason(
     case "prior_finding":
     case "git_history":
       return "other";
+    case "base_revision":
+      // Unreachable by construction: `plannerAvailabilityForMode` pins
+      // base_revision off for every L.5 mode, so the planner cannot offer one
+      // here. Kept as an explicit throw rather than folded into "other",
+      // because a base revision counted as "other" context would silently
+      // enter an L.5 offer manifest and be compared against the baseline.
+      throw new Error(
+        "A base-revision candidate reached the L.5 harness, which pins that " +
+          "fact family off in every mode. This run is not comparable to the " +
+          "f7b49af baseline.",
+      );
   }
 }
 
@@ -1431,11 +1450,72 @@ export function adaptL5CacheIdentityPairs(
   );
 }
 
-export function assertPlannerFamilyNamesAreExact(): void {
-  const planner = [...PLANNER_FACT_FAMILIES].sort();
-  const experiment = [...L5_FACT_FAMILIES].sort();
-  if (canonicalJson(planner) !== canonicalJson(experiment)) {
-    throw new Error("Planner and L.5 fact-family names differ");
+/**
+ * Fact families production has that L.5 never measured — and why.
+ *
+ * Every entry is a deliberate, written act. The guard below permits
+ * production to hold families the frozen experiment lacks, which is what
+ * capability expansion requires, but it will not permit one to appear without
+ * a reason recorded here. Containment on its own would let the production
+ * planner drift arbitrarily away from the baseline one family at a time, each
+ * step individually invisible.
+ */
+const FACT_FAMILIES_L5_NEVER_MEASURED: Readonly<Record<string, string>> = {
+  base_revision:
+    "P1-M.3.0 introduced base-revision context. The f7b49af pipeline had no " +
+    "base input at all, so there is no ablation of it to compare against and " +
+    "every L.5 mode pins it off.",
+};
+
+/**
+ * The planner's fact families are still compatible with the frozen baseline.
+ *
+ * This asserted *equality* while L.5 was the live work, and equality was the
+ * right relation then, for the reason recorded below about analyzers: an
+ * experiment that ablates a family production does not have measures nothing.
+ *
+ * P1-M breaks equality deliberately and in one direction only. Production may
+ * gain families; the baseline may not lose them. So:
+ *
+ * ```
+ * L.5's ablatable families  SUBSET OF  production's fact families
+ * ```
+ *
+ * The direction matters. A family L.5 measured that production has since lost
+ * still fails here, because the frozen numbers would then cite an ablation of
+ * something that no longer exists. A family production gained passes only if
+ * it is named in {@link FACT_FAMILIES_L5_NEVER_MEASURED}, which is the part
+ * that keeps this a decision rather than a default.
+ */
+export function assertPlannerFamilyNamesRemainCompatible(): void {
+  const planner = new Set<string>(PLANNER_FACT_FAMILIES);
+  const experiment = new Set<string>(L5_FACT_FAMILIES);
+
+  const lostSinceBaseline = [...experiment]
+    .filter((family) => !planner.has(family))
+    .sort();
+  if (lostSinceBaseline.length > 0) {
+    throw new Error(
+      "The L.5 baseline ablated fact families production no longer has: " +
+        `[${lostSinceBaseline.join(", ")}]. The frozen f7b49af numbers ` +
+        "describe a pipeline this tree can no longer produce.",
+    );
+  }
+
+  const undeclared = [...planner]
+    .filter(
+      (family) =>
+        !experiment.has(family) &&
+        FACT_FAMILIES_L5_NEVER_MEASURED[family] === undefined,
+    )
+    .sort();
+  if (undeclared.length > 0) {
+    throw new Error(
+      `Production gained fact families with no recorded reason: [${undeclared.join(", ")}]. ` +
+        "Add them to FACT_FAMILIES_L5_NEVER_MEASURED with why the frozen " +
+        "baseline has no ablation of them, or the planner has drifted from " +
+        "the baseline without anyone deciding that it should.",
+    );
   }
 }
 
@@ -1523,5 +1603,5 @@ export function assertProductionAnalyzerListIsExact(): void {
   }
 }
 
-assertPlannerFamilyNamesAreExact();
+assertPlannerFamilyNamesRemainCompatible();
 assertProductionAnalyzerListIsExact();
