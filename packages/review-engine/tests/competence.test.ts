@@ -270,6 +270,13 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
         "`forEach` discards the promise its async callback returns.",
         ["`forEach` ignores its callback's return value"],
       ],
+      exact_optional_property_write: [
+        "Writing `undefined` to the optional property `tag` is rejected under exactOptionalPropertyTypes, which is enabled by tsconfig.json.",
+        [
+          "`tag` is declared optional, so its type does not include `undefined` unless written explicitly",
+          "tsconfig.json enables exactOptionalPropertyTypes",
+        ],
+      ],
     };
 
     for (const capability of VERIFICATION_CAPABILITIES) {

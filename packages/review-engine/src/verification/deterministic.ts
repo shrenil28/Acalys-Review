@@ -36,6 +36,7 @@ import { resolveCallProduct } from "./binding.js";
 import { verifyAsyncCallbackContract } from "./callback.js";
 import { verifyConditionValue } from "./condition.js";
 import { verifyExceptionFlow } from "./exception.js";
+import { verifyExactOptionalWrite } from "./exact-optional.js";
 import { verifySignatureCompatibility } from "./signature.js";
 import { assertReasonForCapability, assessCompetence } from "./competence.js";
 import {
@@ -316,6 +317,47 @@ export function verifyDeterministically(
       assertReasonsSupport(attempt.decision, attempt.reasons);
       assertReasonForCapability("condition_value_semantics", attempt.reasons);
     }
+    return attempt;
+  }
+
+  if (
+    competence.kind === "supported" &&
+    competence.capability === "exact_optional_property_write"
+  ) {
+    // P1-M.2. Its own procedure, not a branch of another: the evidence is a
+    // compiler diagnostic obtained from a rebuilt project, which shares no
+    // machinery with the syntactic observers above.
+    const outcome = verifyExactOptionalWrite(
+      {
+        path: input.location.path,
+        startLine: input.location.startLine,
+        endLine: input.location.endLine,
+        configPaths: context.items
+          .map((item) => item.path)
+          .filter((path) => /tsconfig[\w.-]*\.json$/.test(path)),
+      },
+      context,
+    );
+
+    const reasons: readonly VerificationReason[] =
+      outcome.kind === "verified"
+        ? ["governing_compiler_rejects_write"]
+        : outcome.kind === "rejected"
+          ? ["governing_compiler_permits_write"]
+          : ["governing_project_unavailable"];
+
+    const attempt: VerificationAttempt = {
+      status: "completed",
+      decision: outcome.kind,
+      reasons,
+      // The compiler settled it. Confidence reflects the strength of the
+      // procedure, not enthusiasm for the conclusion.
+      confidence: outcome.kind === "inconclusive" ? 0.2 : 0.95,
+      severity: input.proposedSeverity,
+    };
+
+    assertReasonsSupport(attempt.decision, attempt.reasons);
+    assertReasonForCapability("exact_optional_property_write", attempt.reasons);
     return attempt;
   }
 

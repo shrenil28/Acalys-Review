@@ -252,8 +252,32 @@ export function buildClusters(
 
     // Instructions belong to every cluster: they change what counts as a
     // defect, so a cluster reviewed without them answers a different question.
+    //
+    // A governing configuration belongs to the clusters it governs, for the
+    // same reason and by a narrower rule. `exactOptionalPropertyTypes` decides
+    // whether a line is a defect at all, so a cluster reviewed without it
+    // answers a different question too — but a tsconfig is not in the
+    // neighbourhood of the source it governs, so path adjacency drops it.
+    //
+    // Scoped by the citation rather than given to every cluster: the planner
+    // records which source each configuration governs, and a config governing
+    // a file this cluster does not contain says nothing about this cluster.
+    // Broadcasting all of them would be the generic context enrichment P1-M
+    // forbids.
+    const governsThisCluster = (item: AssembledItem): boolean => {
+      if (item.kind !== "configuration") return false;
+      const provenance = item.provenance;
+      if (provenance?.source !== "configuration_facts") return false;
+      return paths.some((path) =>
+        provenance.citation.includes(`governs ${path}`),
+      );
+    };
+
     const items = context.filter(
-      (item) => neighbourhood.has(item.path) || item.kind === "instruction",
+      (item) =>
+        neighbourhood.has(item.path) ||
+        item.kind === "instruction" ||
+        governsThisCluster(item),
     );
 
     const changedSymbols = items

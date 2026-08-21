@@ -48,6 +48,18 @@ export type VerificationDecision = (typeof VERIFICATION_DECISIONS)[number];
  * asked of a verifier is always "what is it rejecting, and is that right?".
  */
 export const VERIFICATION_REASONS = [
+  // P1-M.2. The compiler, run over the governing project, reported the
+  // diagnostic the claim predicted — or affirmatively did not.
+  //
+  // `governing_compiler_permits_write` is a REFUTATION, not an abstention.
+  // The semantic environment was reproduced and TypeScript found nothing, so
+  // the analyzer's hypothesis is contradicted rather than unsettled. Reporting
+  // it as insufficient evidence would turn every refutation this capability can
+  // produce into "we could not tell", and the analyzer would never be
+  // contradicted by anything.
+  "governing_compiler_rejects_write",
+  "governing_compiler_permits_write",
+  "governing_project_unavailable",
   "evidence_supports_claim",
   "independent_context_confirms",
   "claim_contradicted_by_context",
@@ -155,6 +167,15 @@ export type VerificationReason = (typeof VERIFICATION_REASONS)[number];
 export const REASON_SUPPORTS: Readonly<
   Record<VerificationReason, VerificationDecision>
 > = {
+  // The compiler, over the governing project, produced the predicted
+  // diagnostic. Independent of the analyzer's syntactic reading in method as
+  // well as in input.
+  governing_compiler_rejects_write: "verified",
+  // A REFUTATION. The environment was reproduced and TypeScript found no
+  // violation, which contradicts the claim rather than failing to settle it.
+  governing_compiler_permits_write: "rejected",
+  // The project could not be built, so nothing was learned either way.
+  governing_project_unavailable: "inconclusive",
   evidence_supports_claim: "verified",
   independent_context_confirms: "verified",
 

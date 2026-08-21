@@ -309,6 +309,73 @@ describe("Every reason code is reachable", () => {
         location: { path: "src/caller.ts", startLine: line, endLine: line },
       });
 
+    // P1-M.2's three reasons, each from a real compiler adjudication.
+    //
+    // The middle one matters most: `governing_compiler_permits_write` is a
+    // REFUTATION produced by successfully rebuilding the project and finding
+    // nothing. If it were unreachable, the capability could only ever agree
+    // with its analyzer.
+    const exactOptional = (
+      files: Record<string, string>,
+      line: number,
+    ): VerificationAttempt =>
+      verify(files, {
+        claim: {
+          statement:
+            "Writing `undefined` to the optional property `tag` is rejected under exactOptionalPropertyTypes, which is enabled by tsconfig.json.",
+          steps: [],
+          trigger: "compiling the change under its governing project",
+          consequence: "the project fails to typecheck",
+        },
+        location: { path: "src/cache.ts", startLine: line, endLine: line },
+        // Evidence citing the governing config, exactly as the real analyzer
+        // emits it. The verifier's planner admits every path evidence points
+        // at, which is how the config reaches the program — without this the
+        // procedure cannot build the project and correctly reports
+        // `governing_project_unavailable` instead.
+        evidence: [
+          {
+            type: "static_analysis",
+            observation:
+              "tsconfig.json governs src/cache.ts and enables exactOptionalPropertyTypes.",
+            location: { path: "tsconfig.json", startLine: 1, endLine: 1 },
+          },
+        ],
+      });
+
+    const STRICT =
+      '{"compilerOptions":{"strict":true,"exactOptionalPropertyTypes":true}}';
+
+    record(
+      exactOptional(
+        {
+          "tsconfig.json": STRICT,
+          "src/cache.ts":
+            "interface Entry { tag?: string }\nexport function clear(entry: Entry): void {\n  entry.tag = undefined;\n}",
+        },
+        3,
+      ),
+    );
+    record(
+      exactOptional(
+        {
+          "tsconfig.json": STRICT,
+          "src/cache.ts":
+            "type Maybe<T> = T | undefined;\ninterface Entry { tag?: Maybe<string> }\nexport function clear(entry: Entry): void {\n  entry.tag = undefined;\n}",
+        },
+        4,
+      ),
+    );
+    record(
+      exactOptional(
+        {
+          "src/cache.ts":
+            "interface Entry { tag?: string }\nexport function clear(entry: Entry): void {\n  entry.tag = undefined;\n}",
+        },
+        3,
+      ),
+    );
+
     const API_NEW =
       "export function send(id: string, urgent: boolean): void {\n  return;\n}";
     const CALLER_STALE =

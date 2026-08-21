@@ -64,6 +64,17 @@ import type { VerificationInput } from "./input.js";
  */
 export const VERIFICATION_CAPABILITIES = [
   /**
+   * Whether a write of `undefined` into an optional property is legal under
+   * the projects that govern the changed file.
+   *
+   * Covers a **property write of the `undefined` literal** and nothing else.
+   * Indexed-access safety under `noUncheckedIndexedAccess` belongs to the same
+   * semantic family and is deliberately not this capability — it needs its own
+   * procedure, and naming this one after the family would claim coverage that
+   * does not exist.
+   */
+  "exact_optional_property_write",
+  /**
    * Whether an asynchronous value produced at a call site is consumed.
    *
    * Covers "the promise is discarded", "the rejection is never handled", and
@@ -160,6 +171,12 @@ export type CompetenceAssessment =
 export const REASONS_BY_CAPABILITY: Readonly<
   Record<VerificationCapability, readonly VerificationReason[]>
 > = {
+  exact_optional_property_write: [
+    "governing_compiler_rejects_write",
+    "governing_compiler_permits_write",
+    "governing_project_unavailable",
+    "context_incomplete",
+  ],
   async_callback_contract: [
     "callback_result_discarded_by_receiver",
     "receiver_awaits_callback_result",
@@ -267,6 +284,18 @@ export interface ClaimMatcher {
 }
 
 export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
+  {
+    id: "exact_optional_property_write",
+    capability: "exact_optional_property_write",
+    declines: undefined,
+    // Anchored on the option name, which is what makes the claim
+    // configuration-sensitive rather than a general nullability opinion. A
+    // claim that merely mentions `undefined` is not this capability's, and
+    // routing one here would have it answered by a compiler run that cannot
+    // address it.
+    patterns: [/\bexactOptionalPropertyTypes\b/],
+    dominates: [],
+  },
   {
     id: "external_semantics",
     capability: undefined,

@@ -82,6 +82,16 @@ export {
   signatureCompatibilityAnalyzer,
 } from "./correctness/signature-compatibility.js";
 export {
+  EXACT_OPTIONAL_WRITE_RULE_ID,
+  analyzeExactOptionalWrite,
+} from "./correctness/exact-optional-write.js";
+export {
+  EXACT_OPTIONAL_DIAGNOSTIC_CODE,
+  verifyExactOptionalWrite,
+  type ExactOptionalOutcome,
+  type ExactOptionalQuery,
+} from "./verification/exact-optional.js";
+export {
   DEFAULT_LIMITS,
   DEGRADATION_REASONS,
   createMemoryCache,
@@ -108,6 +118,10 @@ export const ALL_ANALYZER_IDS = [
   "acalys.correctness.async-completion",
   "acalys.correctness.swallowed-error",
   "acalys.correctness.signature-compatibility",
+  // P1-M.2. The first analyzer that cannot decide anything from source alone —
+  // the same line is correct in one project and wrong in another, so it reads
+  // a demand-selected governing configuration.
+  "acalys.correctness.exact-optional-property-write",
 ] as const;
 export * from "./verification/index.js";
 export * from "./publication/index.js";

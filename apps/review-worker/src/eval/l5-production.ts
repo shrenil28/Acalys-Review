@@ -1439,13 +1439,87 @@ export function assertPlannerFamilyNamesAreExact(): void {
   }
 }
 
+/**
+ * L.5 measured a pipeline that still exists.
+ *
+ * This asserted equality with the production set while L.5 was the live work,
+ * and equality was the right relation then: a measurement of a pipeline other
+ * than the one that ships is a measurement of nothing.
+ *
+ * P1-M changes that, deliberately. Capability expansion adds analyzers to
+ * production, and under equality there would be only two ways forward — never
+ * add one, or let L.5 re-measure with the new set. The second is the dangerous
+ * one: `f7b49af` is the immutable baseline every P1-M claim is scored against,
+ * and a baseline that silently re-measures whenever production grows is not a
+ * baseline. Recall would rise because the denominator moved, and the frozen
+ * `2/12` would stop meaning what it said.
+ *
+ * So the relation is now containment rather than equality:
+ *
+ * ```
+ * L.5's measured analyzers  SUBSET OF  current production analyzers
+ * ```
+ *
+ * That keeps the protection which actually mattered — L.5 never measured an
+ * analyzer production lacks, so its numbers describe a real pipeline — while
+ * letting production move ahead of the baseline, which is the entire point of
+ * P1-M. Removing an analyzer L.5 measured still fails here, because that would
+ * leave the frozen baseline citing a stage that no longer exists.
+ */
+/**
+ * Whether this tree can still reproduce the `f7b49af` experiment.
+ *
+ * The containment guard below establishes compatibility — L.5 never measured
+ * an analyzer production has since lost. It does **not** establish
+ * reproducibility, and conflating the two is a live hazard rather than a
+ * theoretical one: this harness executes `runRealAnalysis`, which runs
+ * whatever production currently registers. Once P1-M adds a capability, a
+ * re-run measures TODAY's reviewer against the old corpus.
+ *
+ * The number that comes back would be larger, and it would be labelled L.5.
+ *
+ * That is the goal-post movement M.1 exists to prevent, arriving through a
+ * harness rather than through a decision. So a baseline reproduction refuses
+ * when the production set has moved:
+ *
+ * ```
+ * production === frozen L.5 set   a re-run reproduces the baseline
+ * production  ⊃  frozen L.5 set   a re-run is a TREATMENT measurement
+ * ```
+ *
+ * P1-M's baseline is not re-derived at all — it is the frozen ledger in
+ * `M1_HISTORICAL_BASELINE`, which is why `2/12` continues to mean "the
+ * reviewer that existed at f7b49af published 2 of these 12". This function
+ * exists so that nobody can accidentally produce a competing number and
+ * believe it means the same thing.
+ */
+export function assertL5BaselineIsReproducible(): void {
+  const production: readonly string[] = [...ALL_ANALYZER_IDS].sort();
+  const frozen: readonly string[] = L5_PRODUCTION_ANALYZERS.map(
+    (analyzer) => analyzer.id,
+  ).sort();
+  if (canonicalJson(production) !== canonicalJson(frozen)) {
+    const added = production.filter((id) => !frozen.includes(id));
+    throw new Error(
+      "This tree cannot reproduce the f7b49af baseline: production has " +
+        `gained ${added.join(", ")}. Re-running here measures the current ` +
+        "reviewer against the L.5 corpus, which is a TREATMENT measurement " +
+        "and must not be recorded as the baseline. The frozen baseline is " +
+        "M1_HISTORICAL_BASELINE.",
+    );
+  }
+}
+
 export function assertProductionAnalyzerListIsExact(): void {
-  const production = [...ALL_ANALYZER_IDS].sort();
+  const production = new Set<string>(ALL_ANALYZER_IDS);
   const measured = L5_PRODUCTION_ANALYZERS.map(
     (analyzer) => analyzer.id,
   ).sort();
-  if (canonicalJson(production) !== canonicalJson(measured)) {
-    throw new Error("Production and L.5 analyzer lists differ");
+  const missing = measured.filter((id) => !production.has(id));
+  if (missing.length > 0) {
+    throw new Error(
+      `L.5 measured analyzers production no longer has: ${missing.join(", ")}`,
+    );
   }
 }
 
