@@ -368,3 +368,67 @@ digests computed by the _same_ function, which is self-consistent under any
 comparator, so the right and wrong answers agreed. Pinning the digest of a
 fixed input to a constant is what makes the comparator observable — a
 self-consistency check never can be.
+
+## 12. Ask what difference the mutation was supposed to create
+
+The reflex on a surviving mutant is "why didn't the test kill it?". That
+question assumes the baseline possessed the behaviour the mutation removes,
+and P1-M.2 produced a case where it did not.
+
+`#214` replaced the verifier's project file set with the changed file alone.
+It survived. The test was not weak: the implementation had **never** supplied
+the behaviour the mutation claimed to disable — a path-prefix mismatch had
+been silently dropping every project file since the verifier was written. The
+mutant and the baseline were the same program for the property under test.
+
+A stronger test could not have fixed that. The implementation had to gain the
+guarantee before any test could defend it.
+
+So the diagnosis order is:
+
+```
+1  did the mutation apply to the intended current source?
+     no  -> mutation defect / invalid
+
+2  does the BASELINE actually exhibit the behaviour the mutant removes?
+     no  -> pre-existing implementation defect
+            (baseline_behaviour_absent — investigate the code, not the test)
+
+3  does the declared fixture reach that behaviour?
+     no  -> fixture reachability weakness
+
+4  do correct and mutated behaviour produce distinguishable observable state?
+     no  -> vacuous fixture, or a genuinely equivalent mutant
+
+5  still not failing?
+     -> assertion weakness
+```
+
+Step 2 is the one that is easy to skip and expensive to skip. Starting at
+step 5 produces elaborate tests around code that does nothing, and they pass.
+
+### Run outcome is not diagnosis
+
+The harness reports `SEMANTIC_KILL`, `SETUP_KILL`, `SURVIVED`, `INVALID`.
+Those are outcomes. A survivor's _diagnosis_ is a separate vocabulary, and the
+distinction is what keeps the record legible:
+
+```
+implementation_defect        the code is wrong
+baseline_behaviour_absent    the guarantee was never there to remove
+test_weakness                the assertion cannot fail on the difference
+fixture_premise_weakness     the fixture never reaches the behaviour
+mutation_weakness            wrong anchor, wrong suite, no-op replacement
+equivalent_mutant            no reachable state distinguishes them
+```
+
+`baseline_behaviour_absent` is arguably a subtype of `implementation_defect`,
+and it is kept separate because the phrase records what actually happened:
+**the mutation could not remove a guarantee the implementation never
+supplied.**
+
+For an apparent equivalent mutant, ask whether a reachable state exists in
+which baseline and mutant differ. If none does under the current execution
+model, remove or retarget the mutation — or delete the dead code it targets —
+rather than building theatre around it. Three times in this project that
+answer has been "the code is dead" (invariant 10).
