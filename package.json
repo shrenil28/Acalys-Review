@@ -15,7 +15,7 @@
     "typecheck": "node scripts/run-gate.mjs typecheck -- npm run typecheck:projects",
     "test": "vitest run",
     "test:watch": "vitest",
-    "eval:l5": "tsx apps/review-worker/src/eval/run-l5-report.ts",
+    "eval:l5": "npm run build --workspace=@acalys/contracts && npm run build --workspace=@acalys/code-intelligence && npm run build --workspace=@acalys/review-engine && tsx apps/review-worker/src/eval/run-l5-report.ts",
     "lint": "node scripts/run-gate.mjs lint -- eslint .",
     "format": "prettier --write .",
     "format:check": "node scripts/run-gate.mjs format:check -- prettier --check .",
