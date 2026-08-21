@@ -29,11 +29,14 @@ P1-L.5                quality + economics measurement            FROZEN FOR EXEC
 ```
 
 `P1-L.5` is frozen for replacement aggregate execution at production-runner
-commit `2e42734`, after 94 focused L.5 tests, full repository typecheck, and
-21/21 semantic kills in mutation band 169-189. The first execution from
-`7708e60` was invalidated before scoring or report creation because its
-direct-source attestation observed post-dedup offers rather than the explicit
-pre-competition producer trace; no result from that attempt is retained.
+commit `2e42734` and execution-command commit `91d527f`, after 94 focused L.5
+tests, full repository typecheck, and 21/21 semantic kills in mutation band
+169-189. The first execution from `7708e60` was invalidated before scoring or
+report creation because its direct-source attestation observed post-dedup
+offers rather than the explicit pre-competition producer trace. The next
+attempt from `68378e6` was also invalidated before scoring because its CLI
+resolved stale package build output; the canonical command now builds its
+frozen package dependencies first. No result from either attempt is retained.
 Corpus v2 separately corrects a pre-result cache premise: authored reuse pairs
 preserve production head identity while varying traversal order only. The
 runner compares null repository intelligence with the frozen L.1-L.4

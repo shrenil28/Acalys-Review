@@ -23,6 +23,7 @@ P1-L.4 source/mutation freeze   f50f7f4
 P1-L.5 initial contract         126c3ef
 P1-L.5 initial runner           e05f8d5
 P1-L.5 replacement runner       2e42734
+P1-L.5 execution command        91d527f
 P1-L.5 corpus                   p1-l5-corpus/2026-08-21.v2
 P1-L.5 mutation band            169-189: 21/21 semantic kills
 ```
@@ -43,6 +44,14 @@ adds an explicit planner trace captured with every factual family unavailable,
 then derives each mode's attestation independently from that pre-competition
 trace. The failed execution is invalid evidence and is not included in any
 result; aggregate execution restarts in full from the replacement freeze.
+
+The next execution attempt from `68378e6` also stopped before scoring or report
+creation: the TypeScript CLI resolved stale package `dist` output that predated
+the replacement planner trace. Commit `91d527f` makes the canonical evaluation
+command build the frozen contracts, code-intelligence, and review-engine
+packages before execution. This was a runtime/source identity failure, not a
+treatment result; the attempt is invalid evidence and aggregate execution again
+restarts in full.
 
 No L.1-L.4 production semantics may be changed to improve an L.5 result. Any
 correctness defect discovered while building the harness is fixed and reviewed
