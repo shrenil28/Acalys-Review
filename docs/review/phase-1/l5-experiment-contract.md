@@ -1,8 +1,10 @@
 # P1-L.5 - repository-intelligence quality and economics experiment
 
-**Status:** FROZEN FOR EXECUTION. No aggregate L.5 treatment result was
-inspected before the contract, corrected corpus, production adapters, report
-schema, and stop-condition evaluator were frozen in Git.
+**Status:** CLOSED WITH NO DEMONSTRATED QUALITY OR INCREMENTAL ECONOMIC BENEFIT.
+No aggregate L.5 treatment result was inspected before the contract, corrected
+corpus, production adapters, report schema, and stop-condition evaluator were
+frozen in Git. See [l5-report.md](./l5-report.md) and the canonical
+[l5-report.json](./l5-report.json).
 
 ## Question
 

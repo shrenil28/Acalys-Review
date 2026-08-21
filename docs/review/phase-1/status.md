@@ -25,10 +25,22 @@ P1-L.3                incremental invalidation + rebuild oracle   ✓
 P1-L.4.1              code-to-test, from bindings                ✓
 P1-L.4.2              code-to-config governance                   ✓
 P1-L.4.3              code-to-instruction                        ✓
-P1-L.5                quality + economics measurement            FROZEN FOR EXECUTION
+P1-L.5                quality + economics measurement            ✓ CLOSED (NEGATIVE BENEFIT)
 ```
 
-`P1-L.5` is frozen for replacement aggregate execution at production-runner
+`P1-L.5` is closed from the report generated at source freeze `7684687`. Review
+quality was unchanged: 2/12 published recall and 100% published precision in
+both control and treatment, with zero TP recovered and zero FP introduced.
+Treatment selected 30.2% more estimated tokens in aggregate and its context
+efficiency declined slightly. Cache identity passed all 8/8 authored pairs with
+zero dangerous false reuse. Incremental indexes were equivalent and succeeded
+80/80 times, but the `0.894x` median paired speedup failed the economic stop
+condition. The conclusion is deliberately negative: retain correct facts, do
+not claim current planner consumption improves review quality, and do not
+optimize invalidation width yet. Full evidence is in
+[l5-report.md](./l5-report.md) and [l5-report.json](./l5-report.json).
+
+The final execution followed production-runner
 commit `2e42734` and execution-command commit `91d527f`, after 94 focused L.5
 tests, full repository typecheck, and 21/21 semantic kills in mutation band
 169-189. The first execution from `7708e60` was invalidated before scoring or

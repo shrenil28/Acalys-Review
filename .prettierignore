@@ -8,5 +8,8 @@ generated
 package-lock.json
 .claude/worktrees/**
 
+# Canonical one-line machine evidence emitted by the frozen L.5 runner.
+docs/review/phase-1/l5-report.json
+
 # Inherited verbatim; not reformatted by Phase 0 tooling.
 apps/web
