@@ -25,15 +25,18 @@ P1-L.3                incremental invalidation + rebuild oracle   ✓
 P1-L.4.1              code-to-test, from bindings                ✓
 P1-L.4.2              code-to-config governance                   ✓
 P1-L.4.3              code-to-instruction                        ✓
-P1-L.5                quality + economics measurement            IN PROGRESS
+P1-L.5                quality + economics measurement            FROZEN FOR EXECUTION
 ```
 
-`P1-L.5` is pre-registered before implementation or result inspection. It will
-compare null repository intelligence with the frozen L.1-L.4 production path
-on byte-identical corpus inputs, measure quality, context efficiency,
-incremental wall-clock economics, and cache correctness, and use explicit
-family ablations for causal attribution. Dangerous false cache reuse and
-recorder interference are hard failures. See
+`P1-L.5` is frozen for aggregate execution at production-runner commit
+`e05f8d5`, after 94 focused L.5 tests, full repository typecheck, and 20/20
+semantic kills in mutation band 169-188. Corpus v2 corrects a pre-result cache
+premise: authored reuse pairs now preserve production head identity while
+varying traversal order only. The runner compares null repository intelligence
+with the frozen L.1-L.4 production path on byte-identical corpus inputs,
+measures quality, context efficiency, incremental wall-clock economics, and
+cache correctness, and uses explicit family ablations for causal attribution.
+Dangerous false cache reuse and recorder interference are hard failures. See
 [l5-experiment-contract.md](./l5-experiment-contract.md).
 
 `P1-L.4.3` is closed at source freeze `f50f7f4`. Exact `AGENTS.md` artifacts

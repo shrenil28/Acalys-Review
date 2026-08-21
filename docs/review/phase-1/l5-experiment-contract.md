@@ -1,7 +1,8 @@
 # P1-L.5 - repository-intelligence quality and economics experiment
 
-**Status:** PRE-REGISTERED. No L.5 treatment result may be inspected before the
-contract and corpus are frozen in Git.
+**Status:** FROZEN FOR EXECUTION. No aggregate L.5 treatment result was
+inspected before the contract, corrected corpus, production adapters, report
+schema, and stop-condition evaluator were frozen in Git.
 
 ## Question
 
@@ -19,7 +20,19 @@ that the planner should not currently consume them.
 ```text
 P1-L.4 closure                  c39b78d
 P1-L.4 source/mutation freeze   f50f7f4
+P1-L.5 initial contract         126c3ef
+P1-L.5 production runner        e05f8d5
+P1-L.5 corpus                   p1-l5-corpus/2026-08-21.v2
+P1-L.5 mutation band            169-188: 20/20 semantic kills
 ```
+
+Corpus v1 was invalidated before aggregate execution. Its two authored reuse
+pairs changed synthetic revision identity, while the production analyzer key
+includes `headSha`; that made reuse impossible regardless of context identity.
+Corpus v2 preserves the same head identity and byte content for those pairs and
+varies repository traversal order only. This is the contract's required
+correctness-defect restart, not post-result tuning: no aggregate result from v1
+was produced or inspected.
 
 No L.1-L.4 production semantics may be changed to improve an L.5 result. Any
 correctness defect discovered while building the harness is fixed and reviewed
