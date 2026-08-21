@@ -273,3 +273,60 @@ checkpoint, never an edit against individual holdout cases.
 
 Published precision is measured across the whole frozen evaluation contract
 after M.2, not across this family's fixtures alone.
+
+---
+
+## Production invariant earned during implementation
+
+> **The verifier must successfully use at least one governing-project source
+> file other than the changed file to establish or refute a candidate.**
+
+Correction 3 of this contract said the verifier must reproduce the project
+rather than copy its options. It was implemented in good faith, using
+`parsed.fileNames`, and it silently did not work.
+
+`parseJsonConfigFileContent` returns file names rooted at the base path —
+`/src/cache.ts` — while the verification context is keyed repository-relative
+— `src/cache.ts`. The membership filter therefore rejected every project file,
+and `rootNames` only ever contained the changed path. The verifier had been
+building exactly the fake one-file program the correction forbids, for its
+entire existence.
+
+Nothing detected it. Every fixture was single-file, and in a single-file
+fixture a project's file set adds nothing, so the correct implementation and
+the broken one produce identical results. The mutation written to defend the
+property survived — not because the test was weak about the mutation, but
+because **the code already did what the mutation changed it to**.
+
+That is the general lesson worth carrying forward:
+
+```
+a mutation surviving does NOT imply a weak test
+it may mean the mutated behaviour was never present
+```
+
+"Survived means test weakness" is not a safe default. Classification comes
+first — implementation, test, fixture premise, mutation, or equivalent — and
+here the default would have produced a more elaborate test around code that
+did nothing.
+
+### What the fixture must force
+
+Asserting `rootNames.length > 1` would not have caught it either. The fixture
+has to make the _semantics_ depend on another project file:
+
+```
+globals.d.ts   declares the type
+src/cache.ts   writes to it, and never imports it
+tsconfig.json  files: ["globals.d.ts", "src/cache.ts"]
+```
+
+Only the project's own file list supplies the type. A program built from the
+changed file alone cannot resolve it, cannot produce the diagnostic, and
+returns `rejected` where the truth is `verified` — a semantic difference, not
+an environment error.
+
+Both directions are pinned: with `globals.d.ts` in the project the claim
+verifies; with a project listing only the changed file the same sources
+refute. Without the second assertion the first would be a statement about
+compiler options rather than about project reproduction.
