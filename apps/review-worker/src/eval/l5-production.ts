@@ -580,11 +580,8 @@ export function modeAttestationForTrace(
       selected: familyCounts(trace.context.items),
     },
     directSourceCandidateIdentitiesBeforeCompetition: stageCandidateIds(
-      trace.offered,
-      trace.offered.filter(
-        (candidate) =>
-          (candidate.provenance?.source ?? "direct_source") === "direct_source",
-      ),
+      trace.directSourceCandidatesBeforeCompetition,
+      trace.directSourceCandidatesBeforeCompetition,
     ),
   };
 }

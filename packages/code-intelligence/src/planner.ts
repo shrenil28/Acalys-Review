@@ -337,6 +337,14 @@ export type PlannerFactFamilyAvailability = Readonly<
   Record<PlannerFactFamily, boolean>
 >;
 
+const NO_PLANNER_FACT_FAMILIES: PlannerFactFamilyAvailability = Object.freeze({
+  structural_index: false,
+  binding: false,
+  test_relationship: false,
+  config_governance: false,
+  instruction_governance: false,
+});
+
 export interface PlannerInput {
   readonly changed: readonly ChangedFileInput[];
   /** Every file the planner may draw on, including the changed ones. */
@@ -1417,6 +1425,8 @@ export function assembleContext(
 }
 
 export interface ContextPlanningTrace {
+  /** Direct/legacy producer output before factual candidates may supersede it. */
+  readonly directSourceCandidatesBeforeCompetition: readonly ContextCandidate[];
   readonly offered: readonly ContextCandidate[];
   readonly scored: readonly ScoredCandidate[];
   readonly context: AssembledContext;
@@ -1430,9 +1440,14 @@ export function planContextWithTrace(
   const generated = new Set(
     input.repository.filter((file) => file.generated).map((file) => file.path),
   );
+  const directSourceCandidatesBeforeCompetition = generateCandidates({
+    ...input,
+    factFamilyAvailability: NO_PLANNER_FACT_FAMILIES,
+  });
   const offered = generateCandidates(input);
   const scored = scoreCandidates(offered);
   return {
+    directSourceCandidatesBeforeCompetition,
     offered,
     scored,
     context: assembleContext(scored, budgetTokens, generated),

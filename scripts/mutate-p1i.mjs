@@ -1696,12 +1696,12 @@ const ALL_MUTATIONS = [
     file: "apps/review-worker/src/eval/l5-production.ts",
     find:
       "    directSourceCandidateIdentitiesBeforeCompetition: stageCandidateIds(\n" +
-      "      trace.offered,\n" +
-      "      trace.offered.filter(",
+      "      trace.directSourceCandidatesBeforeCompetition,\n" +
+      "      trace.directSourceCandidatesBeforeCompetition,",
     replace:
       "    directSourceCandidateIdentitiesBeforeCompetition: stageCandidateIds(\n" +
-      "      traces.CONTROL.offered,\n" +
-      "      traces.CONTROL.offered.filter(",
+      "      traces.CONTROL.directSourceCandidatesBeforeCompetition,\n" +
+      "      traces.CONTROL.directSourceCandidatesBeforeCompetition,",
     suite: "apps/review-worker/tests/l5-production.test.ts",
   },
   {
@@ -1739,6 +1739,14 @@ const ALL_MUTATIONS = [
       "        .contextDigest,",
     replace: "      afterContextDigest: beforeContextDigest,",
     suite: "apps/review-worker/tests/l5-production-cache.test.ts",
+  },
+  {
+    id: 189,
+    name: "pre-competition direct-source trace inherits factual mode gates",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "    factFamilyAvailability: NO_PLANNER_FACT_FAMILIES,",
+    replace: "    factFamilyAvailability: input.factFamilyAvailability,",
+    suite: "apps/review-worker/tests/l5-production.test.ts",
   },
   {
     id: 17,

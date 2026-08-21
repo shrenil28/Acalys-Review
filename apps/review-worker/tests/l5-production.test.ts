@@ -225,25 +225,15 @@ describe("P1-L.5 production measurement adapter", () => {
   it("derives each mode's direct-source multiset from that mode independently", async () => {
     const adapted = adaptL5CorpusCase(allFamilyCase(), OPTIONS);
     const outcome = await runL5ProductionAnalysis(adapted, L5_MODES.TREATMENT);
-    const direct = outcome.traces.TREATMENT.offered.find(
-      (candidate) =>
-        (candidate.provenance?.source ?? "direct_source") === "direct_source",
-    );
+    const direct =
+      outcome.traces.TREATMENT.directSourceCandidatesBeforeCompetition[0];
     if (direct === undefined) throw new Error("missing direct-source fixture");
     const withoutDirect = {
       ...outcome.traces.TREATMENT,
-      offered: outcome.traces.TREATMENT.offered.filter(
-        (candidate) => candidate !== direct,
-      ),
-      scored: outcome.traces.TREATMENT.scored.filter(
-        (candidate) => candidate !== direct,
-      ),
-      context: {
-        ...outcome.traces.TREATMENT.context,
-        items: outcome.traces.TREATMENT.context.items.filter(
+      directSourceCandidatesBeforeCompetition:
+        outcome.traces.TREATMENT.directSourceCandidatesBeforeCompetition.filter(
           (candidate) => candidate !== direct,
         ),
-      },
     };
     const traces = { ...outcome.traces, TREATMENT: withoutDirect };
     const control = modeAttestationForTrace(L5_MODES.CONTROL, traces);
@@ -285,6 +275,7 @@ describe("P1-L.5 production measurement adapter", () => {
       content: originalContent,
     };
     const trace = {
+      directSourceCandidatesBeforeCompetition: [offered],
       offered: [offered],
       scored: [{ ...offered, score: 1, estimatedTokens: 100 }],
       context: {
