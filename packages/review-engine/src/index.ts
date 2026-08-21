@@ -112,3 +112,22 @@ export const ALL_ANALYZER_IDS = [
 export * from "./verification/index.js";
 export * from "./publication/index.js";
 export * from "./premerge/index.js";
+
+/**
+ * The measurement vocabulary, exported because evaluation harnesses need it.
+ *
+ * `Quantity` is the reason a report can say "undefined" instead of rendering a
+ * favourable zero. P1-M's quality gate divides true positives by published
+ * comments, and a checkpoint that published nothing has an UNDEFINED ratio,
+ * not a perfect one — the distinction the gate turns on.
+ */
+export {
+  add,
+  measured,
+  notApplicable,
+  ratio,
+  render,
+  sum,
+  unmeasured,
+  type Quantity,
+} from "./telemetry/measurement.js";

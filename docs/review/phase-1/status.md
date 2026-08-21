@@ -26,7 +26,22 @@ P1-L.4.1              code-to-test, from bindings                ✓
 P1-L.4.2              code-to-config governance                   ✓
 P1-L.4.3              code-to-instruction                        ✓
 P1-L.5                quality + economics measurement            ✓ CLOSED (NEGATIVE BENEFIT)
+P1-M.1                miss attribution + executable gate       ✓ FROZEN
+P1-M.2                configuration-sensitive type safety         next
 ```
+
+`P1-M.1` freezes review-capability expansion premises without changing
+production behavior. All 10 P1-L.5 false negatives died at candidate
+generation: the analyzer emitted nothing, so verification and policy never
+ran. Required repository evidence was selected in every case. The frozen M.1
+corpus preserves the 12-case historical baseline, adds eight visible
+development cases and eight sealed holdout cases across the eight observed
+semantic families, and retains the sole naturally observed analyzer false
+positive as an append-only replay. P1-M closes only at at least 8/12 historical
+published recall, at least 4/8 development and holdout published recall, 100%
+published precision, and zero natural-FP publication. See
+[m1-miss-attribution.md](./m1-miss-attribution.md) and
+[m1-capability-contract.md](./m1-capability-contract.md).
 
 `P1-L.5` is closed from the report generated at source freeze `7684687`. Review
 quality was unchanged: 2/12 published recall and 100% published precision in

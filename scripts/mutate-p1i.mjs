@@ -883,9 +883,8 @@ const ALL_MUTATIONS = [
     id: 100,
     name: "the production path stops consuming bindings",
     file: "packages/code-intelligence/src/planner.ts",
-    find: "    for (const record of boundCallees(input.index, changed.path)) {",
-    replace:
-      "    for (const record of [] as ReturnType<typeof boundCallees>) {",
+    find: "      ? boundCallees(input.index, changed.path)",
+    replace: "      ? ([] as ReturnType<typeof boundCallees>)",
     suite: "apps/review-worker/tests/binding-wiring.test.ts",
   },
   // ---------------------------------------------------------------------
@@ -1282,8 +1281,8 @@ const ALL_MUTATIONS = [
     id: 143,
     name: "the production planner ignores ConfigFacts governance",
     file: "packages/code-intelligence/src/planner.ts",
-    find: "    (input.configFacts?.governance ?? []).map((relationship) => [",
-    replace: "    [].map((relationship) => [",
+    find: "      ? (input.configFacts?.governance ?? [])",
+    replace: "      ? []",
     suite: "apps/review-worker/tests/config-wiring.test.ts",
   },
   {
@@ -1749,6 +1748,124 @@ const ALL_MUTATIONS = [
     suite: "apps/review-worker/tests/l5-production.test.ts",
   },
   {
+    id: 190,
+    name: "P1-M historical baseline invents an extra candidate",
+    file: "apps/review-worker/src/eval/m1-corpus.ts",
+    find: "  candidates: 2,\n  publishedTruePositives: 2,",
+    replace: "  candidates: 3,\n  publishedTruePositives: 2,",
+    suite: "apps/review-worker/tests/m1-corpus.test.ts",
+  },
+  {
+    id: 191,
+    name: "P1-M miss attribution claims required evidence was unavailable",
+    file: "apps/review-worker/src/eval/m1-corpus.ts",
+    find: '    caseId: "config-exact-optional-assignment",\n    goldId: "exact-optional-undefined-assignment",\n    capabilityFamily: "configuration_sensitive_type_safety",\n    correctnessFamily: "nullability",\n    analyzer: "absent",\n    verifier: "not_run",\n    policy: "not_run",\n    rootCause: "analyzer_capability",\n    requiredEvidenceAvailable: true,',
+    replace:
+      '    caseId: "config-exact-optional-assignment",\n    goldId: "exact-optional-undefined-assignment",\n    capabilityFamily: "configuration_sensitive_type_safety",\n    correctnessFamily: "nullability",\n    analyzer: "absent",\n    verifier: "not_run",\n    policy: "not_run",\n    rootCause: "analyzer_capability",\n    requiredEvidenceAvailable: false,',
+    suite: "apps/review-worker/tests/m1-corpus.test.ts",
+  },
+  {
+    id: 192,
+    name: "P1-M holdout fixture is reclassified as development",
+    file: "apps/review-worker/src/eval/m1-corpus.ts",
+    find: '    id: "holdout-config-indexed-header",\n    split: "holdout",',
+    replace:
+      '    id: "holdout-config-indexed-header",\n    split: "development",',
+    suite: "apps/review-worker/tests/m1-corpus.test.ts",
+  },
+  {
+    id: 193,
+    name: "P1-M sealed holdout digest accepts changed content",
+    file: "apps/review-worker/src/eval/m1-corpus.ts",
+    find: '  "277bad0df521765e5f570adc40c7a65ea9e847317f3e7e991e2f74fe738c7012" as const;',
+    replace:
+      '  "377bad0df521765e5f570adc40c7a65ea9e847317f3e7e991e2f74fe738c7012" as const;',
+    suite: "apps/review-worker/tests/m1-corpus.test.ts",
+  },
+  {
+    id: 194,
+    name: "P1-M natural false positive is relabelled as constructed",
+    file: "apps/review-worker/src/eval/m1-corpus.ts",
+    find: '    analyzerBehavior: "historically_produced_candidate",',
+    replace: '    analyzerBehavior: "constructed_candidate",',
+    suite: "apps/review-worker/tests/m1-corpus.test.ts",
+  },
+  {
+    id: 195,
+    name: "P1-M taxonomy drops a historical miss",
+    file: "apps/review-worker/src/eval/m1-corpus.ts",
+    find: '    family: "public_api_compatibility",\n    historicalMisses: 2,',
+    replace:
+      '    family: "public_api_compatibility",\n    historicalMisses: 1,',
+    suite: "apps/review-worker/tests/m1-corpus.test.ts",
+  },
+  // ---------------------------------------------------------------------
+  // P1-M.1 — the quality gate and the corpus seal.
+  //
+  // 196-201 attack the function that decides whether P1-M may close. 202
+  // attacks the canonical ordering of the sealed corpus. Both are evaluation
+  // machinery rather than review behaviour, and both are load-bearing for
+  // every claim P1-M will later make about itself.
+  // ---------------------------------------------------------------------
+  {
+    id: 196,
+    name: "the gate treats an undefined ratio as satisfying a threshold",
+    file: "apps/review-worker/src/eval/m1-gate.ts",
+    find: '  return quantity.kind === "measured" && quantity.value >= threshold;',
+    replace:
+      '  return quantity.kind !== "measured" || quantity.value >= threshold;',
+    suite: "apps/review-worker/tests/m1-gate.test.ts",
+  },
+  {
+    id: 197,
+    name: "the gate treats an undefined ratio as satisfying equality",
+    file: "apps/review-worker/src/eval/m1-gate.ts",
+    find: '  return quantity.kind === "measured" && quantity.value === value;',
+    replace:
+      '  return quantity.kind !== "measured" || quantity.value === value;',
+    suite: "apps/review-worker/tests/m1-gate.test.ts",
+  },
+  {
+    id: 198,
+    name: "the gate accepts a natural-FP guard that never ran",
+    file: "apps/review-worker/src/eval/m1-gate.ts",
+    find: "        measurement.naturalFalsePositivesPublished === 0 &&\n        measurement.naturalFalsePositivesReplayed > 0,",
+    replace: "        measurement.naturalFalsePositivesPublished === 0,",
+    suite: "apps/review-worker/tests/m1-gate.test.ts",
+  },
+  {
+    id: 199,
+    name: "the gate stops checking historical regression",
+    file: "apps/review-worker/src/eval/m1-gate.ts",
+    find: "      satisfied: regressed.length === 0,",
+    replace: "      satisfied: true,",
+    suite: "apps/review-worker/tests/m1-gate.test.ts",
+  },
+  {
+    id: 200,
+    name: "the gate closes with no capability attested",
+    file: "apps/review-worker/src/eval/m1-gate.ts",
+    find: "        measurement.capabilities.length > 0 && withoutWitness.length === 0,",
+    replace: "        withoutWitness.length === 0,",
+    suite: "apps/review-worker/tests/m1-gate.test.ts",
+  },
+  {
+    id: 201,
+    name: "the gate's inclusive threshold becomes exclusive",
+    file: "apps/review-worker/src/eval/m1-gate.ts",
+    find: "      satisfied: atLeast(historicalRecall, 8 / 12),",
+    replace: "      satisfied: atLeast(historicalRecall, 8 / 12 + 0.0001),",
+    suite: "apps/review-worker/tests/m1-gate.test.ts",
+  },
+  {
+    id: 202,
+    name: "the corpus seal orders keys by machine locale",
+    file: "apps/review-worker/src/eval/m1-corpus.ts",
+    find: "        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))",
+    replace: "        .sort(([left], [right]) => left.localeCompare(right))",
+    suite: "apps/review-worker/tests/m1-corpus.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",
@@ -1918,6 +2035,68 @@ if (!process.argv.includes("--preflight-only")) {
 // Runtime-invalid verdicts are still possible afterwards (a mutation can apply
 // and still fail to reach its premise). This only removes the class that is
 // knowable without running anything.
+{
+  // ---------------------------------------------------------------------
+  // Layer 0: does the manifest contain what it is supposed to contain?
+  //
+  // Preflight validates that each declared mutation targets current source.
+  // It cannot notice that a mutation was never declared. P1-M.1 shipped a
+  // manifest whose anchors had rotted so badly that preflight refused
+  // outright — and the useful reading of that incident is not "two stale
+  // anchors" but:
+  //
+  //     definitions existed -> loader produced nothing usable
+  //                         -> preflight had nothing to validate
+  //                         -> "mutation protection" existed only nominally
+  //
+  // So the inventory proves its own completeness first. `> 0` is not enough:
+  // a loader that silently drops one definition is also unacceptable, so the
+  // check is on the exact id set, and the count is declared here where a
+  // reviewer sees it change.
+  // ---------------------------------------------------------------------
+  const ids = MUTATIONS.map((mutation) => mutation.id);
+  const unique = new Set(ids);
+
+  if (MUTATIONS.length === 0) {
+    console.error(
+      "\nMutation manifest is EMPTY. A harness that loads no definitions " +
+        "reports a clean run for a tree it never tested.\n",
+    );
+    process.exit(2);
+  }
+
+  if (unique.size !== ids.length) {
+    const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+    console.error(
+      `\nMutation manifest declares duplicate ids: ${duplicates.join(", ")}. ` +
+        "Two definitions under one id hide one of the two results.\n",
+    );
+    process.exit(2);
+  }
+
+  for (const mutation of MUTATIONS) {
+    if (
+      typeof mutation.id !== "number" ||
+      typeof mutation.name !== "string" ||
+      typeof mutation.file !== "string" ||
+      typeof mutation.find !== "string" ||
+      typeof mutation.replace !== "string" ||
+      typeof mutation.suite !== "string"
+    ) {
+      console.error(
+        `\nMutation #${String(mutation.id)} is structurally incomplete. ` +
+          "A definition missing a field cannot be executed or classified.\n",
+      );
+      process.exit(2);
+    }
+  }
+
+  console.log(
+    `Mutation manifest inventory: ${String(MUTATIONS.length)} definitions ` +
+      `loaded, ${String(unique.size)} unique ids, 0 structurally incomplete.`,
+  );
+}
+
 {
   const problems = [];
   const seen = new Map();

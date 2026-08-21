@@ -323,3 +323,48 @@ possibility space is the cheapest way to look thorough while proving nothing.
 Prefer removing dead defensive code to manufacturing a test around it. Dead
 reassurance is worse than an absent guard, because it makes the next reader
 add a case rather than ask whether the branch is reachable.
+
+## 11. A proof inventory must prove its own completeness first
+
+Invariants 8 and 9 validate individual mutations: that each applies uniquely,
+and that its declared suite reaches it. Neither can notice a definition that
+was never loaded at all.
+
+P1-M.1 shipped a manifest whose anchors had rotted far enough that preflight
+refused outright, and the useful reading is not "two stale anchors":
+
+```
+definitions existed
+  -> the manifest did not load cleanly
+    -> preflight had nothing to validate
+      -> "mutation protection" existed only nominally
+```
+
+So the inventory is checked before the items in it:
+
+```
+INVENTORY   did every declared definition load, with unique ids and
+            every required field?
+TARGET      does each one uniquely match current source? (invariant 8)
+EXECUTION   does its declared suite reach the behaviour? (invariant 9)
+SEMANTIC    does the intended assertion fail?
+```
+
+`length > 0` is not the check. A loader that silently drops one definition is
+also unacceptable, so the assertion is on the exact set.
+
+The same shape applies to any structure that enumerates its own obligations.
+The P1-M quality gate declares nine conditions, and a gate that evaluated seven
+and reported "7/7 passed" would be this failure with higher stakes — so its
+condition ids are asserted as an exact set, not counted.
+
+**Corollary, learned the same day.** A canonical form must be specified by us,
+not delegated to the runtime. `localeCompare` in the corpus seal made key
+ordering depend on ICU data, so two correct machines could disagree about the
+digest of identical content.
+
+The first test written against it could not detect the defect: it compared two
+digests computed by the _same_ function, which is self-consistent under any
+comparator, so the right and wrong answers agreed. Pinning the digest of a
+fixed input to a constant is what makes the comparator observable — a
+self-consistency check never can be.
