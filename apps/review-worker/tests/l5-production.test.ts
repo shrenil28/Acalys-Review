@@ -21,7 +21,9 @@ import {
   adaptL5GoldFindings,
   adaptL5CacheIdentityPairs,
   adaptL5CorpusCase,
+  assertL5BaselineIsReproducible,
   assertL5CandidateFingerprintsAreInjective,
+  assertProductionAnalyzerListIsExact,
   contextAccountingInputForTrace,
   inspectL5RequiredExposurePremises,
   l5ProductionSubstantiveHashes,
@@ -490,5 +492,28 @@ describe("P1-L.5 production measurement adapter", () => {
       premergeDecisions: true,
       limitation: null,
     });
+  });
+});
+
+describe("the f7b49af baseline cannot be silently re-measured", () => {
+  it("refuses to reproduce the baseline once production has gained a capability", () => {
+    // This harness executes `runRealAnalysis`, which runs whatever production
+    // currently registers. After P1-M.2 that is four analyzers, not the three
+    // L.5 measured — so a re-run here would score today's reviewer against the
+    // old corpus and the number would look like a baseline.
+    //
+    // That is the goal-post movement M.1 exists to prevent, arriving through a
+    // harness rather than through a decision. The containment guard alone does
+    // not stop it: containment permits production to grow, which is exactly
+    // when the hazard appears.
+    expect(() => assertL5BaselineIsReproducible()).toThrow(
+      /cannot reproduce the f7b49af baseline/,
+    );
+  });
+
+  it("still permits a compatible production set", () => {
+    // The other side: containment must keep passing, or the two guards would
+    // be one guard and the compatibility property would be untested.
+    expect(() => assertProductionAnalyzerListIsExact()).not.toThrow();
   });
 });

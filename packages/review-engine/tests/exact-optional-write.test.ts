@@ -13,6 +13,7 @@
  * new capability is most likely to erode by accident.
  */
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -419,5 +420,147 @@ describe("the analyzer never asks the compiler", () => {
         `${forbidden}(`,
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The program must be the project, not one file wearing its options
+// ---------------------------------------------------------------------------
+
+describe("the verifier reproduces the governing project", () => {
+  // The type lives in a file the CHANGED file never imports. Only the
+  // project's own `files` list pulls it in, so a program built from the
+  // changed file alone cannot resolve `Entry` — and therefore cannot produce
+  // the diagnostic, however faithfully it copies `compilerOptions`.
+  //
+  // A mutation replacing `rootNames` with `[query.path]` survived every
+  // single-file fixture in this suite, because there the project's file set
+  // adds nothing. That is what made this case necessary rather than tidy.
+  const AMBIENT = "declare interface Entry { tag?: string }";
+  const WRITE = [
+    "export function clear(entry: Entry): void {",
+    "  entry.tag = undefined;",
+    "}",
+  ].join("\n");
+  const PROJECT = JSON.stringify({
+    compilerOptions: { strict: true, exactOptionalPropertyTypes: true },
+    files: ["globals.d.ts", "src/cache.ts"],
+  });
+
+  it("verifies using a type the project supplies from another file", () => {
+    const outcome = verifyExactOptionalWrite(
+      {
+        path: "src/cache.ts",
+        startLine: 2,
+        endLine: 2,
+        configPaths: ["tsconfig.json"],
+      },
+      verifyContext({
+        "globals.d.ts": AMBIENT,
+        "src/cache.ts": WRITE,
+        "tsconfig.json": PROJECT,
+      }),
+    );
+
+    expect(outcome.kind).toBe("verified");
+  });
+
+  it("establishes that the project's file list is what supplies it", () => {
+    // The premise. Without `globals.d.ts` the same sources cannot yield the
+    // diagnostic at all, which is what makes the assertion above a statement
+    // about project reproduction rather than about compiler options.
+    const outcome = verifyExactOptionalWrite(
+      {
+        path: "src/cache.ts",
+        startLine: 2,
+        endLine: 2,
+        configPaths: ["tsconfig.json"],
+      },
+      verifyContext({
+        "src/cache.ts": WRITE,
+        "tsconfig.json": JSON.stringify({
+          compilerOptions: { strict: true, exactOptionalPropertyTypes: true },
+          files: ["src/cache.ts"],
+        }),
+      }),
+    );
+
+    expect(outcome.kind).toBe("rejected");
+  });
+});
+
+describe("only this capability's diagnostic counts", () => {
+  it("REJECTS when the region carries a different error", () => {
+    // `tag` is not optional, so writing `undefined` is TS2322 — an ordinary
+    // assignability error, not an exact-optional violation. The claim under
+    // adjudication says the write breaks `exactOptionalPropertyTypes`, and
+    // that claim is false here.
+    //
+    // A verifier accepting any diagnostic in the region would VERIFY this and
+    // publish a finding whose stated mechanism is wrong. Every other fixture
+    // in this suite carries TS2412 as its only diagnostic, so removing the
+    // code filter was invisible until this existed.
+    const outcome = verifyExactOptionalWrite(
+      {
+        path: "src/strict.ts",
+        startLine: 3,
+        endLine: 3,
+        configPaths: ["tsconfig.json"],
+      },
+      verifyContext({
+        "src/strict.ts": [
+          "interface Entry { tag: string }",
+          "export function clear(entry: Entry): void {",
+          "  entry.tag = undefined;",
+          "}",
+        ].join("\n"),
+        "tsconfig.json": STRICT_CONFIG,
+      }),
+    );
+
+    expect(outcome.kind).toBe("rejected");
+  });
+
+  it("establishes that a diagnostic really is present there", () => {
+    // The premise. If the region were clean, "rejected" would prove nothing
+    // about code filtering — only that nothing was found.
+    const files = new Map([
+      [
+        "/src/strict.ts",
+        "interface Entry { tag: string }\nexport function clear(entry: Entry): void {\n  entry.tag = undefined;\n}",
+      ],
+    ]);
+    const program = ts.createProgram({
+      rootNames: ["/src/strict.ts"],
+      options: {
+        strict: true,
+        exactOptionalPropertyTypes: true,
+        noLib: true,
+        noResolve: true,
+      },
+      host: {
+        fileExists: (f: string) => files.has(f),
+        readFile: (f: string) => files.get(f),
+        getSourceFile: (f: string, l: ts.ScriptTarget) => {
+          const content = files.get(f);
+          return content === undefined
+            ? undefined
+            : ts.createSourceFile(f, content, l, true);
+        },
+        getDefaultLibFileName: () => "lib.d.ts",
+        writeFile: () => undefined,
+        getCurrentDirectory: () => "/",
+        getCanonicalFileName: (f: string) => f,
+        useCaseSensitiveFileNames: () => true,
+        getNewLine: () => "\n",
+      },
+    });
+
+    const codes = program
+      .getSemanticDiagnostics(program.getSourceFile("/src/strict.ts"))
+      .map((diagnostic) => diagnostic.code);
+
+    expect(codes.length).toBeGreaterThan(0);
+    expect(codes).not.toContain(EXACT_OPTIONAL_DIAGNOSTIC_CODE);
   });
 });

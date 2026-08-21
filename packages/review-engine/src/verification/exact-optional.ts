@@ -189,8 +189,25 @@ export function verifyExactOptionalWrite(
     // The project's OWN file set, plus the file under review. Without the
     // former this would not be the governing project; without the latter the
     // diagnostic could not exist at all.
+    //
+    // `parsed.fileNames` come back rooted at the base path — `/src/cache.ts`
+    // for a context keyed `src/cache.ts` — so they must be normalized before
+    // they can be looked up. Without this every project file was silently
+    // filtered out and `rootNames` held only the changed file: a one-file
+    // program wearing the project's options, which is precisely what this
+    // verifier was written not to be.
+    //
+    // It was invisible because every fixture was single-file, where a project
+    // adds nothing. A mutation replacing `rootNames` with `[query.path]`
+    // survived — not because the tests were weak about the mutation, but
+    // because the code already did what the mutation changed it to.
+    const relative = (fileName: string): string => fileName.replace(/^\/+/, "");
     const rootNames = [
-      ...new Set([...parsed.fileNames, query.path].filter((f) => files.has(f))),
+      ...new Set(
+        [...parsed.fileNames.map(relative), query.path].filter((f) =>
+          files.has(f),
+        ),
+      ),
     ].sort();
 
     const program = ts.createProgram({

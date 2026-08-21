@@ -1865,6 +1865,141 @@ const ALL_MUTATIONS = [
     replace: "        .sort(([left], [right]) => left.localeCompare(right))",
     suite: "apps/review-worker/tests/m1-corpus.test.ts",
   },
+  // ---------------------------------------------------------------------
+  // P1-M.2 — exact-optional property writes.
+  //
+  // 203-209 attack the analyzer's hypothesis; 210-215 the verifier's ability
+  // to confirm AND refute; 216 the production seam that carries a governing
+  // config into the cluster it governs; 217 the guard that stops the f7b49af
+  // baseline being silently re-measured.
+  //
+  // 203 and 214 are the two real bugs found while building this capability:
+  // an AST kind that matched nothing, and a project file set silently dropped
+  // by a path-prefix mismatch. Bugs discovered during implementation make the
+  // highest-value mutations, because they are the mistakes this code has
+  // already proven it can make.
+  // ---------------------------------------------------------------------
+  {
+    id: 203,
+    name: "M.2 analyzer matches UndefinedKeyword instead of the identifier",
+    file: "packages/review-engine/src/correctness/exact-optional-write.ts",
+    find: 'ts.isIdentifier(node.right) &&\n      node.right.text === "undefined"',
+    replace: "node.right.kind === ts.SyntaxKind.UndefinedKeyword",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 204,
+    name: "M.2 analyzer never checks the governing option",
+    file: "packages/review-engine/src/correctness/exact-optional-write.ts",
+    find: "    if (!enablesExactOptional(item.suppliedContent)) continue;",
+    replace: "    if (false as boolean) continue;",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 205,
+    name: "M.2 analyzer never checks optionality",
+    file: "packages/review-engine/src/correctness/exact-optional-write.ts",
+    find: "      if (!optional.has(write.propertyName)) continue;",
+    replace: "      if (false as boolean) continue;",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 206,
+    name: "M.2 analyzer ignores which source a config governs",
+    file: "packages/review-engine/src/correctness/exact-optional-write.ts",
+    find: "    if (!provenance.citation.includes(`governs ${sourcePath}`)) continue;",
+    replace: "    if (false as boolean) continue;",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 207,
+    name: "M.2 analyzer treats absent governance as usable",
+    file: "packages/review-engine/src/correctness/exact-optional-write.ts",
+    find: "    if (projects.length === 0) continue;",
+    replace: "    if (false as boolean) continue;",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 208,
+    name: "M.2 analyzer reports unchanged lines",
+    file: "packages/review-engine/src/correctness/exact-optional-write.ts",
+    find: "      if (!changedLines.has(write.line)) continue;",
+    replace: "      if (false as boolean) continue;",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 209,
+    name: "M.2 analyzer drops its config evidence citation",
+    file: "packages/review-engine/src/correctness/exact-optional-write.ts",
+    find: "      ...projects.map((project) => ({",
+    replace: "      ...projects.slice(0, 0).map((project) => ({",
+    suite: "apps/review-worker/tests/m2-wiring.test.ts",
+  },
+  {
+    id: 210,
+    name: "M.2 verifier reports a missing diagnostic as VERIFIED",
+    file: "packages/review-engine/src/verification/exact-optional.ts",
+    find: '  return {\n    kind: "rejected",',
+    replace: '  return {\n    kind: "verified",',
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 211,
+    name: "M.2 verifier reports a refutation as INCONCLUSIVE",
+    file: "packages/review-engine/src/verification/exact-optional.ts",
+    find: '  return {\n    kind: "rejected",',
+    replace: '  return {\n    kind: "inconclusive",',
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 212,
+    name: "M.2 verifier accepts any diagnostic code",
+    file: "packages/review-engine/src/verification/exact-optional.ts",
+    find: "        (diagnostic) => diagnostic.code === EXACT_OPTIONAL_DIAGNOSTIC_CODE,",
+    replace: "        () => true,",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 213,
+    name: "M.2 verifier accepts a diagnostic outside the claimed region",
+    file: "packages/review-engine/src/verification/exact-optional.ts",
+    find: "      .filter((diagnostic) => overlapsClaim(diagnostic, source, query));",
+    replace: "      .filter(() => true);",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 214,
+    name: "M.2 verifier builds a one-file program instead of the project",
+    file: "packages/review-engine/src/verification/exact-optional.ts",
+    find: "        [...parsed.fileNames.map(relative), query.path].filter((f) =>",
+    replace: "        [query.path].filter((f) =>",
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 215,
+    name: "M.2 verifier reports an unbuildable project as a refutation",
+    file: "packages/review-engine/src/verification/exact-optional.ts",
+    find: '  if (configPaths.length === 0) {\n    return {\n      kind: "inconclusive",',
+    replace:
+      '  if (configPaths.length === 0) {\n    return {\n      kind: "rejected",',
+    suite: "packages/review-engine/tests/exact-optional-write.test.ts",
+  },
+  {
+    id: 216,
+    name: "governing configs no longer reach the clusters they govern",
+    file: "packages/review-engine/src/cluster.ts",
+    find: "        governsThisCluster(item),",
+    replace: "        false,",
+    suite: "apps/review-worker/tests/m2-wiring.test.ts",
+  },
+  {
+    id: 217,
+    name: "the f7b49af baseline reproducibility guard is removed",
+    file: "apps/review-worker/src/eval/l5-production.ts",
+    find: "  if (canonicalJson(production) !== canonicalJson(frozen)) {\n    const added",
+    replace: "  if (false as boolean) {\n    const added",
+    suite: "apps/review-worker/tests/l5-production.test.ts",
+  },
   {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
