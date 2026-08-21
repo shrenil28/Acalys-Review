@@ -141,3 +141,44 @@ false-positive risk.
 Each subsequent family is selected from the frozen ranking in
 [`m1-miss-attribution.md`](./m1-miss-attribution.md). No checkpoint may combine
 multiple new analyzer families merely to reach the aggregate gate sooner.
+
+---
+
+## M.1 closure evidence
+
+Recorded because the gate this checkpoint freezes will judge every later
+claim, and a gate whose own evidence was never run is not a control.
+
+```
+INVENTORY   201 definitions loaded, 201 unique ids, 0 structurally incomplete
+PRE-RUN     201 declared, 201 uniquely applicable, 201 source-changing,
+              0 structurally invalid
+EXECUTION   201/201 detected
+              200 semantic assertion kills
+                1 setup/startup kill  (#58, pre-existing Postgres harness)
+                0 survived
+                0 invalid
+
+verify      2,288 tests / 0 skipped, 327 modules / 0 violations
+```
+
+The thirteen M.1 mutations, every one a semantic kill with `skipped 0`:
+
+```
+190-195  attribution, corpus split, seal, natural-FP, taxonomy   exec 8
+196-201  the executable quality gate                             exec 22
+202      the corpus seal's canonical ordering                    exec 8
+```
+
+`#201` — making an inclusive threshold exclusive — fails 16 of 22 gate tests,
+which is what a load-bearing comparator looks like. `#202` dies only because
+the seal test pins a digest; the self-consistency version it replaced caught
+nothing, since two digests computed by the same function agree under any
+comparator.
+
+No older band regressed across the telemetry barrel change.
+
+**What M.1 does not claim.** No analyzer, verifier, planner, or publication
+behaviour changed. Historical published recall is still `2/12`. M.1 contributed
+nothing to the quality gate's numerator — it only made the scoring, the
+corpora, and the closure decision impossible to argue with later.
