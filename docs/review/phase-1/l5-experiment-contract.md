@@ -21,9 +21,10 @@ that the planner should not currently consume them.
 P1-L.4 closure                  c39b78d
 P1-L.4 source/mutation freeze   f50f7f4
 P1-L.5 initial contract         126c3ef
-P1-L.5 production runner        e05f8d5
+P1-L.5 initial runner           e05f8d5
+P1-L.5 replacement runner       2e42734
 P1-L.5 corpus                   p1-l5-corpus/2026-08-21.v2
-P1-L.5 mutation band            169-188: 20/20 semantic kills
+P1-L.5 mutation band            169-189: 21/21 semantic kills
 ```
 
 Corpus v1 was invalidated before aggregate execution. Its two authored reuse
@@ -33,6 +34,15 @@ Corpus v2 preserves the same head identity and byte content for those pairs and
 varies repository traversal order only. This is the contract's required
 correctness-defect restart, not post-result tuning: no aggregate result from v1
 was produced or inspected.
+
+The first aggregate execution from freeze `7708e60` stopped before scoring or
+report creation because post-dedup `offered` candidates were incorrectly used
+as the pre-competition direct-source attestation. Factual candidates
+intentionally supersede weaker syntactic candidates there. Runner `2e42734`
+adds an explicit planner trace captured with every factual family unavailable,
+then derives each mode's attestation independently from that pre-competition
+trace. The failed execution is invalid evidence and is not included in any
+result; aggregate execution restarts in full from the replacement freeze.
 
 No L.1-L.4 production semantics may be changed to improve an L.5 result. Any
 correctness defect discovered while building the harness is fixed and reviewed

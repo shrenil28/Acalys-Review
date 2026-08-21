@@ -28,15 +28,19 @@ P1-L.4.3              code-to-instruction                        ✓
 P1-L.5                quality + economics measurement            FROZEN FOR EXECUTION
 ```
 
-`P1-L.5` is frozen for aggregate execution at production-runner commit
-`e05f8d5`, after 94 focused L.5 tests, full repository typecheck, and 20/20
-semantic kills in mutation band 169-188. Corpus v2 corrects a pre-result cache
-premise: authored reuse pairs now preserve production head identity while
-varying traversal order only. The runner compares null repository intelligence
-with the frozen L.1-L.4 production path on byte-identical corpus inputs,
-measures quality, context efficiency, incremental wall-clock economics, and
-cache correctness, and uses explicit family ablations for causal attribution.
-Dangerous false cache reuse and recorder interference are hard failures. See
+`P1-L.5` is frozen for replacement aggregate execution at production-runner
+commit `2e42734`, after 94 focused L.5 tests, full repository typecheck, and
+21/21 semantic kills in mutation band 169-189. The first execution from
+`7708e60` was invalidated before scoring or report creation because its
+direct-source attestation observed post-dedup offers rather than the explicit
+pre-competition producer trace; no result from that attempt is retained.
+Corpus v2 separately corrects a pre-result cache premise: authored reuse pairs
+preserve production head identity while varying traversal order only. The
+runner compares null repository intelligence with the frozen L.1-L.4
+production path on byte-identical corpus inputs, measures quality, context
+efficiency, incremental wall-clock economics, and cache correctness, and uses
+explicit family ablations for causal attribution. Dangerous false cache reuse
+and recorder interference are hard failures. See
 [l5-experiment-contract.md](./l5-experiment-contract.md).
 
 `P1-L.4.3` is closed at source freeze `f50f7f4`. Exact `AGENTS.md` artifacts
