@@ -91,6 +91,53 @@ EPOCH 1   sealed before P1-M.2 · observed at M.3 source freeze d612eac
           validation, and any replay is labelled a post-holdout regression
           replay earning no generalization credit
 
-EPOCH 2   authored independently before returned_value_usage begins
-          status PENDING
+EPOCH 2   p1-m-epoch-2/returned-value-usage.v1
+          sealed independently, before any M.4 source existed
+          8 cases · 4 returned_value_usage · 4 cross-family
+          cross-family: configuration_sensitive_type_safety,
+                        public_api_compatibility,
+                        sensitive_data_exposure,
+                        deterministic_serialization
+          manifest digest bee7cd8e66b788d4664c58578f82ec88b203e760d0f7c78a568ee587728c82c9
+          stored at /home/shrenil/Desktop/acalys-evaluator/epoch-2/ (outside this repo)
+          seal verified independently by the coordinator: SEAL INTACT
+          status SEALED — never observed
 ```
+
+## Epoch 2 scoring instruction, binding at evaluation time
+
+The evaluator reports that `M1ExpectedFinding` cannot express an enumeration
+of allowed anchors, so each case carries its true enumeration in
+`EPOCH2_ANCHOR_POLICY` while `expectedFindings[0]` holds the minimal **hull**
+of that enumeration, present only so the frozen overlap matcher runs
+unchanged.
+
+Scoring must use the enumeration, not the hull.
+
+The overlap matcher accepts any candidate whose span touches the expected
+span. Two allowed anchors at lines 3 and 7 produce a hull of 3–7, and a
+finding published at line 5 would then score as correct while pointing at
+nothing. That is precisely how Epoch 1's historical result was partly earned —
+a 1–4 allowed span blessed a hardcoded line-1 anchor — and it is the defect
+M.3.3 exists to have repaired.
+
+The evaluator states the seal refuses to build a hull wider than its
+enumeration, which if every enumeration is contiguous makes the two identical.
+That cannot be confirmed without reading the fixtures, and the coordinator must
+not. So the instruction is unconditional rather than contingent: at evaluation
+time, a candidate counts only if its anchor is one of the enumerated allowed
+anchors. The hull is never the acceptance criterion.
+
+## Epoch 2 measures something Epoch 1 could not
+
+Two of the four cross-family cases sit in families with shipped capabilities
+(`configuration_sensitive_type_safety`, `public_api_compatibility`), so this
+epoch can ask whether M.2 and M.3 generalize. Epoch 1 could not, by
+construction — seven of its eight rows were out of scope for everything
+implemented.
+
+The other two cross-family cases are in unimplemented families and can only
+cost precision, never add recall. A perfect M.4 therefore reaches at least
+`4/8` — the frozen threshold — and up to `6/8` if the shipped capabilities
+generalize. The threshold was not adjusted to fit this; it has been frozen
+since M.1.
