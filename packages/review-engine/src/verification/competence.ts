@@ -82,7 +82,16 @@ export const VERIFICATION_CAPABILITIES = [
    * declaration. A declaration that moved behind a preserved re-export has not
    * broken anything, and this capability must be able to say so.
    */
-  "removed_export",
+  /**
+   * Whether a name consumers could reach through a public boundary at base is
+   * still reachable through that boundary at head.
+   *
+   * Supersedes `removed_export`, which compared syntactic export names and so
+   * detected renames rather than the removals it was named for. Reachability
+   * is judged at the declared entry point: a name reachable only through an
+   * internal module is, to a consumer, gone.
+   */
+  "public_export_reachability_loss",
   /**
    * Whether a call whose result the change discards was returning a
    * replacement for its own argument.
@@ -213,7 +222,7 @@ export const REASONS_BY_CAPABILITY: Readonly<
     "replacement_evidence_unavailable",
     "context_incomplete",
   ],
-  removed_export: [
+  public_export_reachability_loss: [
     "public_export_unreachable_at_head",
     "public_export_still_reachable",
     "comparison_revision_unavailable",
@@ -356,12 +365,13 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     dominates: ["async_value_use", "signature_compatibility"],
   },
   {
-    id: "removed_export",
-    capability: "removed_export",
+    id: "public_export_reachability_loss",
+    capability: "public_export_reachability_loss",
     declines: undefined,
-    // Anchored on the base-revision comparison, which is what makes this a
-    // compatibility claim rather than an opinion about a missing symbol.
-    patterns: [/no longer appears in its exported \w+ surface/],
+    // Anchored on reachability through a boundary, not on a name's absence
+    // from a statement. The predecessor keyed on the latter and that is what
+    // made it rename-shaped.
+    patterns: [/may no longer be reachable through that boundary/],
     dominates: ["signature_compatibility"],
   },
   {

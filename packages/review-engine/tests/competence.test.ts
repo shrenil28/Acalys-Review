@@ -266,9 +266,9 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
         "The result of `validate(raw)` was used at the base revision and is discarded here, so any replacement value it returns for `raw` is lost.",
         ["The base revision consumed the result of `validate`"],
       ],
-      removed_export: [
-        "`parse` was exported from src/parser.ts at the base revision and no longer appears in its exported value surface.",
-        ["src/parser.ts exported `parse` at the base revision"],
+      public_export_reachability_loss: [
+        "`parse` was reachable through src/parser.ts at the base revision and may no longer be reachable through that boundary, so consumers importing it stop compiling.",
+        ["src/parser.ts exposed `parse` in its public value surface"],
       ],
       required_parameter_added: [
         "`save` accepted 1 required argument(s) at the base revision and now declares 2, so a call written against the previous contract may no longer compile.",

@@ -44,6 +44,20 @@ export interface FindingLocation {
   /** 1-based, inclusive. */
   readonly startLine: number;
   readonly endLine: number;
+  /**
+   * Which revision the lines belong to. Absent means head.
+   *
+   * Almost every finding is about code the author just wrote, and head is
+   * where a reader expects to be sent. A deletion is the exception: the only
+   * truthful coordinate for a name that is simply gone lives in the revision
+   * it was removed from.
+   *
+   * Without this, a capability whose natural defect class is deletion-shaped
+   * would be forced to choose between inventing a head line and never
+   * publishing at all — and the first is how P1-M.3's holdout produced a
+   * published false positive.
+   */
+  readonly side?: "base" | "head" | undefined;
 }
 
 /**

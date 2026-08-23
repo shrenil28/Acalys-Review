@@ -155,3 +155,35 @@ describe("an empty enumeration allows nothing", () => {
     expect(anchorMatches(at(3), [], 1)).toBe(false);
   });
 });
+
+describe("a line number without a revision is not a coordinate", () => {
+  const SIDED: readonly AllowedAnchor[] = [
+    { path: PATH, startLine: 7, endLine: 7, side: "head" },
+  ];
+
+  it.each([1, 2] as const)(
+    "policy %i keeps the same line on different sides distinguishable",
+    (policy) => {
+      // The hazard M.3.4 introduces: it can publish on either side, and the
+      // same numeric line means different code in each revision. Accepting a
+      // base-side finding for a head-side expectation is the base/head
+      // context collision again, one layer up.
+      expect(anchorMatches(at(7, "head"), SIDED, policy)).toBe(true);
+      expect(anchorMatches(at(7, "base"), SIDED, policy)).toBe(false);
+    },
+  );
+
+  it("does not constrain corpora written before sides existed", () => {
+    // Every expectation scored so far declares no side, so this addition must
+    // change nothing for them.
+    const unsided: readonly AllowedAnchor[] = [
+      { path: PATH, startLine: 7, endLine: 7 },
+    ];
+
+    for (const policy of [1, 2] as const) {
+      expect(anchorMatches(at(7, "head"), unsided, policy)).toBe(true);
+      expect(anchorMatches(at(7, "base"), unsided, policy)).toBe(true);
+      expect(anchorMatches(at(7), unsided, policy)).toBe(true);
+    }
+  });
+});

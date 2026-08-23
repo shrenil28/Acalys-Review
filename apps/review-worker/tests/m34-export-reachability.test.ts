@@ -30,7 +30,7 @@ import { describe, expect, it } from "vitest";
 
 import { runRealAnalysis, type AnalysisSource } from "../src/index.js";
 import {
-  REMOVED_EXPORT_RULE_ID,
+  EXPORT_REACHABILITY_RULE_ID,
   planVerificationContext,
   verifyDeterministically,
   type CandidateFinding,
@@ -94,7 +94,7 @@ const review = (options: Parameters<typeof sourceFor>[0]) =>
   });
 
 const removals = (findings: readonly CandidateFinding[]) =>
-  findings.filter((finding) => finding.ruleId === REMOVED_EXPORT_RULE_ID);
+  findings.filter((finding) => finding.ruleId === EXPORT_REACHABILITY_RULE_ID);
 
 /** Runs the real verifier over a candidate, with the comparison revision. */
 function adjudicate(

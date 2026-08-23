@@ -98,7 +98,17 @@ export function anchorMatches(
     // Historical behaviour, preserved deliberately and not improved. The
     // numbers scored under it stay comparable to what was reported at the
     // time, including where that flattered the result.
-    const onPath = allowed.filter((entry) => entry.path === published.path);
+    //
+    // Side agreement is the one thing added, and it is a no-op on every
+    // corpus scored so far: side did not exist when those expectations were
+    // written, so none declares one and `sideAgrees` admits either. It is
+    // here because a base-side publication satisfying a head-side expectation
+    // would be provenance loss of the same family as the base/head context
+    // collision — a wrong-revision coordinate accepted as right. The hull
+    // defect is what policy 1 preserves; side-blindness was never part of it.
+    const onPath = allowed
+      .filter((entry) => entry.path === published.path)
+      .filter((entry) => sideAgrees(published, entry));
     if (onPath.length === 0) return false;
     const start = Math.min(...onPath.map((entry) => entry.startLine));
     const end = Math.max(...onPath.map((entry) => entry.endLine));

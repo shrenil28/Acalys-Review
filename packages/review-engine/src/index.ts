@@ -125,7 +125,11 @@ export const ALL_ANALYZER_IDS = [
   // P1-M.3. The first analyzers that cannot decide anything from the head
   // revision alone: the same file is correct or broken depending only on what
   // it used to export.
-  "acalys.correctness.removed-export",
+  //
+  // `removed-export` is retired here rather than kept alongside. It compared
+  // syntactic export names, so it found renames and missed the removals it was
+  // named for; running both would propose one logical break twice.
+  "acalys.correctness.public-export-reachability-loss",
   "acalys.correctness.required-parameter-added",
   // P1-M.4. The first analyzer whose hypothesis is about a value that still
   // flows: the call happens, nothing looks unused, and what is lost is the
@@ -139,11 +143,14 @@ export {
 } from "./correctness/discarded-replacement.js";
 
 export {
-  REMOVED_EXPORT_RULE_ID,
   REQUIRED_PARAMETER_RULE_ID,
-  analyzeRemovedExport,
   analyzeRequiredParameterAdded,
 } from "./correctness/api-compatibility.js";
+
+export {
+  EXPORT_REACHABILITY_RULE_ID,
+  analyzeExportReachability,
+} from "./correctness/export-reachability.js";
 export * from "./verification/index.js";
 export * from "./publication/index.js";
 export * from "./premerge/index.js";

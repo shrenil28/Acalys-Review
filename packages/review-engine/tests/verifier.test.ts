@@ -255,7 +255,7 @@ function verifyCompatibility(options: {
 }
 
 const REMOVAL_CLAIM =
-  "`parse` was exported from src/parser.ts at the base revision and no longer appears in its exported value surface.";
+  "`parse` was reachable through src/parser.ts at the base revision and may no longer be reachable through that boundary, so consumers importing it stop compiling.";
 const ARITY_CLAIM =
   "`save` accepted 1 required argument(s) at the base revision and now declares 2, so a call written against the previous contract may no longer compile.";
 const BASE_PARSER =

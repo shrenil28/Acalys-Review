@@ -34,7 +34,7 @@ const DECLARATION =
   "export function parse(raw: string): number {\n  return Number(raw);\n}";
 
 const CLAIM =
-  "`parse` was exported from src/parser.ts at the base revision and no longer appears in its exported value surface.";
+  "`parse` was reachable through src/parser.ts at the base revision and may no longer be reachable through that boundary, so consumers importing it stop compiling.";
 
 const inputFor = (): VerificationInput => ({
   candidateId: "revision-scope",

@@ -68,7 +68,8 @@ const BASE_REVISION = "b2".repeat(20);
  * time.
  */
 export const M1_TRACKED_CAPABILITIES: Readonly<Record<string, string>> = {
-  "acalys.correctness/removed-export": "removed_export",
+  "acalys.correctness/public-export-reachability-loss":
+    "public_export_reachability_loss",
   "acalys.correctness/required-parameter-added": "required_parameter_added",
   "acalys.correctness/discarded-replacement-return":
     "discarded_replacement_return",

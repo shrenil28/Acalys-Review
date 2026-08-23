@@ -16,7 +16,7 @@ import { describe, expect, it } from "vitest";
 
 import { runRealAnalysis, type AnalysisSource } from "../src/index.js";
 import {
-  REMOVED_EXPORT_RULE_ID,
+  EXPORT_REACHABILITY_RULE_ID,
   type CandidateFinding,
 } from "@acalys/review-engine";
 
@@ -54,7 +54,8 @@ async function review(base: string, head: string) {
   });
   return {
     removals: outcome.report.findings.filter(
-      (finding: CandidateFinding) => finding.ruleId === REMOVED_EXPORT_RULE_ID,
+      (finding: CandidateFinding) =>
+        finding.ruleId === EXPORT_REACHABILITY_RULE_ID,
     ),
     degradations: outcome.report.degradations,
   };
@@ -84,6 +85,7 @@ describe("the anchor is the export statement, wherever it is", () => {
         path: PATH,
         startLine: line,
         endLine: line,
+        side: "head",
       });
     },
   );
@@ -113,32 +115,37 @@ describe("the anchor is the export statement, wherever it is", () => {
   });
 });
 
-describe("a location that cannot be established is not invented", () => {
-  it("withholds a pure deletion rather than guessing a head line", async () => {
-    // The export is gone from head entirely. There is no head coordinate, and
-    // the base coordinate has no side to be published on, so nothing inline
-    // may be produced.
+describe("a pure deletion is anchored on the side it happened", () => {
+  it("publishes at the deleted statement, on the base side", async () => {
+    // M.3.3 withheld this, because at the time the publication surface had no
+    // side and inventing a head line was the only alternative. That made the
+    // capability semantically correct and systematically unpublishable for
+    // its own defect class — a deletion is exactly where the truthful
+    // coordinate lives only in base.
     const base = `${pad(3)}\nexport { decode };\n${DECL}`;
     const head = `${pad(3)}\n${DECL}`;
 
     const { removals } = await review(base, head);
 
-    expect(removals).toEqual([]);
+    expect(removals).toHaveLength(1);
+    expect(removals[0]?.location).toEqual({
+      path: PATH,
+      startLine: 4,
+      endLine: 4,
+      side: "base",
+    });
   });
 
-  it("records WHY it withheld, so the finding is not silently lost", async () => {
+  it("still never invents a head line for it", async () => {
+    // The invariant that did not change. The anchor moved sides; it was not
+    // fabricated.
     const base = `${pad(3)}\nexport { decode };\n${DECL}`;
     const head = `${pad(3)}\n${DECL}`;
 
-    const { degradations } = await review(base, head);
+    const { removals } = await review(base, head);
 
-    expect(
-      degradations.some(
-        (entry) =>
-          entry.reason === "analyzer_abstained" &&
-          entry.detail.includes("no inline-publishable anchor"),
-      ),
-    ).toBe(true);
+    expect(removals[0]?.location.side).not.toBe("head");
+    expect(removals[0]?.location.startLine).not.toBe(1);
   });
 });
 

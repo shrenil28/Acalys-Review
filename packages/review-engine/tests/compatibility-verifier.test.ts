@@ -1,19 +1,18 @@
 /**
- * P1-M.3 verifier mechanism — the refutations are the point.
+ * P1-M.3.2 verifier mechanism — the refutations are the point.
  *
  * A verifier that only ever agreed with its analyzer would pass a "detects the
  * break" test and nothing else would notice. So most of what is asserted here
  * is the compiler *declining* to call something a break, in exactly the shapes
  * the contract lists.
+ *
+ * M.3.1's half of this file moved to `export-reachability.test.ts` when
+ * `removed_export` was retired. Its results are the supersession obligation
+ * M.3.4 owes, and they belong beside the capability that now has to keep them.
  */
 
 import { describe, expect, it } from "vitest";
 
-import {
-  REMOVED_EXPORT_CODES,
-  probeSourceFor as removedProbe,
-  verifyRemovedExport,
-} from "../src/verification/removed-export.js";
 import {
   REQUIRED_PARAMETER_CODES,
   verifyRequiredParameterAdded,
@@ -21,195 +20,6 @@ import {
 
 const files = (entries: Record<string, string>) =>
   new Map(Object.entries(entries));
-
-const BOUNDARY = "src/parser.ts";
-const EXPORTED =
-  "export function parse(raw: string): number {\n  return Number(raw);\n}";
-
-const removal = (base: Record<string, string>, head: Record<string, string>) =>
-  verifyRemovedExport(
-    { boundaryPath: BOUNDARY, exportName: "parse", namespace: "value" },
-    { baseFiles: files(base), headFiles: files(head) },
-  );
-
-describe("M.3.1 — a genuine removal", () => {
-  it("VERIFIES when the name is no longer exported at the boundary", () => {
-    const outcome = removal(
-      { [BOUNDARY]: EXPORTED },
-      {
-        [BOUNDARY]:
-          "function parse(raw: string): number {\n  return Number(raw);\n}\nexport { parse as parseInternal };",
-      },
-    );
-
-    expect(outcome.kind).toBe("verified");
-  });
-
-  it("VERIFIES when the name is gone entirely", () => {
-    const outcome = removal(
-      { [BOUNDARY]: EXPORTED },
-      { [BOUNDARY]: "export function other(): void {}" },
-    );
-
-    expect(outcome.kind).toBe("verified");
-  });
-});
-
-describe("M.3.1 — the refutations", () => {
-  it("REJECTS a declaration moved behind a named re-export", () => {
-    // The declaration left the file. The contract did not.
-    const outcome = removal(
-      { [BOUNDARY]: EXPORTED },
-      {
-        [BOUNDARY]: 'export { parse } from "./impl";',
-        "src/impl.ts": EXPORTED,
-      },
-    );
-
-    expect(outcome.kind).toBe("rejected");
-  });
-
-  it("REJECTS a declaration moved behind `export *`", () => {
-    const outcome = removal(
-      { [BOUNDARY]: EXPORTED },
-      {
-        [BOUNDARY]: 'export * from "./impl";',
-        "src/impl.ts": EXPORTED,
-      },
-    );
-
-    expect(outcome.kind).toBe("rejected");
-  });
-
-  it("REJECTS an internal rename kept behind a public alias", () => {
-    const outcome = removal(
-      { [BOUNDARY]: EXPORTED },
-      {
-        [BOUNDARY]:
-          "function parseImpl(raw: string): number {\n  return Number(raw);\n}\nexport { parseImpl as parse };",
-      },
-    );
-
-    expect(outcome.kind).toBe("rejected");
-  });
-});
-
-describe("M.3.1 — namespaces are not interchangeable", () => {
-  const TYPE_BOUNDARY = "src/types.ts";
-
-  it("does not report a removal for a type export that is still reachable", () => {
-    // A value-shaped probe against a type-only export produces TS2693, which
-    // is a fact about the probe, not about the author's change. Recognising it
-    // would let the verifier manufacture removals out of its own choices.
-    const outcome = verifyRemovedExport(
-      {
-        boundaryPath: TYPE_BOUNDARY,
-        exportName: "Config",
-        namespace: "type",
-      },
-      {
-        baseFiles: files({
-          [TYPE_BOUNDARY]: "export type Config = { a: string };",
-        }),
-        headFiles: files({
-          [TYPE_BOUNDARY]: "export type Config = { a: string; b?: number };",
-        }),
-      },
-    );
-
-    expect(outcome.kind).toBe("rejected");
-  });
-
-  it("VERIFIES a type export that genuinely stopped being exported", () => {
-    const outcome = verifyRemovedExport(
-      {
-        boundaryPath: TYPE_BOUNDARY,
-        exportName: "Config",
-        namespace: "type",
-      },
-      {
-        baseFiles: files({
-          [TYPE_BOUNDARY]: "export type Config = { a: string };",
-        }),
-        headFiles: files({
-          [TYPE_BOUNDARY]:
-            "type Config = { a: string };\nexport type { Config as Internal };",
-        }),
-      },
-    );
-
-    expect(outcome.kind).toBe("verified");
-  });
-
-  it("builds the probe in the symbol's own namespace", () => {
-    expect(
-      removedProbe({
-        boundaryPath: TYPE_BOUNDARY,
-        exportName: "Config",
-        namespace: "type",
-      }),
-    ).toContain("import type {");
-    expect(
-      removedProbe({
-        boundaryPath: BOUNDARY,
-        exportName: "parse",
-        namespace: "value",
-      }),
-    ).not.toContain("import type {");
-  });
-});
-
-describe("M.3.1 — the base-validity premise", () => {
-  it("is INCONCLUSIVE when the export never existed at base", () => {
-    // Without this the verifier would report a break for every name it was
-    // ever asked about, because a probe that fails at base fails at head too.
-    const outcome = removal(
-      { [BOUNDARY]: "export function other(): void {}" },
-      { [BOUNDARY]: "export function other(): void {}" },
-    );
-
-    expect(outcome.kind).toBe("inconclusive");
-    expect(outcome.detail).toContain("not valid against the base revision");
-  });
-
-  it("is INCONCLUSIVE when the boundary is missing from the head snapshot", () => {
-    // Ambiguous between a deleted module and a snapshot that omitted it. The
-    // ambiguity is refused rather than resolved in favour of a finding.
-    const outcome = removal({ [BOUNDARY]: EXPORTED }, {});
-
-    expect(outcome.kind).toBe("inconclusive");
-    expect(outcome.detail).toContain("head snapshot");
-  });
-});
-
-describe("M.3.1 — project reproduction is semantically necessary", () => {
-  it("changes verdict when the `export *` target is withheld", () => {
-    // Not `rootNames.length > 1`, which any implementation satisfies by
-    // accident. Withhold the second module and the SAME query flips verdict,
-    // so a verifier that quietly collapsed to the boundary file alone would
-    // publish a break that does not exist.
-    //
-    // `export *` rather than a named re-export, and the difference is not
-    // cosmetic. With `export { parse } from "./impl"` the name is declared in
-    // the boundary's own export clause, so the probe's import resolves even
-    // when the target is missing — the unresolved-module error lands inside
-    // the boundary, not the probe. That fixture would have passed while
-    // proving nothing. `export *` has no such clause: with the target absent,
-    // there is genuinely nothing to re-export.
-    const head = {
-      [BOUNDARY]: 'export * from "./impl";',
-      "src/impl.ts": EXPORTED,
-    };
-
-    expect(removal({ [BOUNDARY]: EXPORTED }, head).kind).toBe("rejected");
-
-    const withheld: Record<string, string> = { ...head };
-    delete withheld["src/impl.ts"];
-    expect(removal({ [BOUNDARY]: EXPORTED }, withheld).kind).toBe("verified");
-  });
-});
-
-// ---------------------------------------------------------------------------
 
 const ARITY_BOUNDARY = "src/api.ts";
 const arity = (baseSrc: string, headSrc: string, baseArity = 1) =>
@@ -290,71 +100,7 @@ describe("M.3.2 — the base-validity premise", () => {
   });
 });
 
-describe("only probe-local, recognised diagnostics establish anything", () => {
-  it("ignores an unrelated error elsewhere in the head revision", () => {
-    // HEAD may be broken in ways that have nothing to do with this claim. A
-    // verifier that read any diagnostic — or counted them — would report a
-    // compatibility break every time the branch happened to be red.
-    const outcome = removal(
-      { [BOUNDARY]: EXPORTED },
-      {
-        [BOUNDARY]: EXPORTED,
-        "src/unrelated.ts": 'export const broken: number = "not a number";',
-      },
-    );
-
-    expect(outcome.kind).toBe("rejected");
-  });
-
-  it("ignores an unrelated error inside the boundary itself", () => {
-    const outcome = removal(
-      { [BOUNDARY]: EXPORTED },
-      {
-        [BOUNDARY]: `${EXPORTED}\nexport const wrong: number = "no";`,
-      },
-    );
-
-    expect(outcome.kind).toBe("rejected");
-  });
-
-  it("does not treat an unrecognised probe diagnostic as a removal", () => {
-    // A value export that became type-only. The base-shaped value probe now
-    // produces TS2693 — a real diagnostic, at the probe, of a code this
-    // capability does not recognise.
-    //
-    // M.3.1 is about reachability through the boundary, and the name is still
-    // exported. Value/type migration is a different proposition with its own
-    // evidence, so this REJECTS rather than quietly widening the capability
-    // through its diagnostic filter.
-    const outcome = verifyRemovedExport(
-      { boundaryPath: BOUNDARY, exportName: "Config", namespace: "value" },
-      {
-        baseFiles: files({
-          [BOUNDARY]: "export const Config = { a: 1 };",
-        }),
-        headFiles: files({
-          [BOUNDARY]: "export type Config = { a: number };",
-        }),
-      },
-    );
-
-    expect(outcome.kind).toBe("rejected");
-  });
-});
-
 describe("the recognised code sets stay disjoint and minimal", () => {
-  it("removal recognises only the three reachability codes", () => {
-    expect([...REMOVED_EXPORT_CODES].sort()).toEqual([2305, 2459, 2460]);
-  });
-
-  it("does not recognise TS2693, the value-probe-on-a-type error", () => {
-    expect(REMOVED_EXPORT_CODES.has(2693)).toBe(false);
-  });
-
-  it("does not recognise TS2307, which an incomplete snapshot also produces", () => {
-    expect(REMOVED_EXPORT_CODES.has(2307)).toBe(false);
-  });
-
   it("arity recognises only too-few-arguments", () => {
     expect([...REQUIRED_PARAMETER_CODES]).toEqual([2554]);
   });

@@ -75,7 +75,7 @@ import { analyzeAsyncCompletion } from "@acalys/review-engine";
 import {
   analyzeExactOptionalWrite,
   analyzeDiscardedReplacement,
-  analyzeRemovedExport,
+  analyzeExportReachability,
   analyzeRequiredParameterAdded,
   analyzeSignatureCompatibility,
   analyzeSwallowedErrors,
@@ -523,7 +523,7 @@ export async function runRealAnalysis(
         analyzeSwallowedErrors(input),
         analyzeSignatureCompatibility(input),
         analyzeExactOptionalWrite(input),
-        analyzeRemovedExport(input),
+        analyzeExportReachability(input),
         analyzeRequiredParameterAdded(input),
         analyzeDiscardedReplacement(input),
       ];

@@ -37,7 +37,7 @@ import { verifyAsyncCallbackContract } from "./callback.js";
 import { verifyConditionValue } from "./condition.js";
 import { verifyExceptionFlow } from "./exception.js";
 import { verifyExactOptionalWrite } from "./exact-optional.js";
-import { verifyRemovedExport } from "./removed-export.js";
+import { verifyExportReachability } from "./export-reachability.js";
 import { verifyDiscardedReplacement } from "./discarded-replacement.js";
 import { verifyRequiredParameterAdded } from "./required-parameter.js";
 import { adjudicateCompatibility } from "./compatibility-route.js";
@@ -266,19 +266,19 @@ function parseDiscardedReplacementClaim(
   return match?.[1] === undefined ? undefined : { calleeName: match[1] };
 }
 
-function parseRemovedExportClaim(
+function parseReachabilityClaim(
   statement: string,
 ):
   | { readonly exportName: string; readonly namespace: "value" | "type" }
   | undefined {
-  const match =
-    /^`([^`]+)` was exported from .* and no longer appears in its exported (value|type) surface\.$/.exec(
-      statement,
-    );
-  if (match?.[1] === undefined || match[2] === undefined) return undefined;
+  const match = /^`([^`]+)` was reachable through /.exec(statement);
+  if (match?.[1] === undefined) return undefined;
+  // Value is the default. A type-shaped probe against a value export reports
+  // a fact about the probe, which is the trap the namespace field exists to
+  // avoid, so the type space is entered only when the claim says so.
   return {
     exportName: match[1],
-    namespace: match[2] === "type" ? "type" : "value",
+    namespace: /\btype surface\b/.test(statement) ? "type" : "value",
   };
 }
 
@@ -463,17 +463,17 @@ export function verifyDeterministically(
 
   if (
     competence.kind === "supported" &&
-    competence.capability === "removed_export"
+    competence.capability === "public_export_reachability_loss"
   ) {
     const attempt = adjudicateCompatibility({
       input,
       context,
-      capability: "removed_export",
+      capability: "public_export_reachability_loss",
       run: (revisions) => {
-        const parsed = parseRemovedExportClaim(input.claim.statement);
+        const parsed = parseReachabilityClaim(input.claim.statement);
         if (parsed === undefined) return undefined;
-        return verifyRemovedExport(
-          { boundaryPath: input.location.path, ...parsed },
+        return verifyExportReachability(
+          { declarationPath: input.location.path, ...parsed },
           revisions,
         );
       },
@@ -481,7 +481,10 @@ export function verifyDeterministically(
       rejectedReason: "public_export_still_reachable",
     });
     assertReasonsSupport(attempt.decision, attempt.reasons);
-    assertReasonForCapability("removed_export", attempt.reasons);
+    assertReasonForCapability(
+      "public_export_reachability_loss",
+      attempt.reasons,
+    );
     return attempt;
   }
 
