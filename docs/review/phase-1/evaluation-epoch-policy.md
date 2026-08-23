@@ -104,6 +104,47 @@ EPOCH 2   p1-m-epoch-2/returned-value-usage.v1
           status SEALED — never observed
 ```
 
+```
+EPOCH 3   p1-m-epoch-3/public-export-reachability-loss.v1
+          sealed independently, before any M.3.4 source existed
+          8 cases · 4 export-reachability · 4 cross-family
+          cross-family: boundary_comparison,
+                        configuration_sensitive_type_safety,
+                        fail_closed_authorization,
+                        returned_value_usage
+          manifest digest fcaa19119cf9ded0068ce7ce43b033b07f20cb8b3aef3f353333bc4ed4154eb0
+          stored at /home/shrenil/Desktop/acalys-evaluator/epoch-3/ (outside this repo)
+          seal verified independently by the coordinator: SEAL INTACT, exit 0
+          status SEALED — never observed
+```
+
+## Epoch 3 carries two decisions worth recording
+
+**Precision pressure lives inside the primary family, not only across it.**
+Eight cases, a perfect implementation reaching exactly `4/8`, and a
+must-decline refutation in the primary family cannot all hold if that decline
+is a standalone row — it would move the denominator or cap a perfect
+implementation at `3/8`. The evaluator co-located it instead: every primary
+case carries one planted reachability loss _and_ named shapes in the same
+base/head pair that must be refuted, each frozen with why it is not a loss.
+Publishing one costs precision from inside the family. Epoch 2's four
+cross-family cases all stayed silent, which was reassuring and tested less
+than it could have.
+
+**Refutation attribution is decided before the observation.** Cross-family
+cases are labelled `capability_recall_miss`. Primary cases are labelled
+`incorrect_verifier_reject_unless_contract_narrows`: the evaluator authored
+from family semantics without reading the M.3.4 contract, so a primary case
+refused because that contract scopes the shape out is a recall miss — and the
+scorer must cite the narrowing clause. A refusal with no clause to cite is an
+incorrect reject.
+
+That is the Epoch 2 correction applied in advance rather than discovered
+afterwards. Epoch 2's single refutation was a scope boundary reported as a
+broken verifier, and the argument about which it was happened after the number
+was recorded. Here the criterion is fixed first, and the burden is on the
+implementation to point at the clause.
+
 ## Epoch 2 scoring instruction, binding at evaluation time
 
 The evaluator reports that `M1ExpectedFinding` cannot express an enumeration
