@@ -94,6 +94,26 @@ function isValid(raw: string): boolean { return raw.length > 0 } // rejected: no
 function identity(raw: string): string { return raw; }           // rejected: identity only
 ```
 
+### Compatibility is the checker's judgement, not a name match
+
+Step 3 asks whether the returned value can _replace_ the input. That question
+belongs to the TypeScript type system, and the verifier must ask it there —
+`checker.isTypeAssignableTo` and the types it resolves, never a comparison of
+type names or their printed text.
+
+Textual equality is wrong in every direction that matters:
+
+```
+type aliases        Raw = string          same type, different name
+unions              string | undefined    compatible, different name
+generics            T resolved per call site
+branded types       string & { __brand }  narrower, still a replacement
+narrowed returns    a subtype is a perfectly good replacement
+```
+
+A string comparison would reject legitimate replacements and accept unrelated
+types that happen to print the same. Let the checker decide.
+
 ### Dataflow, not identifier comparison
 
 Implementing step 4 or 5 as
@@ -118,6 +138,21 @@ return normalized; // both a transform
 So local aliasing is followed. The test is whether the returned value is the
 input itself, however many names it travelled under, or something computed
 from it.
+
+Deliberately local and conservative. Derivation is traced within the callee's
+own body and no further. When it cannot be established — a value crossing a
+closure, a reassignment through a mutable binding, a path the tracer does not
+model — the outcome is `inconclusive`.
+
+```
+unknown derivation  ->  inconclusive
+                    NOT "probably transformed"
+```
+
+That asymmetry is the point. Guessing "transformed" publishes a finding on
+evidence nobody has; guessing "identity" silently drops a real defect. Only
+the first is a false statement to a developer, but both are conclusions drawn
+from an absence, and the capability declines to draw either.
 
 ### Binding resolution is load-bearing
 
