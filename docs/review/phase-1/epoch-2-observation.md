@@ -150,3 +150,40 @@ repository. The evaluator used the one that reproduces Epoch 1's recorded
 `0.75 (3 TP / 4 comments)` exactly. That is a gap worth closing before it
 decides anything: a gate input with no frozen formula is a gate input that can
 be chosen after seeing the result.
+
+---
+
+## Addendum — the attribution machinery was defective (P1-M.4.1)
+
+Added after the observation. **The gate output recorded above is not amended.**
+Epoch 2's first observation failed conditions 1, 2, 3 and 6, and that remains
+the record.
+
+Analysis of condition 6 found its input defective. It received a bare count of
+"incorrect verifier rejects" with no definition anywhere in the repository, so
+a case the frozen capability contract placed out of scope was indistinguishable
+from a verifier that had genuinely misbehaved. The single refutation here was
+the former, and the gate reported it as the latter.
+
+Condition 7 had the same shape of problem in a different place: its two inputs
+arrived from the caller with no formula recorded, which the evaluator had to
+reconstruct. An input whose interpretation can be chosen after seeing the
+result is not a gate input.
+
+Both are now derived inside `evaluateM1Gate`:
+
+```
+condition 6   rejects carry an attribution
+              incorrect_verifier_reject   inside the contract, refused anyway
+              capability_recall_miss      outside the frozen capability
+              both cost recall; only the first accuses the verifier
+
+condition 7   computed from the splits and the L.5 baseline, never supplied
+              validated against Epoch 1's recorded 0.75 alone
+```
+
+Same pattern as anchor policy 1 → policy 2: the past measurement stays as it
+was, and future epochs stop repeating a known defect. Under the corrected
+machinery this observation's condition 6 would read `0 incorrect rejects, 1
+capability recall miss` — but that is analysis, not a re-scoring, and the
+`FAIL 1, 2, 3, 6` above stands as what was measured on the day.

@@ -54,9 +54,7 @@ function passing(): M1FunnelMeasurement {
     ],
     naturalFalsePositivesReplayed: 1,
     naturalFalsePositivesPublished: 0,
-    verifier: { incorrectRejects: 0, inconclusive: 2, unavailable: 0 },
-    additionalTruePositivesPublished: 6,
-    additionalCommentsPublished: 6,
+    verifier: { rejects: [], inconclusive: 2, unavailable: 0 },
     capabilities: [
       {
         family: "configuration_sensitive_type_safety",
@@ -151,8 +149,6 @@ describe("each condition can refuse on its own", () => {
         "structural-index-export-declaration-drift",
         "binding-shadowed-validator-contract",
       ],
-      additionalTruePositivesPublished: 5,
-      additionalCommentsPublished: 5,
     });
     expect(verdict.failing).toEqual([1]);
   });
@@ -177,7 +173,12 @@ describe("each condition can refuse on its own", () => {
         publishedFalsePositives: 1,
       },
     });
-    expect(verdict.failing).toEqual([3]);
+    // Also fails 7, and that coupling is the point of deriving the economics
+    // rather than receiving them. A published false positive grows condition
+    // 7's denominator without its numerator. While those numbers arrived from
+    // the caller, a checkpoint could report a published false positive AND a
+    // perfect yield ratio in the same breath.
+    expect(verdict.failing).toEqual([3, 7]);
   });
 
   it("4. refuses a published natural false positive", () => {
@@ -218,21 +219,81 @@ describe("each condition can refuse on its own", () => {
 
   it("6. refuses an incorrect verifier reject", () => {
     const verdict = verdictFor({
-      verifier: { incorrectRejects: 1, inconclusive: 0, unavailable: 0 },
+      verifier: {
+        rejects: [
+          {
+            kind: "incorrect_verifier_reject",
+            caseId: "e2-some-in-scope-case",
+            because: "inside the contract and refused anyway",
+          },
+        ],
+        inconclusive: 0,
+        unavailable: 0,
+      },
     });
     expect(verdict.failing).toEqual([6]);
   });
 
   it("6. refuses verifier unavailability", () => {
     const verdict = verdictFor({
-      verifier: { incorrectRejects: 0, inconclusive: 0, unavailable: 1 },
+      verifier: { rejects: [], inconclusive: 0, unavailable: 1 },
     });
     expect(verdict.failing).toEqual([6]);
   });
 
   it("7. refuses a yield ratio below 1.0", () => {
-    const verdict = verdictFor({ additionalCommentsPublished: 7 });
-    expect(verdict.failing).toEqual([7]);
+    // One published false positive on the historical split: the denominator
+    // grows and the numerator does not.
+    const verdict = verdictFor({
+      historical: {
+        planted: 12,
+        publishedTruePositives: 8,
+        publishedFalsePositives: 1,
+      },
+    });
+    expect(verdict.failing).toEqual([3, 7]);
+  });
+
+  it("6. does NOT accuse the verifier of a capability recall miss", () => {
+    // Epoch 2's finding, as machinery. A case the frozen capability contract
+    // places out of scope still costs recall — conditions 1 and 2 feel it —
+    // but it is not evidence of a broken verifier, and reporting it as one
+    // points the next checkpoint at the wrong repair.
+    const verdict = verdictFor({
+      verifier: {
+        rejects: [
+          {
+            kind: "capability_recall_miss",
+            caseId: "family-level-case",
+            because: "a wrapper return is outside the frozen capability",
+          },
+        ],
+        inconclusive: 0,
+        unavailable: 0,
+      },
+    });
+
+    expect(verdict.failing).toEqual([]);
+  });
+
+  it("6. names the offending case when it does accuse the verifier", () => {
+    const verdict = verdictFor({
+      verifier: {
+        rejects: [
+          {
+            kind: "incorrect_verifier_reject",
+            caseId: "e2-some-in-scope-case",
+            because: "inside the contract and refused anyway",
+          },
+        ],
+        inconclusive: 0,
+        unavailable: 0,
+      },
+    });
+
+    expect(
+      verdict.conditions.find((condition) => condition.id === 6)?.observed,
+    ).toContain("e2-some-in-scope-case");
   });
 
   it("8. refuses a capability with no production witness", () => {
@@ -278,8 +339,16 @@ describe("undefined ratios are never rendered as favourable", () => {
     // strictest-looking condition in the gate, so it is the most tempting
     // place for a zero denominator to read as success.
     const verdict = verdictFor({
-      additionalTruePositivesPublished: 0,
-      additionalCommentsPublished: 0,
+      historical: {
+        planted: 12,
+        publishedTruePositives: 2,
+        publishedFalsePositives: 0,
+      },
+      holdout: {
+        planted: 8,
+        publishedTruePositives: 0,
+        publishedFalsePositives: 0,
+      },
     });
 
     const condition = verdict.conditions.find((entry) => entry.id === 7);
@@ -329,7 +398,17 @@ describe("the verdict is actionable", () => {
   it("names which conditions failed rather than only that it failed", () => {
     const verdict = verdictFor({
       naturalFalsePositivesPublished: 2,
-      verifier: { incorrectRejects: 1, inconclusive: 0, unavailable: 0 },
+      verifier: {
+        rejects: [
+          {
+            kind: "incorrect_verifier_reject",
+            caseId: "e2-some-in-scope-case",
+            because: "inside the contract and refused anyway",
+          },
+        ],
+        inconclusive: 0,
+        unavailable: 0,
+      },
     });
 
     expect(verdict.failing).toEqual([4, 6]);
@@ -345,5 +424,86 @@ describe("the verdict is actionable", () => {
     const verdict = evaluateM1Gate(passing());
     expect(verdict.conditions).toHaveLength(9);
     expect(renderM1Gate(verdict)).toContain("P1-M GATE SATISFIED");
+  });
+});
+
+describe("condition 7's economics reproduce the recorded epochs", () => {
+  /** Only the inputs the formula reads; everything else is irrelevant here. */
+  const economicsFor = (
+    historical: [number, number],
+    development: [number, number],
+    holdout: [number, number],
+  ) =>
+    verdictFor({
+      historical: {
+        planted: 12,
+        publishedTruePositives: historical[0],
+        publishedFalsePositives: historical[1],
+      },
+      development: {
+        planted: 8,
+        publishedTruePositives: development[0],
+        publishedFalsePositives: development[1],
+      },
+      holdout: {
+        planted: 8,
+        publishedTruePositives: holdout[0],
+        publishedFalsePositives: holdout[1],
+      },
+    }).conditions.find((condition) => condition.id === 7)?.observed;
+
+  it("reproduces Epoch 1 exactly: 0.75 (3 TP / 4 comments)", () => {
+    // The formula was derived from the contract's ECONOMICS line and the L.5
+    // baseline of two published true positives, then validated against THIS
+    // recorded number alone. Epoch 2 is a consequence of it, never an input
+    // to choosing it.
+    expect(economicsFor([5, 0], [1, 0], [0, 1])).toContain(
+      "0.75 (3 TP / 4 comments)",
+    );
+  });
+
+  it("excluding development is forced by that record, not preferred", () => {
+    // Including the development split gives 4/5 = 0.8, which contradicts what
+    // was reported. The arithmetic settles it; the contract agrees, since
+    // perfect scores on the visible fixtures alone cannot close P1-M.
+    const observed = economicsFor([5, 0], [1, 0], [0, 1]);
+    expect(observed).not.toContain("4 TP / 5 comments");
+    expect(observed).not.toContain("0.8");
+  });
+
+  it("reproduces Epoch 2 exactly: 1.0 (4 TP / 4 comments)", () => {
+    expect(economicsFor([6, 0], [3, 0], [0, 0])).toContain(
+      "1 (4 TP / 4 comments)",
+    );
+  });
+
+  it("counts a published false positive against the denominator only", () => {
+    const clean = economicsFor([6, 0], [3, 0], [0, 0]);
+    const withFalsePositive = economicsFor([6, 0], [3, 0], [0, 1]);
+
+    expect(clean).toContain("4 TP / 4 comments");
+    expect(withFalsePositive).toContain("4 TP / 5 comments");
+  });
+
+  it("counts holdout true positives in the numerator", () => {
+    // Needs a published false positive to be observable at all. With none,
+    // comments == true positives and the ratio is 1.0 whatever the numerator,
+    // so dropping the holdout term scales both sides equally and hides
+    // itself. The false positive is what separates them.
+    expect(economicsFor([8, 0], [0, 0], [4, 1])).toContain(
+      "10 TP / 11 comments",
+    );
+  });
+
+  it("ignores the development split entirely", () => {
+    // Publishing on the visible split, correctly or otherwise, must not move
+    // the ratio in either direction.
+    expect(economicsFor([6, 0], [8, 4], [0, 0])).toContain("4 TP / 4 comments");
+  });
+
+  it("lets a regression below the baseline go negative rather than hide it", () => {
+    // Clamping to zero would conceal a regression inside an economics number.
+    // Condition 5 is what names it; this declines to launder it.
+    expect(economicsFor([1, 0], [0, 0], [0, 0])).toContain("-1 TP");
   });
 });
