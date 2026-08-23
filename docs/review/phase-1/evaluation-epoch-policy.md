@@ -145,6 +145,42 @@ broken verifier, and the argument about which it was happened after the number
 was recorded. Here the criterion is fixed first, and the burden is on the
 implementation to point at the clause.
 
+```
+EPOCH 4   p1-m-epoch-4/public-api-reachability-loss.v1
+          sealed independently, before any M.3.5 source existed
+          8 cases · 4 public-API reachability · 4 cross-family
+          cross-family: configuration_sensitive_type_safety,
+                        returned_value_usage,
+                        sensitive_data_exposure,
+                        required_failure_observability
+          manifest digest a969020f0423fcc1baa3729ef01bcc60bcebdefe676ca271b20ebf0d3290100b
+          stored at /home/shrenil/Desktop/acalys-evaluator/epoch-4/ (outside this repo)
+          seal verified independently by the coordinator: SEAL INTACT, exit 0
+          status SEALED — never observed
+```
+
+### Epoch 4 turns the Epoch 3 oracle defect into a fixture property
+
+Two of its eleven frozen refused coordinates _are_ the mistake Epoch 3's oracle
+made: a head coordinate occupying a deleted member's exact lines while
+declaring a different name, and a head coordinate on a deleted manifest entry's
+line that is unrelated syntax. The seal proves mechanically that neither
+matches under policy 2.
+
+So the rule frozen above is not only asserted, it is adversarially tested by
+the corpus that comes after it. An oracle that repeated Epoch 3's error would
+now fail its own seal.
+
+The seal additionally refuses to build on: an anchor missing a side, a
+provenance, or an exact span; a deletion anchored head-side; a hull wider than
+its enumeration; and a must-not-publish shape carrying no reason. Nine allowed
+anchors, five base-sided and four head-sided, with one primary case
+enumerating both sides of the same clause — each on its own side, never
+hulled.
+
+Sixteen named must-refuse shapes are distributed across all eight cases, so
+precision pressure comes from inside the primary family as well as across it.
+
 ## Anchor authoring, binding from Epoch 4 onward
 
 Epoch 3 rejected a correct finding, and the evaluator reported why without
