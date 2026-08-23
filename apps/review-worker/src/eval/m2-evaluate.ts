@@ -40,6 +40,7 @@ import {
 } from "@acalys/review-engine";
 
 import { runRealAnalysis } from "../analysis.js";
+import { anchorMatches } from "./anchor-scoring.js";
 import type { BaseRevisionResolution } from "@acalys/code-intelligence";
 import {
   M1_DEVELOPMENT_CASES,
@@ -120,17 +121,35 @@ export interface M1CaseObservation {
   readonly byCapability: Readonly<Record<string, CapabilityCounts>>;
 }
 
-/** Whether a candidate lands where the case says the defect is. */
+/**
+ * Whether a candidate lands where the case says the defect is.
+ *
+ * Delegates to the versioned scorer at **policy 1**, which is the behaviour
+ * this harness has always had: one allowed span, accepted on overlap. Routed
+ * through the shared module rather than reimplemented so there is exactly one
+ * place where "did it point at the right line" is decided — and so the
+ * enumerated policy Epoch 2 requires cannot drift away from it.
+ *
+ * Policy 1 is preserved including its defect. The historical corpus and Epoch
+ * 1 were scored this way, and rescoring them under policy 2 would improve
+ * numbers nobody re-measured.
+ */
 function matchesExpectation(
   candidate: CandidateFinding,
   entry: M1CapabilityCase,
 ): boolean {
   const expected = entry.expectedFindings[0];
   if (expected === undefined) return false;
-  return (
-    candidate.location.path === expected.path &&
-    candidate.location.startLine <= expected.endLine &&
-    candidate.location.endLine >= expected.startLine
+  return anchorMatches(
+    candidate.location,
+    [
+      {
+        path: expected.path,
+        startLine: expected.startLine,
+        endLine: expected.endLine,
+      },
+    ],
+    1,
   );
 }
 
