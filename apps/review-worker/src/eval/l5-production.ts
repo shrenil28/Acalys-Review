@@ -1488,8 +1488,28 @@ const FACT_FAMILIES_L5_NEVER_MEASURED: Readonly<Record<string, string>> = {
  * that keeps this a decision rather than a default.
  */
 export function assertPlannerFamilyNamesRemainCompatible(): void {
-  const planner = new Set<string>(PLANNER_FACT_FAMILIES);
-  const experiment = new Set<string>(L5_FACT_FAMILIES);
+  checkFamilyCompatibility(
+    PLANNER_FACT_FAMILIES,
+    L5_FACT_FAMILIES,
+    FACT_FAMILIES_L5_NEVER_MEASURED,
+  );
+}
+
+/**
+ * The guard's rule, over supplied sets rather than module constants.
+ *
+ * Separated so the rule itself can be tested with families that do not exist.
+ * Asserting only against the real constants would test today's arrangement —
+ * which is compatible — and prove nothing about what the guard does when it
+ * is not, which is the only situation it exists for.
+ */
+export function checkFamilyCompatibility(
+  plannerFamilies: readonly string[],
+  experimentFamilies: readonly string[],
+  declaredExclusions: Readonly<Record<string, string>>,
+): void {
+  const planner = new Set<string>(plannerFamilies);
+  const experiment = new Set<string>(experimentFamilies);
 
   const lostSinceBaseline = [...experiment]
     .filter((family) => !planner.has(family))
@@ -1505,8 +1525,7 @@ export function assertPlannerFamilyNamesRemainCompatible(): void {
   const undeclared = [...planner]
     .filter(
       (family) =>
-        !experiment.has(family) &&
-        FACT_FAMILIES_L5_NEVER_MEASURED[family] === undefined,
+        !experiment.has(family) && declaredExclusions[family] === undefined,
     )
     .sort();
   if (undeclared.length > 0) {

@@ -151,7 +151,7 @@ export const REVIEW_PROCEDURE_VERSION = "1";
  * the entry that matters most is the model identity:
  *
  * ```
- * code identity        repository · head commit · base commit · changed lines
+ * code identity        repository · head commit · comparison identity · lines
  * context identity     the assembled context that was actually supplied
  * procedure identity   analyzer ids and versions · procedure version
  * execution identity   model and provider, once a model is involved
@@ -170,21 +170,35 @@ export function analyzerCacheKey(input: {
   readonly repositoryId: string;
   readonly headSha: string;
   /**
-   * The base commit, when the review compared against one.
+   * Identity of the revision this review *compared against*, when it did.
    *
-   * Not redundant with `contextDigest`. Base context is only *offered* to the
-   * planner, and the planner may omit it under budget or ablation — so two
+   * Deliberately not named `baseSha`. The general invariant is
+   *
+   * ```
+   * if analyzer semantics may observe a comparison revision,
+   * that revision's identity participates directly in the cache key
+   * ```
+   *
+   * and a commit name is the wrong shape for it. A pull-request base and a
+   * merge base are different revisions that a future pipeline may want to
+   * distinguish, and neither is "the" base. What this takes is the identity
+   * of the comparison material actually supplied — see the digest built in
+   * `resolveBaseRevisions`, which covers the commit, every path, its resolved
+   * state, and the content itself.
+   *
+   * Not redundant with `contextDigest`. Comparison material is only *offered*
+   * to the planner, and may be dropped under budget or ablation — so two
    * reviews of one head against different bases can assemble byte-identical
    * context and collide on every other entry in this key. The result they
    * would share is wrong for at least one of them: rebase a pull request, or
    * retarget a branch from `main` onto a release branch, and the findings
    * served are the previous base's.
    *
-   * Present and explicitly null when no base was involved, for the same
-   * reason `model` is: a head-only result and a base-aware result must never
-   * share a key.
+   * Present and explicitly null when nothing was compared against, for the
+   * same reason `model` is: a head-only result and a comparison result must
+   * never share a key.
    */
-  readonly baseSha?: string | undefined;
+  readonly comparisonIdentity?: string | undefined;
   readonly contextDigest: string;
   readonly modelIdentity?: string | undefined;
 }): string {
@@ -192,7 +206,7 @@ export function analyzerCacheKey(input: {
     JSON.stringify({
       repositoryId: input.repositoryId,
       headSha: input.headSha,
-      baseSha: input.baseSha ?? null,
+      comparisonIdentity: input.comparisonIdentity ?? null,
       contextDigest: input.contextDigest,
       analyzers: [...ALL_ANALYZER_IDS].sort(),
       procedure: REVIEW_PROCEDURE_VERSION,
@@ -381,9 +395,16 @@ function resolveBaseRevisions(
   return {
     sha: baseSha,
     revisions,
-    // Covers content, not just the commit: a port that hands back the wrong
-    // text for the right sha must not share an identity with one that does
-    // not, or the mistake becomes uninvestigable after the fact.
+    // Covers content AND the commit, and both belong.
+    //
+    // Content, because a port that hands back the wrong text for the right
+    // sha must not share an identity with one that does not, or the mistake
+    // becomes uninvestigable after the fact.
+    //
+    // The commit, because it is not merely a label here: it appears in the
+    // citation every base item carries, so an analyzer reading that citation
+    // genuinely receives different input when it changes. Excluding it would
+    // be excluding something the analyzer can see.
     digest: sha256(
       JSON.stringify({
         baseSha,
@@ -530,7 +551,7 @@ export async function runRealAnalysis(
   const cacheKey = analyzerCacheKey({
     repositoryId: options.repositoryId,
     headSha: options.headSha,
-    ...(base === undefined ? {} : { baseSha: base.sha }),
+    ...(base === undefined ? {} : { comparisonIdentity: base.digest }),
     contextDigest,
   });
 

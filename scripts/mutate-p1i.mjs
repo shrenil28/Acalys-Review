@@ -2001,6 +2001,110 @@ const ALL_MUTATIONS = [
     suite: "apps/review-worker/tests/l5-production.test.ts",
   },
   {
+    id: 218,
+    name: "M.3.0 comparison identity is dropped from the analyzer cache key",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "      comparisonIdentity: input.comparisonIdentity ?? null,",
+    replace: "      comparisonIdentity: null,",
+    suite: "apps/review-worker/tests/base-revision-wiring.test.ts",
+  },
+  {
+    id: 219,
+    name: "M.3.0 the cache key identifies the comparison by HEAD instead of base",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "    ...(base === undefined ? {} : { comparisonIdentity: base.digest }),",
+    replace:
+      "    ...(base === undefined ? {} : { comparisonIdentity: options.headSha }),",
+    suite: "apps/review-worker/tests/base-revision-wiring.test.ts",
+  },
+  {
+    id: 220,
+    name: "M.3.0 a base that is ABSENT is reported as NOT_INDEXED",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "        resolution: base.resolution.kind,",
+    replace:
+      '        resolution:\n          base.resolution.kind === "absent"\n            ? "not_indexed"\n            : base.resolution.kind,',
+    suite: "packages/code-intelligence/tests/base-revision.test.ts",
+  },
+  {
+    id: 221,
+    name: "M.3.0 a base that is UNAVAILABLE is reported as ABSENT",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "        resolution: base.resolution.kind,",
+    replace:
+      '        resolution:\n          base.resolution.kind === "unavailable"\n            ? "absent"\n            : base.resolution.kind,',
+    suite: "packages/code-intelligence/tests/base-revision.test.ts",
+  },
+  {
+    id: 222,
+    name: "M.3.0 a base that is NOT_INDEXED is reported as ABSENT",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "        resolution: base.resolution.kind,",
+    replace:
+      '        resolution:\n          base.resolution.kind === "not_indexed"\n            ? "absent"\n            : base.resolution.kind,',
+    suite: "packages/code-intelligence/tests/base-revision.test.ts",
+  },
+  {
+    id: 223,
+    name: "M.3.0 no context item is emitted for an UNAVAILABLE base",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "    if (seen.has(base.path)) continue;",
+    replace:
+      '    if (seen.has(base.path) || base.resolution.kind === "unavailable")\n      continue;',
+    suite: "packages/code-intelligence/tests/base-revision.test.ts",
+  },
+  {
+    id: 224,
+    name: "M.3.0 no context item is emitted for a NOT_INDEXED base",
+    file: "packages/code-intelligence/src/planner.ts",
+    find: "    if (seen.has(base.path)) continue;",
+    replace:
+      '    if (seen.has(base.path) || base.resolution.kind === "not_indexed")\n      continue;',
+    suite: "packages/code-intelligence/tests/base-revision.test.ts",
+  },
+  {
+    id: 225,
+    name: "M.3.0 a changed path the source never mentioned gets no base entry",
+    file: "apps/review-worker/src/analysis.ts",
+    find: "  const revisions: PlannerBaseRevision[] = changed",
+    replace:
+      "  const revisions: PlannerBaseRevision[] = changed.filter(\n    (entry) => entry.base !== undefined,\n  )",
+    suite: "apps/review-worker/tests/base-revision-wiring.test.ts",
+  },
+  {
+    id: 226,
+    name: "M.3.0 an unobserved path is synthesized as ABSENT instead of NOT_INDEXED",
+    file: "apps/review-worker/src/analysis.ts",
+    find: '      resolution: file.base ?? ({ kind: "not_indexed" } as const),',
+    replace: '      resolution: file.base ?? ({ kind: "absent" } as const),',
+    suite: "apps/review-worker/tests/base-revision-wiring.test.ts",
+  },
+  {
+    id: 227,
+    name: "M.3.0 base_revision is allowed to follow the L.5 mode definition",
+    file: "apps/review-worker/src/eval/l5-production.ts",
+    find: "    base_revision: false,",
+    replace: "    base_revision: mode.families.base_revision ?? true,",
+    suite: "apps/review-worker/tests/base-revision-l5-guard.test.ts",
+  },
+  {
+    id: 228,
+    name: "M.3.0 the L.5 vocabulary accepts a base-revision observation",
+    file: "packages/code-intelligence/src/eval/l5-context.ts",
+    find: '    throw new InvalidL5ContextObservationError(\n      "Base-revision context cannot appear in an L.5 observation: the L.5 " +',
+    replace:
+      '    return "none";\n    throw new InvalidL5ContextObservationError(\n      "Base-revision context cannot appear in an L.5 observation: the L.5 " +',
+    suite: "packages/code-intelligence/tests/l5-context.test.ts",
+  },
+  {
+    id: 229,
+    name: "M.3.0 the containment guard stops requiring a recorded reason",
+    file: "apps/review-worker/src/eval/l5-production.ts",
+    find: "        !experiment.has(family) && declaredExclusions[family] === undefined,",
+    replace: "        !experiment.has(family) && false,",
+    suite: "apps/review-worker/tests/base-revision-l5-guard.test.ts",
+  },
+  {
     id: 17,
     name: "promotion writes `published` instead of `verified`",
     file: "packages/database/src/review/verification-store.ts",

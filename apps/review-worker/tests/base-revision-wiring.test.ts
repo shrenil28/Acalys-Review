@@ -81,7 +81,7 @@ describe("the cache key separates two bases at one head", () => {
       analyzerCacheKey({
         repositoryId: REPO,
         headSha: HEAD_SHA,
-        baseSha,
+        comparisonIdentity: baseSha,
         contextDigest: "identical-context",
       });
 
@@ -100,7 +100,7 @@ describe("the cache key separates two bases at one head", () => {
     const withBase = analyzerCacheKey({
       repositoryId: REPO,
       headSha: HEAD_SHA,
-      baseSha: "base-one",
+      comparisonIdentity: "base-one",
       contextDigest: "identical-context",
     });
 
@@ -112,11 +112,46 @@ describe("the cache key separates two bases at one head", () => {
       analyzerCacheKey({
         repositoryId: REPO,
         headSha: HEAD_SHA,
-        baseSha: "base-one",
+        comparisonIdentity: "base-one",
         contextDigest: "identical-context",
       });
 
     expect(key()).toBe(key());
+  });
+});
+
+describe("comparison identity through the production path", () => {
+  const keyFor = async (baseSha: string, content: string) =>
+    (await run(source({ baseSha, base: { kind: "present", content } })))
+      .cacheKey;
+
+  it("differs when the compared revision differs", async () => {
+    expect(await keyFor("base-one", BASE)).not.toBe(
+      await keyFor("base-two", BASE),
+    );
+  });
+
+  it("differs when the compared CONTENT differs at the same commit", async () => {
+    // The commit name alone is not the semantic input. A port that returns
+    // the wrong text for the right sha must not be served the other one's
+    // findings, and the mistake must stay investigable afterwards.
+    expect(await keyFor("base-one", BASE)).not.toBe(
+      await keyFor("base-one", BASE.replace("return id;", "return `${id}`;")),
+    );
+  });
+
+  it("is identical when the semantic inputs are identical", async () => {
+    // The converse, and it is not ceremony: without it, a key that mixed in
+    // run time or a counter would pass every assertion above while making the
+    // cache useless. Entropy is not identity.
+    expect(await keyFor("base-one", BASE)).toBe(await keyFor("base-one", BASE));
+  });
+
+  it("differs from the same head reviewed against nothing", async () => {
+    const compared = await keyFor("base-one", BASE);
+    const headOnly = (await run(source({}))).cacheKey;
+
+    expect(compared).not.toBe(headOnly);
   });
 });
 

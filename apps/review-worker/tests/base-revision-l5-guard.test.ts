@@ -12,7 +12,11 @@
 
 import { describe, expect, it } from "vitest";
 
-import { plannerAvailabilityForMode } from "../src/eval/l5-production.js";
+import {
+  assertPlannerFamilyNamesRemainCompatible,
+  checkFamilyCompatibility,
+  plannerAvailabilityForMode,
+} from "../src/eval/l5-production.js";
 import { L5_MODES } from "../src/eval/l5-run.js";
 import {
   InvalidL5ContextObservationError,
@@ -66,5 +70,48 @@ describe("the L.5 fact-family vocabulary refuses base revision", () => {
       "structural_index",
     );
     expect(factFamilyFor("changed_hunk", "direct_source")).toBe("none");
+  });
+});
+
+describe("the planner/L.5 family containment guard", () => {
+  const BASELINE = ["structural_index", "binding"];
+
+  it("accepts a production family that is declared with a reason", () => {
+    expect(() =>
+      checkFamilyCompatibility([...BASELINE, "base_revision"], BASELINE, {
+        base_revision: "the frozen baseline had no base input",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a production family nobody wrote a reason for", () => {
+    // Containment alone would pass this. The whole point of the exclusion
+    // list is that gaining a family is a decision someone recorded, not a
+    // default that happens one family at a time until the planner no longer
+    // resembles the one the baseline measured.
+    expect(() =>
+      checkFamilyCompatibility([...BASELINE, "some_new_family"], BASELINE, {}),
+    ).toThrow(/no recorded reason/);
+  });
+
+  it("names the undeclared family so the message is actionable", () => {
+    expect(() =>
+      checkFamilyCompatibility([...BASELINE, "some_new_family"], BASELINE, {}),
+    ).toThrow(/some_new_family/);
+  });
+
+  it("rejects losing a family the baseline ablated, in the other direction", () => {
+    // The asymmetry is the design. Production may gain; the baseline may not
+    // lose, because the frozen numbers would then cite an ablation of
+    // something this tree can no longer produce.
+    expect(() =>
+      checkFamilyCompatibility(["structural_index"], BASELINE, {
+        binding: "declared, but that must not help here",
+      }),
+    ).toThrow(/no longer has/);
+  });
+
+  it("holds for the real constants this tree ships", () => {
+    expect(() => assertPlannerFamilyNamesRemainCompatible()).not.toThrow();
   });
 });
