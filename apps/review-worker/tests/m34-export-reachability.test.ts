@@ -30,8 +30,11 @@ import { describe, expect, it } from "vitest";
 
 import { runRealAnalysis, type AnalysisSource } from "../src/index.js";
 import {
+  DEFAULT_PUBLICATION_CONFIG,
   EXPORT_REACHABILITY_RULE_ID,
+  planPublication,
   planVerificationContext,
+  promoteVerified,
   verifyDeterministically,
   type CandidateFinding,
 } from "@acalys/review-engine";
@@ -141,7 +144,7 @@ describe("witness 1 — a public export stops being reachable", () => {
   const HEAD = { [BOUNDARY]: ALIASED };
   const BASE = { [BOUNDARY]: EXPORTED };
 
-  it("produces exactly one M.3.1 candidate from the production entry", async () => {
+  it("produces exactly one M.3.4 candidate from the production entry", async () => {
     const outcome = await review({
       head: HEAD,
       base: { kind: "present", content: EXPORTED },
@@ -168,6 +171,141 @@ describe("witness 1 — a public export stops being reachable", () => {
     if (attempt.status !== "completed") return;
     expect(attempt.decision).toBe("verified");
     expect(attempt.reasons).toContain("public_export_unreachable_at_head");
+  });
+});
+
+describe("witness 1b — a PLAIN removal, the whole chain", () => {
+  // The defect the predecessor was named for and never found, driven end to
+  // end: analyzer, verifier, promotion, publication, anchor. Everything else
+  // in this file inherits from M.3.1; this is the shape that could not exist
+  // before.
+  const GONE = "export function other(): void {}";
+  const HEAD = { [BOUNDARY]: GONE };
+  const BASE = { [BOUNDARY]: EXPORTED };
+
+  it("proposes, with the base-side anchor of the deleted statement", async () => {
+    const outcome = await review({
+      head: HEAD,
+      base: { kind: "present", content: EXPORTED },
+      baseSha: BASE_SHA,
+    });
+
+    const mine = removals(outcome.report.findings);
+    expect(mine).toHaveLength(1);
+    // Line 1 is where `export function parse` stood in the base revision. Not
+    // a fabricated head line, and not a constant that happens to be 1.
+    expect(mine[0]?.location).toEqual({
+      path: BOUNDARY,
+      startLine: 1,
+      endLine: 1,
+      side: "base",
+    });
+  });
+
+  it("is VERIFIED, promoted, and published", async () => {
+    const outcome = await review({
+      head: HEAD,
+      base: { kind: "present", content: EXPORTED },
+      baseSha: BASE_SHA,
+    });
+    const candidate = removals(outcome.report.findings)[0];
+    if (candidate === undefined) throw new Error("no M.3.4 candidate");
+
+    const attempt = adjudicate(candidate, HEAD, BASE);
+    expect(attempt.status).toBe("completed");
+    if (attempt.status !== "completed") return;
+    expect(attempt.decision).toBe("verified");
+    expect(attempt.reasons).toContain("public_export_unreachable_at_head");
+
+    const promotion = promoteVerified([
+      {
+        candidateId: candidate.identityHint,
+        fingerprint: candidate.identityHint,
+        severity: attempt.severity,
+        category: candidate.category,
+        path: candidate.location.path,
+        attempt,
+      },
+    ]);
+    expect(promotion.kind).toBe("promoted");
+
+    const plan = planPublication(
+      [
+        {
+          findingId: candidate.identityHint,
+          fingerprint: candidate.identityHint,
+          severity: attempt.severity,
+          category: candidate.category,
+          path: candidate.location.path,
+        },
+      ],
+      DEFAULT_PUBLICATION_CONFIG,
+    );
+    expect(plan.publish).toHaveLength(1);
+  });
+
+  it("produces ONE finding for one logical break", async () => {
+    // The predecessor is retired rather than kept alongside. Two generations
+    // both recognising a change would propose one consumer-visible break
+    // twice, and deduplication would become a rule to remember instead of a
+    // structural fact.
+    const outcome = await review({
+      head: HEAD,
+      base: { kind: "present", content: EXPORTED },
+      baseSha: BASE_SHA,
+    });
+
+    expect(outcome.report.findings).toHaveLength(1);
+  });
+});
+
+describe("witness 1c — reachability is judged at the package entry point", () => {
+  it("VERIFIES when the entry drops a name the module still exports", async () => {
+    // Epoch 2's warning, through the production entry. `src/parser.ts` still
+    // exports `parse`; consumers import the package, and it no longer passes
+    // the name through. A verifier resolving from the declaring module calls
+    // this reachable and is wrong about what a consumer can do.
+    const MANIFEST = '{"name":"pkg","exports":"./src/index.ts"}';
+    const ENTRY = "src/index.ts";
+    const HEAD = {
+      "package.json": MANIFEST,
+      [ENTRY]: "export const version = 1;",
+      [BOUNDARY]: EXPORTED,
+    };
+    const BASE = {
+      "package.json": MANIFEST,
+      [ENTRY]: 'export { parse } from "./parser.js";',
+      [BOUNDARY]: EXPORTED,
+    };
+
+    const outcome = await runRealAnalysis({
+      repositoryId: REPO,
+      headSha: SHA,
+      tenantId: "tenant-1",
+      source: {
+        read: () =>
+          Promise.resolve({
+            changed: [
+              {
+                path: ENTRY,
+                content: HEAD[ENTRY],
+                changedLines: [1],
+                base: { kind: "present", content: BASE[ENTRY] },
+              },
+            ],
+            repository: new Map(Object.entries(HEAD)),
+            baseSha: BASE_SHA,
+          }),
+      },
+    });
+
+    const candidate = removals(outcome.report.findings)[0];
+    if (candidate === undefined) throw new Error("no M.3.4 candidate");
+
+    const attempt = adjudicate(candidate, HEAD, BASE);
+    expect(attempt.status).toBe("completed");
+    if (attempt.status !== "completed") return;
+    expect(attempt.decision).toBe("verified");
   });
 });
 
