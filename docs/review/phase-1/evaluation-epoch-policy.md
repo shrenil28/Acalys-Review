@@ -145,6 +145,65 @@ broken verifier, and the argument about which it was happened after the number
 was recorded. Here the criterion is fixed first, and the burden is on the
 implementation to point at the clause.
 
+## Anchor authoring, binding from Epoch 4 onward
+
+Epoch 3 rejected a correct finding, and the evaluator reported why without
+being asked: its sealed anchor was head `date.ts:1`, which points at
+`function parseDateInternal(...)` — a _different declaration_ that merely
+occupies the deleted one's line. The product anchored base `date.ts:1`, the
+export a reader actually needs.
+
+The oracle equated two locations because they shared a line number.
+
+```
+allowed publication anchors are SEMANTIC change locations,
+identified by path + side + exact span
+
+numeric line correspondence across BASE and HEAD is never evidence
+that two anchors describe the same change
+```
+
+Concretely:
+
+```
+a deletion            the exact BASE/LEFT deleted syntax is a valid anchor
+                      unrelated HEAD syntax on the same line is NOT valid,
+                      and a matching line number does not make it so
+
+a rename or a change  the exact HEAD syntax expressing the change is valid
+
+both genuinely useful enumerate BOTH, on their own sides. Never hull them.
+```
+
+Each expected anchor from Epoch 4 carries `path`, `side`, `startLine`,
+`endLine`, and a provenance naming why that syntax _is_ the defect —
+`deleted_export_clause`, `changed_public_boundary`, `changed_callsite`, and so
+on. That field is evaluator and seal metadata; the production scorer does not
+read it. Its purpose is to make an evaluator state the semantic reason for a
+coordinate, so that "same line number" cannot quietly stand in for "same
+change".
+
+### What is already mechanical, and what is not
+
+Honest split, because the difference matters:
+
+```
+MECHANICAL   the scorer consults `side` under both policies, and three
+             mutations defend it — #259, #261, #285. A base-side finding
+             cannot satisfy a head-side allowed anchor, and a stated side
+             cannot be treated as absent.
+
+AUTHORING    that an allowed anchor points at the syntax which constitutes
+             the defect is a judgement made when the epoch is written. No
+             scorer can check it, because the scorer has no notion of what
+             the defect *is* beyond what the oracle asserts.
+```
+
+The seal can enforce the shape — every anchor sided, spanned, and given a
+provenance — and refuse to build otherwise. It cannot enforce that the
+provenance is true. That is why the rule is frozen here before an epoch is
+authored rather than discovered while scoring one.
+
 ## Epoch 2 scoring instruction, binding at evaluation time
 
 The evaluator reports that `M1ExpectedFinding` cannot express an enumeration

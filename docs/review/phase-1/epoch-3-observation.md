@@ -131,6 +131,34 @@ The freeze evidence stands; the mutations and witnessesmeasure what they measure
 prose overclaimed the scope of one repair, and the overclaim is corrected here
 rather than edited out of the frozen document.
 
+## Evidence this epoch produced for capabilities it was not aimed at
+
+Collapsing this into "1/8, bad" would discard three independent results:
+
+```
+M.4    discarded_replacement_return published a TRUE POSITIVE on a case
+       authored by someone who had never seen its contract or its
+       development corpus. That is generalization evidence, on fresh unseen
+       material, for a capability this epoch was not built to test.
+
+M.3.4  every within-primary decoy declined — four planted must-decline
+       shapes, three proposed on, none published, with both
+       "declaration moved but still reachable" cases refuted by name.
+       The verifier's boundary reasoning is sound.
+
+       Zero cross-family hallucinations across four unrelated families.
+
+M.2    produced nothing on an unchecked index reached through array
+       destructuring. A second independent confirmation, after Epoch 2's,
+       that `exact_optional_property_write` is write-shaped.
+```
+
+The M.2 result is not a defect. That capability's name is honest about its
+scope, and broadening it because an epoch happened to contain an adjacent
+shape is the failure mode the taxonomy exists to prevent. M.3.4 is the
+opposite case: its name promised boundary reachability while its proposer
+operated on module deltas, and that gap is what earns the next checkpoint.
+
 ## What this observation does not license
 
 M.3.4 is frozen and Epoch 3 is spent. Nothing here permits editing the
