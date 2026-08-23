@@ -127,7 +127,16 @@ export const ALL_ANALYZER_IDS = [
   // it used to export.
   "acalys.correctness.removed-export",
   "acalys.correctness.required-parameter-added",
+  // P1-M.4. The first analyzer whose hypothesis is about a value that still
+  // flows: the call happens, nothing looks unused, and what is lost is the
+  // difference between what came back and what the caller keeps.
+  "acalys.correctness.discarded-replacement-return",
 ] as const;
+
+export {
+  DISCARDED_REPLACEMENT_RULE_ID,
+  analyzeDiscardedReplacement,
+} from "./correctness/discarded-replacement.js";
 
 export {
   REMOVED_EXPORT_RULE_ID,

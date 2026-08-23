@@ -262,6 +262,10 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
         "`send()` is called without `b`, which this change made required.",
         ["the declaration gained a required parameter"],
       ],
+      discarded_replacement_return: [
+        "The result of `validate(raw)` was used at the base revision and is discarded here, so any replacement value it returns for `raw` is lost.",
+        ["The base revision consumed the result of `validate`"],
+      ],
       removed_export: [
         "`parse` was exported from src/parser.ts at the base revision and no longer appears in its exported value surface.",
         ["src/parser.ts exported `parse` at the base revision"],

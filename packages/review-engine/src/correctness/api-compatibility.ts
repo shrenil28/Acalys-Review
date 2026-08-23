@@ -233,7 +233,7 @@ function baseContentFor(
   return undefined;
 }
 
-interface ChangedSource {
+export interface ChangedSource {
   readonly path: string;
   readonly base: ts.SourceFile;
   readonly head: ts.SourceFile;
@@ -249,8 +249,14 @@ function parse(path: string, content: string): ts.SourceFile {
   );
 }
 
-/** The changed TypeScript files whose base revision is present. */
-function comparableSources(input: AsyncAnalyzerInput): {
+/**
+ * The changed TypeScript files whose base revision is present.
+ *
+ * Shared with M.4, which needs the same pairing under the same base-state
+ * rules. Exported rather than duplicated so that "which files may be compared,
+ * and what to do when the base could not be established" is decided once.
+ */
+export function comparableSources(input: AsyncAnalyzerInput): {
   readonly sources: readonly ChangedSource[];
   readonly degradations: readonly { path: string; because: string }[];
 } {

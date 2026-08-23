@@ -73,6 +73,11 @@ export const VERIFICATION_REASONS = [
   // nothing was learned about the change, which is a different statement from
   // the change being safe.
   "comparison_revision_unavailable",
+  // P1-M.4. Stated in terms of what the discarded value carried, because
+  // "the result was unused" is true of every refutation this capability makes.
+  "discarded_value_carried_replacement",
+  "discarded_value_carried_nothing",
+  "replacement_evidence_unavailable",
   "evidence_supports_claim",
   "independent_context_confirms",
   "claim_contradicted_by_context",
@@ -199,6 +204,11 @@ export const REASON_SUPPORTS: Readonly<
   public_export_still_reachable: "rejected",
   base_valid_call_still_accepted: "rejected",
   comparison_revision_unavailable: "inconclusive",
+  discarded_value_carried_replacement: "verified",
+  // A REFUTATION, not a failure to settle. The callee returns nothing, or a
+  // status, or the argument itself, so discarding it loses nothing.
+  discarded_value_carried_nothing: "rejected",
+  replacement_evidence_unavailable: "inconclusive",
   evidence_supports_claim: "verified",
   independent_context_confirms: "verified",
 

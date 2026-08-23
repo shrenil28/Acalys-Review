@@ -84,6 +84,17 @@ export const VERIFICATION_CAPABILITIES = [
    */
   "removed_export",
   /**
+   * Whether a call whose result the change discards was returning a
+   * replacement for its own argument.
+   *
+   * Covers **a transformed replacement for the first parameter** and nothing
+   * else. A void procedure, a predicate, and an identity function all have
+   * their results discarded here too, and none of them is this capability's
+   * defect. Conversions, Result types, promises and builder APIs belong to
+   * later capabilities in the same family.
+   */
+  "discarded_replacement_return",
+  /**
    * Whether a call shape the base contract accepted still compiles at head.
    *
    * Covers **positional required arity on an exported callable** and nothing
@@ -194,6 +205,12 @@ export const REASONS_BY_CAPABILITY: Readonly<
     "governing_compiler_rejects_write",
     "governing_compiler_permits_write",
     "governing_project_unavailable",
+    "context_incomplete",
+  ],
+  discarded_replacement_return: [
+    "discarded_value_carried_replacement",
+    "discarded_value_carried_nothing",
+    "replacement_evidence_unavailable",
     "context_incomplete",
   ],
   removed_export: [
@@ -326,6 +343,17 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     // address it.
     patterns: [/\bexactOptionalPropertyTypes\b/],
     dominates: [],
+  },
+  {
+    id: "discarded_replacement_return",
+    capability: "discarded_replacement_return",
+    declines: undefined,
+    // Anchored on the base comparison and the replacement proposition
+    // together. A claim that merely mentions a discarded value is not this
+    // capability's, and routing one here would have it answered by a
+    // procedure that cannot address it.
+    patterns: [/is discarded here, so any replacement value/],
+    dominates: ["async_value_use", "signature_compatibility"],
   },
   {
     id: "removed_export",

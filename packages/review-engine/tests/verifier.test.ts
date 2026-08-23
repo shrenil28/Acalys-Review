@@ -334,6 +334,69 @@ describe("P1-M.3 compatibility verification", () => {
   });
 });
 
+const DISCARD_CLAIM =
+  "The result of `validate(raw)` was used at the base revision and is discarded here, so any replacement value it returns for `raw` is lost.";
+
+const DISCARDING_CALLER = [
+  'import { validate } from "./validator.js";',
+  "export function route(raw: string): string {",
+  "  validate(raw);",
+  "  return raw;",
+  "}",
+].join("\n");
+
+/** A real M.4 verification, used as behaviour and as reachability evidence. */
+function verifyDiscard(validator: string | undefined): VerificationAttempt {
+  const input = inputFor({
+    claim: {
+      statement: DISCARD_CLAIM,
+      steps: [],
+      trigger: "calling `validate` and continuing with `raw`",
+      consequence: "the untransformed value flows onward",
+    },
+    location: { path: "src/route.ts", startLine: 3, endLine: 3 },
+    evidence: [],
+  });
+
+  const files: Record<string, string> = { "src/route.ts": DISCARDING_CALLER };
+  if (validator !== undefined) files["src/validator.ts"] = validator;
+
+  return verifyDeterministically(
+    input,
+    planVerificationContext({
+      verificationInput: input,
+      repository: repositoryOf(files),
+    }),
+  );
+}
+
+describe("P1-M.4 discarded replacement verification", () => {
+  it("VERIFIES when the callee returned a transformed replacement", () => {
+    const attempt = verifyDiscard(
+      "export function validate(raw: string): string {\n  return raw.trim();\n}",
+    );
+
+    expect(decisionOf(attempt)).toBe("verified");
+    expect(reasonsOf(attempt)).toContain("discarded_value_carried_replacement");
+  });
+
+  it("REJECTS a predicate, whose result cannot replace the argument", () => {
+    const attempt = verifyDiscard(
+      "export function validate(raw: string): boolean {\n  return raw.length > 0;\n}",
+    );
+
+    expect(decisionOf(attempt)).toBe("rejected");
+    expect(reasonsOf(attempt)).toContain("discarded_value_carried_nothing");
+  });
+
+  it("abstains when the callee cannot be reached at all", () => {
+    const attempt = verifyDiscard(undefined);
+
+    expect(decisionOf(attempt)).toBe("inconclusive");
+    expect(reasonsOf(attempt)).toContain("replacement_evidence_unavailable");
+  });
+});
+
 describe("Every reason code is reachable", () => {
   it("is exercised by a real verification, not merely declared", () => {
     // A reason nothing can produce is a vocabulary entry that will be misused
@@ -344,6 +407,19 @@ describe("Every reason code is reachable", () => {
     };
 
     record(verify({ "src/caller.ts": CALLER, "src/store.ts": ASYNC_STORE }));
+
+    // P1-M.4, produced by real verifications rather than asserted into the set.
+    record(
+      verifyDiscard(
+        "export function validate(raw: string): string {\n  return raw.trim();\n}",
+      ),
+    );
+    record(
+      verifyDiscard(
+        "export function validate(raw: string): boolean {\n  return raw.length > 0;\n}",
+      ),
+    );
+    record(verifyDiscard(undefined));
 
     // P1-M.3, produced by real verifications rather than asserted into the set.
     record(

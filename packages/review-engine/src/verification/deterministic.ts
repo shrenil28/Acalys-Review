@@ -38,6 +38,7 @@ import { verifyConditionValue } from "./condition.js";
 import { verifyExceptionFlow } from "./exception.js";
 import { verifyExactOptionalWrite } from "./exact-optional.js";
 import { verifyRemovedExport } from "./removed-export.js";
+import { verifyDiscardedReplacement } from "./discarded-replacement.js";
 import { verifyRequiredParameterAdded } from "./required-parameter.js";
 import { adjudicateCompatibility } from "./compatibility-route.js";
 import { verifySignatureCompatibility } from "./signature.js";
@@ -257,6 +258,14 @@ function observeSite(
  * not state, and the verifier would be adjudicating something a reader of the
  * finding never saw.
  */
+/** The callee name, read back out of the claim the reader also sees. */
+function parseDiscardedReplacementClaim(
+  statement: string,
+): { readonly calleeName: string } | undefined {
+  const match = /^The result of `([A-Za-z_$][\w$]*)\(/.exec(statement);
+  return match?.[1] === undefined ? undefined : { calleeName: match[1] };
+}
+
 function parseRemovedExportClaim(
   statement: string,
 ):
@@ -397,6 +406,58 @@ export function verifyDeterministically(
 
     assertReasonsSupport(attempt.decision, attempt.reasons);
     assertReasonForCapability("exact_optional_property_write", attempt.reasons);
+    return attempt;
+  }
+
+  if (
+    competence.kind === "supported" &&
+    competence.capability === "discarded_replacement_return"
+  ) {
+    // P1-M.4. Reads the HEAD revision only: the claim is about what the callee
+    // returns now, not about a comparison. The base comparison is the
+    // ANALYZER's evidence, and re-deriving it here would make the two stages
+    // one opinion consulted twice.
+    const files =
+      context.revision?.files ??
+      new Map(context.items.map((item) => [item.path, item.content]));
+
+    const parsed = parseDiscardedReplacementClaim(input.claim.statement);
+    const outcome =
+      parsed === undefined
+        ? undefined
+        : verifyDiscardedReplacement(
+            {
+              path: input.location.path,
+              calleeName: parsed.calleeName,
+              line: input.location.startLine,
+            },
+            { files },
+          );
+
+    const reasons: readonly VerificationReason[] =
+      outcome === undefined
+        ? ["replacement_evidence_unavailable"]
+        : outcome.kind === "verified"
+          ? ["discarded_value_carried_replacement"]
+          : outcome.kind === "rejected"
+            ? ["discarded_value_carried_nothing"]
+            : ["replacement_evidence_unavailable"];
+
+    const attempt: VerificationAttempt = {
+      status: "completed",
+      decision:
+        outcome === undefined
+          ? "inconclusive"
+          : outcome.kind === "unavailable"
+            ? "inconclusive"
+            : outcome.kind,
+      reasons,
+      confidence: reasons[0] === "replacement_evidence_unavailable" ? 0.2 : 0.9,
+      severity: input.proposedSeverity,
+    };
+
+    assertReasonsSupport(attempt.decision, attempt.reasons);
+    assertReasonForCapability("discarded_replacement_return", attempt.reasons);
     return attempt;
   }
 
