@@ -1,14 +1,16 @@
 /**
- * P1-M.3.1 and M.3.2 — cheap base-to-head hypotheses about the public surface.
- *
- * Two capabilities, kept separate all the way down to their rule ids, because
- * one can be right while the other is wrong and a shared verdict would hide
- * that:
+ * P1-M.3.2 — a cheap base-to-head hypothesis about a callable's public surface.
  *
  * ```
- * acalys.correctness/removed-export
  * acalys.correctness/required-parameter-added
  * ```
+ *
+ * This file also held `removed_export` until M.3.4 superseded it. That body is
+ * deleted rather than left dormant: `depcruise` reasons about module
+ * reachability, and this module stays reachable through the capability above,
+ * so a dead half would have gone on looking alive. Its mutations then survived
+ * a full harness while defending nothing, which is how the deletion came to be
+ * noticed at all.
  *
  * # What this is allowed to know
  *
@@ -19,9 +21,8 @@
  *
  * # Why these hypotheses are deliberately wrong sometimes
  *
- * `removedExports` cannot see through `export *`, and `parameterGrowth`
- * counts parameters rather than reasoning about optionality. Both will
- * therefore propose candidates that are not defects.
+ * `parameterGrowth` counts parameters rather than reasoning about
+ * optionality, so it will propose candidates that are not defects.
  *
  * That is the design, not a defect in it. The verifier compiles a consumer
  * that was valid against base and asks whether it still compiles — it can say
@@ -38,15 +39,8 @@ import ts from "typescript";
 import type { AnalysisResult, CandidateFinding } from "../finding.js";
 import type { AsyncAnalyzerInput } from "./async-completion.js";
 
-export const REMOVED_EXPORT_RULE_ID = "acalys.correctness/removed-export";
 export const REQUIRED_PARAMETER_RULE_ID =
   "acalys.correctness/required-parameter-added";
-
-/** An exported name, and which space it lives in. */
-interface ExportedName {
-  readonly name: string;
-  readonly namespace: "value" | "type";
-}
 
 /** A callable's parameter shape, as declarations state it. */
 interface CallableShape {
@@ -57,108 +51,11 @@ interface CallableShape {
   readonly total: number;
 }
 
-const isTypeOnlyDeclaration = (node: ts.Node): boolean =>
-  ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node);
-
 const hasExportModifier = (node: ts.Node): boolean =>
   ts.canHaveModifiers(node) &&
   (ts.getModifiers(node) ?? []).some(
     (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
   );
-
-/**
- * Every name this module exports, read from syntax alone.
- *
- * Blind to `export *` by construction — resolving one means reading another
- * module, and a syntactic pass over a single file cannot. The blindness is
- * recorded by {@link reexportsWholesale} rather than papered over, so the
- * caller can decide what to do about it.
- */
-function exportedNames(source: ts.SourceFile): readonly ExportedName[] {
-  const found = new Map<string, ExportedName>();
-  const localKinds = new Map<string, "value" | "type">();
-
-  const remember = (name: string, namespace: "value" | "type"): void => {
-    if (!found.has(name)) found.set(name, { name, namespace });
-  };
-
-  for (const statement of source.statements) {
-    if (
-      ts.isInterfaceDeclaration(statement) ||
-      ts.isTypeAliasDeclaration(statement)
-    ) {
-      localKinds.set(statement.name.text, "type");
-    } else if (
-      (ts.isFunctionDeclaration(statement) ||
-        ts.isClassDeclaration(statement) ||
-        ts.isEnumDeclaration(statement)) &&
-      statement.name !== undefined
-    ) {
-      localKinds.set(statement.name.text, "value");
-    } else if (ts.isVariableStatement(statement)) {
-      for (const declaration of statement.declarationList.declarations) {
-        if (ts.isIdentifier(declaration.name)) {
-          localKinds.set(declaration.name.text, "value");
-        }
-      }
-    }
-  }
-
-  for (const statement of source.statements) {
-    // `export function f`, `export interface I`, `export const x`
-    if (hasExportModifier(statement)) {
-      const namespace = isTypeOnlyDeclaration(statement) ? "type" : "value";
-      if (
-        (ts.isFunctionDeclaration(statement) ||
-          ts.isClassDeclaration(statement) ||
-          ts.isEnumDeclaration(statement) ||
-          ts.isInterfaceDeclaration(statement) ||
-          ts.isTypeAliasDeclaration(statement)) &&
-        statement.name !== undefined
-      ) {
-        remember(statement.name.text, namespace);
-      } else if (ts.isVariableStatement(statement)) {
-        for (const declaration of statement.declarationList.declarations) {
-          if (ts.isIdentifier(declaration.name)) {
-            remember(declaration.name.text, "value");
-          }
-        }
-      }
-      continue;
-    }
-
-    // `export { a, b as c }` and `export type { T }`, with or without `from`.
-    if (
-      ts.isExportDeclaration(statement) &&
-      statement.exportClause !== undefined &&
-      ts.isNamedExports(statement.exportClause)
-    ) {
-      for (const element of statement.exportClause.elements) {
-        const exposed = element.name.text;
-        const local = element.propertyName?.text ?? exposed;
-        const namespace =
-          statement.isTypeOnly || element.isTypeOnly
-            ? "type"
-            : (localKinds.get(local) ?? "value");
-        remember(exposed, namespace);
-      }
-    }
-  }
-
-  return [...found.values()].sort((left, right) =>
-    left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
-  );
-}
-
-/** Whether this module re-exports something wholesale, hiding names from us. */
-function reexportsWholesale(source: ts.SourceFile): boolean {
-  return source.statements.some(
-    (statement) =>
-      ts.isExportDeclaration(statement) &&
-      statement.moduleSpecifier !== undefined &&
-      statement.exportClause === undefined,
-  );
-}
 
 /**
  * Exported callables, by name, taking the most permissive overload.
@@ -306,303 +203,6 @@ export function comparableSources(input: AsyncAnalyzerInput): {
   }
 
   return { sources, degradations };
-}
-
-// ---------------------------------------------------------------------------
-// M.3.1 — removed_export
-// ---------------------------------------------------------------------------
-
-export function analyzeRemovedExport(
-  input: AsyncAnalyzerInput,
-): AnalysisResult {
-  const findings: CandidateFinding[] = [];
-  const clusterId = input.clusterId ?? "cluster:unscoped";
-  const { sources, degradations } = comparableSources(input);
-  const unlocalized: { path: string; because: string }[] = [];
-
-  for (const source of sources) {
-    const before = exportedNames(source.base);
-    const after = new Set(
-      exportedNames(source.head).map((entry) => entry.name),
-    );
-
-    for (const exported of before) {
-      if (after.has(exported.name)) continue;
-
-      const anchor = resolveRemovalAnchor(
-        source.base,
-        source.head,
-        exported.name,
-      );
-
-      // A break that cannot be located is still a break, and still must not be
-      // published at an invented line. Withheld from inline publication and
-      // recorded, rather than pointed somewhere plausible.
-      if (anchor.kind !== "exact_head") {
-        unlocalized.push({
-          path: source.path,
-          because:
-            `\`${exported.name}\` is no longer exported, but the finding has no inline-publishable ` +
-            `anchor (${anchor.kind}: ${anchor.because})`,
-        });
-        continue;
-      }
-
-      // Not skipped when the head re-exports wholesale, deliberately. The
-      // analyzer cannot resolve `export *` and must not pretend the name is
-      // therefore gone OR therefore present; it proposes, and the verifier
-      // imports the name and finds out.
-      findings.push(
-        removedExportCandidate(
-          source.path,
-          exported,
-          source.head,
-          clusterId,
-          anchor,
-        ),
-      );
-    }
-  }
-
-  // Reported, not discarded.
-  //
-  // A comparison capability that abstained because it could not establish the
-  // base is producing an empty result for a reason, and an empty result with
-  // no reason attached is indistinguishable from a clean review. That is the
-  // exact confusion M.3.0's four states exist to prevent, and dropping these
-  // would reintroduce it one layer up.
-  return {
-    findings,
-    suppressions: [],
-    degradations: [...degradations, ...unlocalized].map((entry) => ({
-      clusterId,
-      reason: `${entry.path}: ${entry.because}`,
-    })),
-  };
-}
-
-/**
- * Where a removal may be published, and on what evidence.
- *
- * Three states, none of them soft. There is deliberately no `approximate` or
- * `best_effort`: a state that means "we guessed" must not be publishable, and
- * naming it gently is exactly how it becomes publishable.
- */
-type RemovalAnchor =
-  | {
-      readonly kind: "exact_head";
-      readonly line: number;
-      readonly because: string;
-    }
-  | {
-      readonly kind: "exact_base";
-      readonly line: number;
-      readonly because: string;
-    }
-  | { readonly kind: "unavailable"; readonly because: string };
-
-/**
- * The statement in a source file that exposes, or stops exposing, a name.
- *
- * Returns the line of an export declaration whose clause mentions `name` on
- * either side of an alias — `export { name }`, `export { name as other }`,
- * `export { other as name }`. That statement is where the public surface is
- * decided, so it is where a change to the public surface happened.
- */
-function exportStatementLine(
-  source: ts.SourceFile,
-  name: string,
-): number | undefined {
-  for (const statement of source.statements) {
-    if (!ts.isExportDeclaration(statement)) continue;
-    const clause = statement.exportClause;
-    if (clause === undefined || !ts.isNamedExports(clause)) continue;
-
-    const mentions = clause.elements.some(
-      (element) =>
-        element.name.text === name || element.propertyName?.text === name,
-    );
-    if (!mentions) continue;
-
-    return (
-      source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1
-    );
-  }
-
-  // `export function name` and friends: the declaration itself is the export.
-  for (const statement of source.statements) {
-    if (!hasExportModifier(statement)) continue;
-    const declared =
-      (ts.isFunctionDeclaration(statement) ||
-        ts.isClassDeclaration(statement) ||
-        ts.isEnumDeclaration(statement) ||
-        ts.isInterfaceDeclaration(statement) ||
-        ts.isTypeAliasDeclaration(statement)) &&
-      statement.name !== undefined
-        ? statement.name.text
-        : undefined;
-    if (declared !== name) continue;
-    return (
-      source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1
-    );
-  }
-
-  return undefined;
-}
-
-/** The line of a wholesale `export * from "..."`, when the module has one. */
-function wholesaleReexportLine(source: ts.SourceFile): number | undefined {
-  for (const statement of source.statements) {
-    if (!ts.isExportDeclaration(statement)) continue;
-    if (statement.moduleSpecifier === undefined) continue;
-    if (statement.exportClause !== undefined) continue;
-    return (
-      source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1
-    );
-  }
-  return undefined;
-}
-
-/**
- * Resolves where to publish a removal, in a fixed order of evidence.
- *
- * The order is the contract, and every step is evidence rather than a
- * preference:
- *
- * ```
- * A  the head still has an export statement mentioning the name
- *      -> the public surface changed there
- * B  only the base has one
- *      -> the honest coordinate is on the base side
- * C  neither
- *      -> there is no trustworthy coordinate
- * ```
- *
- * What is deliberately absent is a fallback. `startLine: 1` was the original
- * defect; first-changed-line, nearest-declaration and module-start are the
- * same defect with better excuses, each right for the case that motivated it
- * and silently wrong everywhere else.
- */
-function resolveRemovalAnchor(
-  base: ts.SourceFile,
-  head: ts.SourceFile,
-  name: string,
-): RemovalAnchor {
-  const headLine = exportStatementLine(head, name);
-  if (headLine !== undefined) {
-    return {
-      kind: "exact_head",
-      line: headLine,
-      because: `the changed export statement mentioning \`${name}\` is on this line`,
-    };
-  }
-
-  // A wholesale re-export decides the name's visibility even though it never
-  // writes the name down, so it is the head statement where the public
-  // surface changed. Admitted only when no named statement mentions the name
-  // — this is evidence about where visibility is determined, not a preference
-  // for "some export-looking line".
-  const wholesaleLine = wholesaleReexportLine(head);
-  if (wholesaleLine !== undefined) {
-    return {
-      kind: "exact_head",
-      line: wholesaleLine,
-      because: `\`${name}\` is exposed, if at all, by the wholesale re-export on this line`,
-    };
-  }
-
-  const baseLine = exportStatementLine(base, name);
-  if (baseLine !== undefined) {
-    return {
-      kind: "exact_base",
-      line: baseLine,
-      because: `the export was deleted; the base revision exposed \`${name}\` on this line`,
-    };
-  }
-
-  // Unreachable for a removal candidate, and kept anyway.
-  //
-  // A name only becomes a candidate by appearing in `exportedNames(base)`,
-  // which requires base to carry either a named export clause or an
-  // export-modifier declaration — and `exportStatementLine` finds both. So
-  // there is no path here today, and its mutation was withdrawn rather than
-  // defended with a test for behaviour the baseline cannot produce.
-  //
-  // The state stays because it is the correct model: it is what any future
-  // caller reaching this function by another route must be handed, instead of
-  // a fabricated line.
-  return {
-    kind: "unavailable",
-    because: `no export statement mentioning \`${name}\` exists in either revision`,
-  };
-}
-
-function removedExportCandidate(
-  path: string,
-  exported: ExportedName,
-  head: ts.SourceFile,
-  clusterId: string,
-  anchor: Extract<RemovalAnchor, { kind: "exact_head" }>,
-): CandidateFinding {
-  // From resolved evidence, never a constant. `startLine: 1` was the P1-M.3
-  // holdout's published false positive: the semantics were right and the
-  // reader was sent to the wrong line of a two-line file.
-  const location = { path, startLine: anchor.line, endLine: anchor.line };
-  const wholesale = reexportsWholesale(head);
-
-  return {
-    ruleId: REMOVED_EXPORT_RULE_ID,
-    category: "correctness",
-    family: "api_contract",
-    claim:
-      `\`${exported.name}\` was exported from ${path} at the base revision and no longer appears ` +
-      `in its exported ${exported.namespace} surface.`,
-    causal: {
-      anchor: location,
-      steps: [
-        `${path} exported \`${exported.name}\` at the base revision.`,
-        `The changed file no longer names \`${exported.name}\` among its exports.`,
-        wholesale
-          ? `${path} re-exports another module wholesale, which may or may not still expose \`${exported.name}\`.`
-          : `No re-export in ${path} restores the name.`,
-      ],
-      trigger: `importing \`${exported.name}\` from ${path}`,
-      consequence:
-        "consumers written against the previous public surface no longer compile",
-    },
-    remediation: `Re-export \`${exported.name}\` from ${path}, or record the removal as an intentional breaking change.`,
-    counterfactual: {
-      existsWithoutChange: false,
-      because: "the export was present at the base revision",
-    },
-    proposedSeverity: "medium",
-    // A syntactic surface comparison is real support and not proof: it cannot
-    // see through `export *`, which is precisely what the verifier resolves.
-    confidenceScore: wholesale ? 0.4 : 0.6,
-    location,
-    evidence: [
-      {
-        type: "static_analysis",
-        strength: "supporting",
-        observation: `\`${exported.name}\` appears in the base revision's exported ${exported.namespace} surface of ${path}.`,
-        location,
-      },
-      {
-        type: "static_analysis",
-        strength: "supporting",
-        observation: `\`${exported.name}\` does not appear in the changed file's exported names.`,
-        location,
-      },
-      {
-        type: "static_analysis",
-        strength: "supporting",
-        observation: `The published location is established evidence: ${anchor.because}.`,
-        location,
-      },
-    ],
-    identityHint: `${path}:${exported.name}:${exported.namespace}:removed-export`,
-    clusterId,
-  };
 }
 
 // ---------------------------------------------------------------------------

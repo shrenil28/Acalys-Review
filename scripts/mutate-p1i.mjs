@@ -20,6 +20,7 @@
 import { execFile, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
+  existsSync,
   readFileSync,
   writeFileSync,
   mkdtempSync,
@@ -2143,7 +2144,7 @@ const ALL_MUTATIONS = [
     file: "packages/review-engine/src/verification/compatibility-probe.ts",
     find: "  if (!options.headFiles.has(options.boundaryPath)) {",
     replace: "  if (false as boolean) {",
-    suite: "packages/review-engine/tests/compatibility-verifier.test.ts",
+    suite: "packages/review-engine/tests/export-reachability.test.ts",
   },
   {
     id: 236,
@@ -2151,7 +2152,7 @@ const ALL_MUTATIONS = [
     file: "packages/review-engine/src/verification/compatibility-probe.ts",
     find: "    relevant: probeLocal.filter((diagnostic) =>\n      options.recognisedCodes.has(diagnostic.code),\n    ),",
     replace: "    relevant: probeLocal.filter(() => true),",
-    suite: "packages/review-engine/tests/compatibility-verifier.test.ts",
+    suite: "packages/review-engine/tests/export-reachability.test.ts",
   },
   {
     id: 237,
@@ -2184,7 +2185,7 @@ const ALL_MUTATIONS = [
     find: '    if (provenance.resolution === "absent") return undefined;',
     replace:
       '    if (provenance.resolution === "absent") return { abstain: "absent" };',
-    suite: "apps/review-worker/tests/m31-removed-export.test.ts",
+    suite: "apps/review-worker/tests/m34-export-reachability.test.ts",
   },
   {
     id: 242,
@@ -2192,7 +2193,7 @@ const ALL_MUTATIONS = [
     file: "packages/review-engine/src/correctness/api-compatibility.ts",
     find: '    if ("abstain" in base) {',
     replace: "    if (false as boolean) {",
-    suite: "apps/review-worker/tests/m31-removed-export.test.ts",
+    suite: "apps/review-worker/tests/m34-export-reachability.test.ts",
   },
   {
     id: 243,
@@ -2200,7 +2201,7 @@ const ALL_MUTATIONS = [
     file: "packages/review-engine/src/correctness/api-compatibility.ts",
     find: '    if (item.kind !== "source_file") continue;\n    if (item.reason !== "changed_hunk") continue;',
     replace: "",
-    suite: "apps/review-worker/tests/m31-removed-export.test.ts",
+    suite: "apps/review-worker/tests/m34-export-reachability.test.ts",
   },
   {
     id: 244,
@@ -2248,53 +2249,37 @@ const ALL_MUTATIONS = [
     file: "packages/review-engine/src/verification/compatibility-route.ts",
     find: "  if (context.comparison === undefined) return abstain();",
     replace: "",
-    suite: "apps/review-worker/tests/m31-removed-export.test.ts",
+    suite: "apps/review-worker/tests/m34-export-reachability.test.ts",
   },
   {
     id: 250,
-    name: "M.3.3 the published anchor reverts to the hardcoded line 1",
-    file: "packages/review-engine/src/correctness/api-compatibility.ts",
-    find: "  const location = { path, startLine: anchor.line, endLine: anchor.line };",
-    replace: "  const location = { path, startLine: 1, endLine: 1 };",
-    suite: "apps/review-worker/tests/m33-anchor.test.ts",
-  },
-  {
-    id: 251,
-    name: "M.3.3 a finding with no established anchor is published anyway",
-    file: "packages/review-engine/src/correctness/api-compatibility.ts",
-    find: '      if (anchor.kind !== "exact_head") {',
-    replace: "      if (false as boolean) {",
-    suite: "apps/review-worker/tests/m33-anchor.test.ts",
-  },
-  {
-    id: 252,
-    name: "M.3.3 a base-side line is published as a head-side line",
-    file: "packages/review-engine/src/correctness/api-compatibility.ts",
-    find: '      kind: "exact_base",',
-    replace: '      kind: "exact_head",',
+    name: "M.3.4 the head anchor reverts to a hardcoded line 1",
+    file: "packages/review-engine/src/correctness/export-reachability.ts",
+    find: "      line: head,",
+    replace: "      line: 1,",
     suite: "apps/review-worker/tests/m33-anchor.test.ts",
   },
   {
     id: 254,
-    name: "M.3.3 the wholesale re-export is not treated as the boundary",
-    file: "packages/review-engine/src/correctness/api-compatibility.ts",
-    find: "  const wholesaleLine = wholesaleReexportLine(head);",
-    replace: "  const wholesaleLine: number | undefined = undefined;",
+    name: "M.3.4 the wholesale re-export is not treated as the boundary",
+    file: "packages/review-engine/src/correctness/export-reachability.ts",
+    find: "  const wholesale = wholesaleLine(source.head);",
+    replace: "  const wholesale: number | undefined = undefined;",
     suite: "apps/review-worker/tests/m33-anchor.test.ts",
   },
   {
     id: 255,
-    name: "M.3.3 the internal declaration is used instead of the export statement",
-    file: "packages/review-engine/src/correctness/api-compatibility.ts",
-    find: "  for (const statement of source.statements) {\n    if (!ts.isExportDeclaration(statement)) continue;\n    const clause = statement.exportClause;",
+    name: "M.3.4 the declaration outranks the export statement",
+    file: "packages/review-engine/src/correctness/export-reachability.ts",
+    find: "      ts.isNamedExports(statement.exportClause) &&\n      statement.exportClause.elements.some(",
     replace:
-      "  for (const statement of source.statements) {\n    if (true as boolean) continue;\n    const clause = statement.exportClause;",
+      "      (false as boolean) &&\n      ts.isNamedExports(statement.exportClause) &&\n      statement.exportClause.elements.some(",
     suite: "apps/review-worker/tests/m33-anchor.test.ts",
   },
   {
     id: 256,
-    name: "M.3.3 the anchor's own provenance is dropped from the finding",
-    file: "packages/review-engine/src/correctness/api-compatibility.ts",
+    name: "M.3.4 the anchor's own provenance is dropped from the finding",
+    file: "packages/review-engine/src/correctness/export-reachability.ts",
     find: '      {\n        type: "static_analysis",\n        strength: "supporting",\n        observation: `The published location is established evidence: ${anchor.because}.`,\n        location,\n      },\n',
     replace: "",
     suite: "apps/review-worker/tests/m33-anchor.test.ts",
@@ -2833,6 +2818,24 @@ if (!process.argv.includes("--preflight-only")) {
     const mutated = source.replace(mutation.find, mutation.replace);
     if (mutated === source) {
       problems.push(`#${id} "${mutation.name}": applying it changes nothing`);
+      continue;
+    }
+
+    // The evidence route, not just the target.
+    //
+    // A mutation whose declared suite has been renamed or deleted still
+    // preflights perfectly: its anchor is unique, its edit changes source, and
+    // nothing about the file it points at is examined. It then reports INVALID
+    // after a full run has already paid for it, and — worse — it looked
+    // protected the whole time it was not.
+    //
+    // That happened here. Retiring M.3.1 renamed its witness file, and four
+    // mutations kept pointing at the old path through a clean preflight.
+    // Anchor rot and route rot are the same failure wearing different clothes.
+    if (!existsSync(join(ROOT, mutation.suite))) {
+      problems.push(
+        `#${id} "${mutation.name}": declared suite ${mutation.suite} does not exist`,
+      );
     }
   }
 
@@ -2853,7 +2856,7 @@ if (!process.argv.includes("--preflight-only")) {
   console.log(
     `Mutation manifest preflight: ${String(total)} declared, ` +
       `${String(total)} matched uniquely, ${String(total)} change source, ` +
-      `0 invalid before execution.\n`,
+      `${String(total)} declared suites present, 0 invalid before execution.\n`,
   );
 
   // `--preflight-only` validates the manifest without running anything. The

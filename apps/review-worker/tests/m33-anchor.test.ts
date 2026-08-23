@@ -160,6 +160,17 @@ describe("the anchor follows the public boundary, not an internal declaration", 
     const { removals } = await review(base, head);
 
     expect(removals).toHaveLength(1);
-    expect(removals[0]?.location.startLine).toBe(3);
+    // Side as well as line, because they coincide here. The base
+    // `export { decode };` and the head `export * from "./impl";` both sit on
+    // line 3, so a resolver that skipped the wholesale branch and fell through
+    // to the base statement would produce the same number on the other side of
+    // the diff — right coordinate, wrong revision, and invisible to a
+    // line-only assertion.
+    expect(removals[0]?.location).toEqual({
+      path: PATH,
+      startLine: 3,
+      endLine: 3,
+      side: "head",
+    });
   });
 });

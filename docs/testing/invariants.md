@@ -487,3 +487,64 @@ participates at all. Hold `contextDigest` identical across the two, and
 assert the converse as well — identical semantic inputs must produce an
 identical key — or the entry can be satisfied by mixing in entropy, which
 defeats caching entirely while passing every difference assertion.
+
+## 14. A mutation guarantee is live only if its evidence route is live
+
+Two ways a mutation manifest has now failed in this project, both producing
+the same outcome:
+
+```
+P1-L   definitions existed, the loader loaded none
+       -> protection existed only nominally
+
+P1-M.3.4  definitions loaded, their declared test route had moved
+          -> protection existed only nominally
+```
+
+The second is the subtler one, because everything a preflight checked was
+true. Anchors were unique, edits changed source, nothing was stale about the
+_target_. What had rotted was the path from the mutation to the assertion that
+would catch it.
+
+So the rule is broader than anchor validity:
+
+> A mutation defends something only when its mutation, its target, and its
+> declared evidence route are all live on the current tree.
+
+### What preflight must therefore check
+
+```
+source target exists
+anchor applies uniquely
+the edit changes source
+the declared suite exists
+```
+
+The last line is the one this cost a full harness run to learn. Four mutations
+passed a clean preflight and reported INVALID only after the expensive run had
+already paid for them — and, worse, they had looked protected for as long as
+the rename had been in place.
+
+### Supersession is when this rots
+
+A capability that replaces another moves code and tests at the same time.
+Mutations pointing at either will silently detach, and a targeted band cannot
+notice: it runs the new mutations, which are fine. Only the full historical
+harness runs the old ones.
+
+That is the argument for running it after every supersession, not only after
+new capability work.
+
+### Retarget by guarantee, never by identifier
+
+When the old target is gone, the question is not how to keep the id alive:
+
+```
+guarantee survives, nothing newer defends it   -> retarget
+guarantee survives, a newer mutation defends it -> retire as duplicate
+guarantee belonged to deleted code only         -> retire
+guarantee should survive but does not           -> implementation defect
+```
+
+Mutation count is not the invariant. Semantic protection is, and a manifest
+that shrinks because two entries defended one guarantee has improved.

@@ -9,6 +9,8 @@
 
 import { describe, expect, it } from "vitest";
 
+import { ALL_ANALYZER_IDS } from "../src/index.js";
+
 import {
   EXPORT_REACHABILITY_CODES,
   resolvePublicBoundary,
@@ -265,5 +267,28 @@ describe("only probe-local, recognised diagnostics establish anything", () => {
         },
       ).kind,
     ).toBe("rejected");
+  });
+});
+
+describe("the retirement of removed_export is structural", () => {
+  it("leaves no reachable trace of the superseded capability", async () => {
+    // A dormant implementation is worse than a deleted one: it keeps its
+    // mutations looking defended while they defend nothing, and it invites a
+    // later change to register it again. `depcruise` cannot see this, because
+    // it reasons about module reachability and the module that held this body
+    // is still reachable through M.3.2.
+    const engine = await import("../src/index.js");
+
+    expect("REMOVED_EXPORT_RULE_ID" in engine).toBe(false);
+    expect("analyzeRemovedExport" in engine).toBe(false);
+    expect("EXPORT_REACHABILITY_RULE_ID" in engine).toBe(true);
+    expect("analyzeExportReachability" in engine).toBe(true);
+  });
+
+  it("registers exactly one generation of the capability", () => {
+    const ids = [...ALL_ANALYZER_IDS];
+
+    expect(ids).toContain("acalys.correctness.public-export-reachability-loss");
+    expect(ids).not.toContain("acalys.correctness.removed-export");
   });
 });
