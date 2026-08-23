@@ -74,6 +74,8 @@ type ConfigFacts = NonNullable<
 import { analyzeAsyncCompletion } from "@acalys/review-engine";
 import {
   analyzeExactOptionalWrite,
+  analyzeRemovedExport,
+  analyzeRequiredParameterAdded,
   analyzeSignatureCompatibility,
   analyzeSwallowedErrors,
 } from "@acalys/review-engine";
@@ -520,6 +522,8 @@ export async function runRealAnalysis(
         analyzeSwallowedErrors(input),
         analyzeSignatureCompatibility(input),
         analyzeExactOptionalWrite(input),
+        analyzeRemovedExport(input),
+        analyzeRequiredParameterAdded(input),
       ];
 
       return {

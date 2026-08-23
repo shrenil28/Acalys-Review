@@ -37,6 +37,9 @@ import { verifyAsyncCallbackContract } from "./callback.js";
 import { verifyConditionValue } from "./condition.js";
 import { verifyExceptionFlow } from "./exception.js";
 import { verifyExactOptionalWrite } from "./exact-optional.js";
+import { verifyRemovedExport } from "./removed-export.js";
+import { verifyRequiredParameterAdded } from "./required-parameter.js";
+import { adjudicateCompatibility } from "./compatibility-route.js";
 import { verifySignatureCompatibility } from "./signature.js";
 import { assertReasonForCapability, assessCompetence } from "./competence.js";
 import {
@@ -245,6 +248,42 @@ function observeSite(
  * `inconclusive`. A verifier that rejected what it could not parse would
  * suppress every finding from the next analyzer anyone writes.
  */
+/**
+ * The export name and namespace, read back out of the claim.
+ *
+ * The claim is the interface between the two stages. Passing a structured
+ * payload from analyzer to verifier would be the convenient design and the
+ * wrong one: it would let the analyzer hand over conclusions the claim does
+ * not state, and the verifier would be adjudicating something a reader of the
+ * finding never saw.
+ */
+function parseRemovedExportClaim(
+  statement: string,
+):
+  | { readonly exportName: string; readonly namespace: "value" | "type" }
+  | undefined {
+  const match =
+    /^`([^`]+)` was exported from .* and no longer appears in its exported (value|type) surface\.$/.exec(
+      statement,
+    );
+  if (match?.[1] === undefined || match[2] === undefined) return undefined;
+  return {
+    exportName: match[1],
+    namespace: match[2] === "type" ? "type" : "value",
+  };
+}
+
+function parseRequiredParameterClaim(
+  statement: string,
+): { readonly exportName: string; readonly baseArity: number } | undefined {
+  const match =
+    /^`([^`]+)` accepted (\d+) required argument\(s\) at the base revision/.exec(
+      statement,
+    );
+  if (match?.[1] === undefined || match[2] === undefined) return undefined;
+  return { exportName: match[1], baseArity: Number(match[2]) };
+}
+
 export function verifyDeterministically(
   input: VerificationInput,
   context: VerificationContext,
@@ -358,6 +397,54 @@ export function verifyDeterministically(
 
     assertReasonsSupport(attempt.decision, attempt.reasons);
     assertReasonForCapability("exact_optional_property_write", attempt.reasons);
+    return attempt;
+  }
+
+  if (
+    competence.kind === "supported" &&
+    competence.capability === "removed_export"
+  ) {
+    const attempt = adjudicateCompatibility({
+      input,
+      context,
+      capability: "removed_export",
+      run: (revisions) => {
+        const parsed = parseRemovedExportClaim(input.claim.statement);
+        if (parsed === undefined) return undefined;
+        return verifyRemovedExport(
+          { boundaryPath: input.location.path, ...parsed },
+          revisions,
+        );
+      },
+      verifiedReason: "public_export_unreachable_at_head",
+      rejectedReason: "public_export_still_reachable",
+    });
+    assertReasonsSupport(attempt.decision, attempt.reasons);
+    assertReasonForCapability("removed_export", attempt.reasons);
+    return attempt;
+  }
+
+  if (
+    competence.kind === "supported" &&
+    competence.capability === "required_parameter_added"
+  ) {
+    const attempt = adjudicateCompatibility({
+      input,
+      context,
+      capability: "required_parameter_added",
+      run: (revisions) => {
+        const parsed = parseRequiredParameterClaim(input.claim.statement);
+        if (parsed === undefined) return undefined;
+        return verifyRequiredParameterAdded(
+          { boundaryPath: input.location.path, ...parsed },
+          revisions,
+        );
+      },
+      verifiedReason: "base_valid_call_rejected_at_head",
+      rejectedReason: "base_valid_call_still_accepted",
+    });
+    assertReasonsSupport(attempt.decision, attempt.reasons);
+    assertReasonForCapability("required_parameter_added", attempt.reasons);
     return attempt;
   }
 

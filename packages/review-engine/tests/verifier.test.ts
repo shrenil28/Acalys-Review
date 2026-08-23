@@ -217,6 +217,123 @@ describe("Decision and reason must be compatible", () => {
   });
 });
 
+/**
+ * Real P1-M.3 verifications, used both as behaviour and as the reachability
+ * evidence for the five compatibility reason codes.
+ */
+function verifyCompatibility(options: {
+  readonly statement: string;
+  readonly path: string;
+  readonly head: Record<string, string>;
+  readonly base?: Record<string, string> | undefined;
+}): VerificationAttempt {
+  const input = inputFor({
+    claim: {
+      statement: options.statement,
+      steps: [],
+      trigger: "a consumer written against the base revision is compiled",
+      consequence: "the consumer no longer compiles",
+    },
+    location: { path: options.path, startLine: 1, endLine: 1 },
+    evidence: [],
+  });
+
+  const context = planVerificationContext({
+    verificationInput: input,
+    repository: repositoryOf(options.head),
+    ...(options.base === undefined
+      ? {}
+      : {
+          comparison: {
+            revisionId: "b".repeat(40),
+            files: new Map(Object.entries(options.base)),
+          },
+        }),
+  });
+
+  return verifyDeterministically(input, context);
+}
+
+const REMOVAL_CLAIM =
+  "`parse` was exported from src/parser.ts at the base revision and no longer appears in its exported value surface.";
+const ARITY_CLAIM =
+  "`save` accepted 1 required argument(s) at the base revision and now declares 2, so a call written against the previous contract may no longer compile.";
+const BASE_PARSER =
+  "export function parse(raw: string): number {\n  return Number(raw);\n}";
+
+describe("P1-M.3 compatibility verification", () => {
+  it("VERIFIES a removal a base-valid consumer can no longer perform", () => {
+    const attempt = verifyCompatibility({
+      statement: REMOVAL_CLAIM,
+      path: "src/parser.ts",
+      base: { "src/parser.ts": BASE_PARSER },
+      head: { "src/parser.ts": "export function other(): void {}" },
+    });
+
+    expect(decisionOf(attempt)).toBe("verified");
+    expect(reasonsOf(attempt)).toContain("public_export_unreachable_at_head");
+  });
+
+  it("REJECTS a removal the head revision still satisfies", () => {
+    const attempt = verifyCompatibility({
+      statement: REMOVAL_CLAIM,
+      path: "src/parser.ts",
+      base: { "src/parser.ts": BASE_PARSER },
+      head: {
+        "src/parser.ts": 'export { parse } from "./impl";',
+        "src/impl.ts": BASE_PARSER,
+      },
+    });
+
+    expect(decisionOf(attempt)).toBe("rejected");
+    expect(reasonsOf(attempt)).toContain("public_export_still_reachable");
+  });
+
+  it("VERIFIES an arity break against a base-valid call", () => {
+    const attempt = verifyCompatibility({
+      statement: ARITY_CLAIM,
+      path: "src/api.ts",
+      base: { "src/api.ts": "export function save(value: string): void {}" },
+      head: {
+        "src/api.ts":
+          "export function save(value: string, flush: boolean): void {}",
+      },
+    });
+
+    expect(decisionOf(attempt)).toBe("verified");
+    expect(reasonsOf(attempt)).toContain("base_valid_call_rejected_at_head");
+  });
+
+  it("REJECTS an arity claim when the new parameter is optional", () => {
+    const attempt = verifyCompatibility({
+      statement: ARITY_CLAIM,
+      path: "src/api.ts",
+      base: { "src/api.ts": "export function save(value: string): void {}" },
+      head: {
+        "src/api.ts":
+          "export function save(value: string, flush?: boolean): void {}",
+      },
+    });
+
+    expect(decisionOf(attempt)).toBe("rejected");
+    expect(reasonsOf(attempt)).toContain("base_valid_call_still_accepted");
+  });
+
+  it("abstains, never concludes, when no comparison revision was supplied", () => {
+    // The reading this forbids is "no base, so nothing was removed" — a
+    // negative conclusion drawn from a missing input, which is silent when it
+    // is wrong because the review simply comes back clean.
+    const attempt = verifyCompatibility({
+      statement: REMOVAL_CLAIM,
+      path: "src/parser.ts",
+      head: { "src/parser.ts": "export function other(): void {}" },
+    });
+
+    expect(decisionOf(attempt)).toBe("inconclusive");
+    expect(reasonsOf(attempt)).toContain("comparison_revision_unavailable");
+  });
+});
+
 describe("Every reason code is reachable", () => {
   it("is exercised by a real verification, not merely declared", () => {
     // A reason nothing can produce is a vocabulary entry that will be misused
@@ -227,6 +344,56 @@ describe("Every reason code is reachable", () => {
     };
 
     record(verify({ "src/caller.ts": CALLER, "src/store.ts": ASYNC_STORE }));
+
+    // P1-M.3, produced by real verifications rather than asserted into the set.
+    record(
+      verifyCompatibility({
+        statement: REMOVAL_CLAIM,
+        path: "src/parser.ts",
+        base: { "src/parser.ts": BASE_PARSER },
+        head: { "src/parser.ts": "export function other(): void {}" },
+      }),
+    );
+    record(
+      verifyCompatibility({
+        statement: REMOVAL_CLAIM,
+        path: "src/parser.ts",
+        base: { "src/parser.ts": BASE_PARSER },
+        head: {
+          "src/parser.ts": 'export { parse } from "./impl";',
+          "src/impl.ts": BASE_PARSER,
+        },
+      }),
+    );
+    record(
+      verifyCompatibility({
+        statement: ARITY_CLAIM,
+        path: "src/api.ts",
+        base: { "src/api.ts": "export function save(value: string): void {}" },
+        head: {
+          "src/api.ts":
+            "export function save(value: string, flush: boolean): void {}",
+        },
+      }),
+    );
+    record(
+      verifyCompatibility({
+        statement: ARITY_CLAIM,
+        path: "src/api.ts",
+        base: { "src/api.ts": "export function save(value: string): void {}" },
+        head: {
+          "src/api.ts":
+            "export function save(value: string, flush?: boolean): void {}",
+        },
+      }),
+    );
+    record(
+      verifyCompatibility({
+        statement: REMOVAL_CLAIM,
+        path: "src/parser.ts",
+        head: { "src/parser.ts": "export function other(): void {}" },
+      }),
+    );
     // A claim no procedure adjudicates. Added when the competence boundary
     // landed: the verifier now abstains on a claim family it has no way to
     // settle, and that abstention has its own reason precisely so it is not

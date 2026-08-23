@@ -621,6 +621,18 @@ function baseRevisionCandidates(
       kind: "base_revision",
       path: base.path,
       reason: "base_revision",
+      // Keyed by revision, not by span.
+      //
+      // Deduplication identity defaults to `path|startLine|endLine`, and a
+      // base revision carries no span — so it collided with the changed
+      // file's own full-text candidate, which has no span either. Whichever
+      // was generated first claimed the key and the other was discarded
+      // silently. That cost every changed file with a base revision its head
+      // text, for every analyzer, with no omission recorded anywhere.
+      //
+      // Two revisions of one path are never the same item, whatever their
+      // spans say.
+      deduplicationKey: `base_revision|${base.path}`,
       // Repository text, not authored guidance: it must never be able to
       // instruct the reviewer, only to be compared against.
       trust: "repository_source",
@@ -1498,6 +1510,11 @@ export function assembleContext(
       covering !== undefined &&
       candidate.kind !== "instruction" &&
       candidate.kind !== "coverage" &&
+      // Never collapse a base revision into a pointer at head text, or the
+      // reverse. The two can be byte-identical — an unchanged file — and
+      // replacing one with "see the other" would hand a comparison capability
+      // one revision twice and a guarantee that nothing ever changed.
+      candidate.kind !== "base_revision" &&
       candidate.content !== "" &&
       covering.includes(candidate.content)
     ) {

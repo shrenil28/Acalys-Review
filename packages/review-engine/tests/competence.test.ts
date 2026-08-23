@@ -262,6 +262,14 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
         "`send()` is called without `b`, which this change made required.",
         ["the declaration gained a required parameter"],
       ],
+      removed_export: [
+        "`parse` was exported from src/parser.ts at the base revision and no longer appears in its exported value surface.",
+        ["src/parser.ts exported `parse` at the base revision"],
+      ],
+      required_parameter_added: [
+        "`save` accepted 1 required argument(s) at the base revision and now declares 2, so a call written against the previous contract may no longer compile.",
+        ["`save` required 1 argument(s) at the base revision"],
+      ],
       exception_flow: [
         "This `catch` discards the error and does nothing.",
         ["the guarded operation can throw", "the failure is not observed"],

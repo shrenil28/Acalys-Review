@@ -75,6 +75,25 @@ export const VERIFICATION_CAPABILITIES = [
    */
   "exact_optional_property_write",
   /**
+   * Whether a public export reachable at the base revision is still reachable
+   * through the same consumer-visible boundary at head.
+   *
+   * Covers **reachability through a named boundary**, not the survival of a
+   * declaration. A declaration that moved behind a preserved re-export has not
+   * broken anything, and this capability must be able to say so.
+   */
+  "removed_export",
+  /**
+   * Whether a call shape the base contract accepted still compiles at head.
+   *
+   * Covers **positional required arity on an exported callable** and nothing
+   * else. Return-type variance, parameter-type variance, generic constraints,
+   * `this` parameters, constructors and overrides are separate propositions;
+   * naming this one after signature compatibility generally would claim
+   * coverage it does not have.
+   */
+  "required_parameter_added",
+  /**
    * Whether an asynchronous value produced at a call site is consumed.
    *
    * Covers "the promise is discarded", "the rejection is never handled", and
@@ -175,6 +194,18 @@ export const REASONS_BY_CAPABILITY: Readonly<
     "governing_compiler_rejects_write",
     "governing_compiler_permits_write",
     "governing_project_unavailable",
+    "context_incomplete",
+  ],
+  removed_export: [
+    "public_export_unreachable_at_head",
+    "public_export_still_reachable",
+    "comparison_revision_unavailable",
+    "context_incomplete",
+  ],
+  required_parameter_added: [
+    "base_valid_call_rejected_at_head",
+    "base_valid_call_still_accepted",
+    "comparison_revision_unavailable",
     "context_incomplete",
   ],
   async_callback_contract: [
@@ -295,6 +326,25 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     // address it.
     patterns: [/\bexactOptionalPropertyTypes\b/],
     dominates: [],
+  },
+  {
+    id: "removed_export",
+    capability: "removed_export",
+    declines: undefined,
+    // Anchored on the base-revision comparison, which is what makes this a
+    // compatibility claim rather than an opinion about a missing symbol.
+    patterns: [/no longer appears in its exported \w+ surface/],
+    dominates: ["signature_compatibility"],
+  },
+  {
+    id: "required_parameter_added",
+    capability: "required_parameter_added",
+    declines: undefined,
+    // Distinct from `signature_compatibility`, which is about a named in-repo
+    // call site. This one is about the published contract, and the two reach
+    // different verifiers on purpose.
+    patterns: [/required argument\(s\) at the base revision/],
+    dominates: ["signature_compatibility"],
   },
   {
     id: "external_semantics",

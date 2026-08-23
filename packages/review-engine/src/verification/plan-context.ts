@@ -111,6 +111,8 @@ function looksLikeTestFor(path: string, subject: string): boolean {
 export function planVerificationContext(request: {
   readonly verificationInput: VerificationInput;
   readonly repository: RepositorySnapshot;
+  /** The revision to compare against, for capabilities that need one. */
+  readonly comparison?: RepositorySnapshot | undefined;
   readonly policy?: VerificationPolicy | undefined;
 }): VerificationContext {
   const policy = request.policy ?? DEFAULT_VERIFICATION_POLICY;
@@ -185,6 +187,18 @@ export function planVerificationContext(request: {
     // Over what was actually shown, not over what was intended.
     digest: digestOf(items, policy, repository.revisionId),
     incomplete,
+    revision: {
+      revisionId: repository.revisionId,
+      files: repository.files,
+    },
+    ...(request.comparison === undefined
+      ? {}
+      : {
+          comparison: {
+            revisionId: request.comparison.revisionId,
+            files: request.comparison.files,
+          },
+        }),
   };
 }
 

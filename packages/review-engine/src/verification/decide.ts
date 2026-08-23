@@ -60,6 +60,19 @@ export const VERIFICATION_REASONS = [
   "governing_compiler_rejects_write",
   "governing_compiler_permits_write",
   "governing_project_unavailable",
+  // P1-M.3. Both capabilities adjudicate by compiling a consumer that was
+  // proven valid against the base revision, so their reasons are stated in
+  // terms of that consumer rather than of a declaration.
+  "public_export_unreachable_at_head",
+  "public_export_still_reachable",
+  "base_valid_call_rejected_at_head",
+  "base_valid_call_still_accepted",
+  // Covers every way the comparison itself could not be carried out: the base
+  // revision was not established, a boundary was missing from a snapshot, or
+  // the synthetic consumer was not valid against the base. All of them mean
+  // nothing was learned about the change, which is a different statement from
+  // the change being safe.
+  "comparison_revision_unavailable",
   "evidence_supports_claim",
   "independent_context_confirms",
   "claim_contradicted_by_context",
@@ -176,6 +189,16 @@ export const REASON_SUPPORTS: Readonly<
   governing_compiler_permits_write: "rejected",
   // The project could not be built, so nothing was learned either way.
   governing_project_unavailable: "inconclusive",
+  // A consumer valid against base stopped compiling. The break is exhibited,
+  // not inferred from a declaration diff.
+  public_export_unreachable_at_head: "verified",
+  base_valid_call_rejected_at_head: "verified",
+  // REFUTATIONS. The same consumer still compiles, so the contract survived —
+  // a re-export was preserved, or the new parameter was optional. Reporting
+  // these as inconclusive would make the analyzer uncontradictable.
+  public_export_still_reachable: "rejected",
+  base_valid_call_still_accepted: "rejected",
+  comparison_revision_unavailable: "inconclusive",
   evidence_supports_claim: "verified",
   independent_context_confirms: "verified",
 
@@ -318,6 +341,44 @@ export interface VerificationContext {
   readonly digest: string;
   /** True when the planner could not supply something it wanted. */
   readonly incomplete: boolean;
+  /**
+   * The revision this review compares against, when there is one.
+   *
+   * Carried separately from `items` rather than mixed into them. The items are
+   * what the claim is *about*; this is the other side of a comparison, and a
+   * verifier that read base text out of the same list would have no way to
+   * tell which revision a given file came from — which is the one distinction
+   * a compatibility procedure cannot afford to lose.
+   *
+   * Absent for head-only reviews. A comparison capability asked to adjudicate
+   * without it must abstain, never conclude that nothing changed.
+   */
+  readonly comparison?:
+    | {
+        readonly revisionId: string;
+        readonly files: ReadonlyMap<string, string>;
+      }
+    | undefined;
+  /**
+   * The head revision in full, for procedures that must resolve modules.
+   *
+   * Distinct from `items`, and the distinction is load-bearing. `items` is
+   * what a *reader* of the claim was shown: selected, budgeted, and scoped to
+   * the claimed location and its cited evidence. A compatibility probe does
+   * not read — it compiles, and module resolution follows imports wherever
+   * they go. Handing it the reading selection produces a program missing the
+   * files an `export *` points at, which resolves to nothing and reports a
+   * removal that did not happen.
+   *
+   * This is M.2's `#214` in another place: a verifier silently compiling
+   * against a smaller world than the one under review.
+   */
+  readonly revision?:
+    | {
+        readonly revisionId: string;
+        readonly files: ReadonlyMap<string, string>;
+      }
+    | undefined;
 }
 
 /**

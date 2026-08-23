@@ -122,7 +122,19 @@ export const ALL_ANALYZER_IDS = [
   // the same line is correct in one project and wrong in another, so it reads
   // a demand-selected governing configuration.
   "acalys.correctness.exact-optional-property-write",
+  // P1-M.3. The first analyzers that cannot decide anything from the head
+  // revision alone: the same file is correct or broken depending only on what
+  // it used to export.
+  "acalys.correctness.removed-export",
+  "acalys.correctness.required-parameter-added",
 ] as const;
+
+export {
+  REMOVED_EXPORT_RULE_ID,
+  REQUIRED_PARAMETER_RULE_ID,
+  analyzeRemovedExport,
+  analyzeRequiredParameterAdded,
+} from "./correctness/api-compatibility.js";
 export * from "./verification/index.js";
 export * from "./publication/index.js";
 export * from "./premerge/index.js";
