@@ -432,3 +432,58 @@ which baseline and mutant differ. If none does under the current execution
 model, remove or retarget the mutation — or delete the dead code it targets —
 rather than building theatre around it. Three times in this project that
 answer has been "the code is dead" (invariant 10).
+
+## 13. Comparison identity belongs in the cache key, not in the context digest
+
+Stated generally, because the narrow version of it is what goes wrong:
+
+```
+if analyzer semantics may observe a comparison revision,
+that revision's identity participates DIRECTLY in the analyzer cache key
+```
+
+The failure this prevents is invisible in every test that does not construct
+it deliberately. An analyzer that compares a change against some earlier
+revision produces results that are a function of _both_ revisions. If the key
+covers only the head, then
+
+```
+base = A, head = H
+base = B, head = H
+```
+
+collide, and one of the two is served the other's findings. In practice that
+is a rebased pull request, or a branch retargeted from `main` onto a release
+branch, coming back reviewed and wrong.
+
+### The context digest cannot stand in for it
+
+The tempting argument is that comparison material shows up in the assembled
+context, so `contextDigest` already covers it. It does not. Comparison
+material is _offered_ to the planner and may be dropped by budget, by
+ablation, or by a selection rule — so two reviews against different bases can
+assemble byte-identical context and agree on every other entry in the key.
+The key must contain the **semantic input identity**, not whichever
+representation of it survived selection.
+
+### Name it for the comparison, not for a commit
+
+`baseSha` is the wrong shape even when it is the right value. A pull-request
+base and a merge base are different revisions, and a pipeline that later
+distinguishes them will have a key entry whose name asserts there is only
+one. Take the identity of the comparison material actually supplied: the
+revision, every path, the state each path resolved to, and the content.
+
+A commit identifier still belongs _inside_ that digest — not as a label, but
+because it appears in the citation each comparison item carries, so an
+analyzer reading that citation genuinely receives different input when it
+changes.
+
+### Testing it requires holding the context digest fixed
+
+A test that lets the context differ between the two bases can pass because
+the context differed, proving nothing about whether the comparison identity
+participates at all. Hold `contextDigest` identical across the two, and
+assert the converse as well — identical semantic inputs must produce an
+identical key — or the entry can be satisfied by mixing in entropy, which
+defeats caching entirely while passing every difference assertion.
