@@ -101,20 +101,28 @@ that simply disappeared has **no head statement to point at**, which is exactly
 why M.3.1's anchor resolution refused to produce one.
 
 ```
-exact_head    a head statement decides the name's visibility
-exact_base    only the base statement locates it   -> not inline eligible
-unavailable   no trustworthy coordinate            -> not inline eligible
+exact_head    a head statement decides the name's visibility  -> publish, head side
+exact_base    the deleted statement locates it exactly        -> publish, base side
+unavailable   neither side yields a trustworthy coordinate    -> withhold, record
 ```
 
-A genuine removal will frequently land in the second or third state. That is a
-correct outcome, not a failure: a verified break with no publishable anchor is
-withheld and recorded, never anchored at a fabricated line. Publishing removals
-inline needs base-side anchoring, which the publication surface does not have
-and which is separate work with its own evidence.
+**"No head coordinate" is not "no anchor".** A pure deletion is precisely the
+case where the truthful coordinate exists only in base, and a rule that
+withheld everything without a head statement would make this capability
+semantically correct and systematically unpublishable — losing recall at the
+publication stage for the defect class it exists to catch.
 
-Recording this now because it is the predictable disappointment of this
-checkpoint: recall may improve at the verifier while inline publication does
-not, and the honest response is to report both numbers rather than to invent a
+So the base side is a publishable coordinate, not a consolation. The
+publication surface gains a `side` on finding locations to carry it; the
+evaluation scorer already models sides, so only the producing half was
+missing.
+
+The invariant is unchanged and now has two legs rather than one:
+
+> Never invent an anchor. Use an exact old-side anchor when one genuinely
+> exists and the publication contract can carry it.
+
+`unavailable` still withholds and records, and still never falls back to a
 line.
 
 ## Scope
@@ -136,7 +144,7 @@ abstain and record.
 Development fixtures authored from this contract, not from Epoch 2:
 
 ```
-a name genuinely gone                          -> verified
+a name genuinely gone                          -> verified, base-side anchor
 a declaration moved, re-exported by name       -> rejected
 a declaration moved behind `export *`          -> proposed, then rejected
 reachable only through an internal module      -> verified at the entry point
@@ -149,6 +157,22 @@ Production witnesses through `runRealAnalysis`, at least one analyzer-proposes
 / verifier-rejects pair, a separate mutation band admitted only after targeted
 execution, survivors classified before anything is fixed, then the full
 historical mutation harness.
+
+**Supersession regression witnesses.** Retiring M.3.1 is only legitimate if
+M.3.4 subsumes every result M.3.1 defended, so each is re-proved by name and
+not left to aggregate recall:
+
+```
+the historical alias-rename case   still candidate, verified, anchored, published
+a named re-export preserved        still refuted
+`export *` preserving the symbol   still refuted
+a type export still type-reachable still not fabricated through value space
+```
+
+Condition 5 guards only the two L.5 baseline true positives. The obligation
+here is broader: **M.3.4 regresses no pre-M.3.4 portfolio true positive.**
+Mutations cover the supersession seam itself — removing the new registration,
+or restoring the rename-only predicate, must fail.
 
 ## Measurement
 
