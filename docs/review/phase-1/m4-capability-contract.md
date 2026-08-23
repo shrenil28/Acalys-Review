@@ -1,151 +1,187 @@
-# P1-M.4 — returned_value_usage
+# P1-M.4 — discarded_replacement_return
 
-Taxonomy rank 3. One historical miss: `binding-shadowed-validator-contract`.
+Supersedes the contract frozen at `8e9b754`, which contained a contradiction
+between its prose and its rule. Corrected before any source exists.
 
-Frozen before implementation, and frozen while Evaluation Epoch 2 is sealed and
-unseen. Nothing here is derived from Epoch 2.
+```
+semantic family    returned_value_usage      (taxonomy rank 3)
+capability         discarded_replacement_return
+```
 
-## The defect
+The family is not claimed. One capability inside it is.
+
+## The contradiction that forced this revision
+
+The superseded contract said, correctly, that validation-only calls must be
+refuted. Its verifier rule then said:
+
+```
+some return path yields a different value  ->  verified
+```
+
+For
+
+```ts
+function isValid(raw: string): boolean {
+  return raw.length > 0;
+}
+```
+
+every path returns a value different from `raw`, so the rule verifies exactly
+what the prose forbids. Prose loses to rules, because the rule is what gets
+implemented. Narrowing the capability is the fix, not a stricter adjective.
+
+## The defect this capability covers
 
 ```ts
 // base                          // head
-return validate(raw);
-validate(raw);
+return normalize(raw);
+normalize(raw);
 return raw;
 ```
 
-`validate` returns `raw.trim()`. The base returned the normalized value; the
-head returns the untrimmed input and throws the normalization away. The call
-still happens, so nothing looks unused — the loss is the _difference_ between
-what the callee produced and what the caller now returns.
+The callee returned a **replacement** for its input — a value the caller was
+meant to use _instead of_ what it passed in. The head throws that replacement
+away and returns the original. The call still happens, so nothing reads as
+unused; the loss is the difference between what came back and what is now
+returned.
 
-## What makes this hard, stated before it is convenient to forget
-
-Discarding a return value is not a defect. It is a defect only when the
-discarded value carried something the caller now loses. The taxonomy says so
-in its own rationale: the capability must distinguish **normalizers** from
-**validation-only** calls.
+## Analyzer — base to head, and deliberately ignorant of the callee
 
 ```
-validate(raw): string  -> returns raw.trim()   discarding LOSES the trim
-assertValid(raw): void -> throws or returns    discarding loses nothing
-isValid(raw): boolean  -> used for control     discarding is a different defect
-```
-
-A rule keying on "return value unused" would report all three. That is this
-family's version of M.2's `UndefinedKeyword` and M.3.2's parameter count: a
-cheap proxy that is not the semantics.
-
-## Analyzer — base to head, syntactic, no bindings
-
-The hypothesis, formed from changed syntax and the base revision M.3.0
-supplies:
-
-```
-BASE  the call's value was used        (returned, assigned, or passed on)
+BASE  the call's value was consumed   (returned, assigned, or passed on)
 HEAD  the same call is an expression statement, its value discarded
 ```
 
-Deliberately blind to what the callee does. It may not resolve the binding,
-consult the checker, or read the callee's body — those are the verifier's
-evidence, and an analyzer that used them would leave the second stage with
-nothing to disagree about.
+That is the whole hypothesis. It may not resolve the binding, consult the
+checker, or read the callee's body. It will therefore propose on void
+procedures, predicates and identity functions alike — which is what leaves the
+verifier something real to disagree with.
 
-It will therefore propose on validation-only calls. That is expected, and the
-refutation is the point.
+## Verifier — prove a replacement, not a difference
 
-## Verifier — the exact callee, and what it actually returns
-
-Independent evidence, in this order:
+Independent evidence, in order. Every step must be _established_; failure to
+establish any of them is `inconclusive`, never a verdict.
 
 ```
-1  resolve the EXACT binding of the callee through a revision-backed Program
-2  read its declared return type
-3  read its return statements
+1  resolve the EXACT callee binding in a revision-backed Program
+2  identify the input parameter the call passes
+3  the return type is compatible with REPLACING that input
+4  the returned expression is dataflow-derived from that input
+5  at least one successful return applies a non-identity transformation
 ```
 
-Adjudication:
+### Outcomes
 
 ```
-return type is void/undefined              -> rejected  (nothing was discarded)
-every return returns the argument unchanged -> rejected  (a pure validator)
-some return path yields a different value   -> verified  (a normalizer)
-the binding cannot be resolved              -> inconclusive
-the project cannot be reproduced            -> inconclusive
+void / no value returned                         -> rejected
+return is in a non-replacement domain
+  (string input, boolean or predicate result)    -> rejected for THIS capability
+every successful return is an identity alias
+  of the input                                   -> rejected
+replacement-compatible + derived from the input
+  + at least one non-identity transformation     -> verified
+binding, body, type or dataflow unestablished    -> inconclusive
+the verifier cannot execute at all               -> unavailable
 ```
 
-Step 1 is not ceremony. The historical case plants a same-named
-`validate(): boolean` in another module precisely so that a verifier resolving
-by name rather than by binding reaches the wrong declaration and returns the
-wrong verdict. Name matching is forbidden.
+Worked against the four shapes that matter:
 
-Steps 2 and 3 are what make the verifier able to say _no_. A pure validator
-whose every `return` hands back its own parameter is refuted on the callee's
-own text, not on a guess about intent.
-
-## Anchoring — M.3.3's invariant applies
-
-The published anchor is the changed call statement that discards the value. It
-exists in head, is established from syntax, and is not a constant.
-
-```
-exact_head    the discarding statement       -> inline eligible
-unavailable   no such statement in head      -> withheld and recorded
+```ts
+function normalize(raw: string): string { return raw.trim(); }   // VERIFIED
+function assertValid(raw: string): void { ... }                  // rejected: nothing returned
+function isValid(raw: string): boolean { return raw.length > 0 } // rejected: not a replacement
+function identity(raw: string): string { return raw; }           // rejected: identity only
 ```
 
-No fallback line. M.3.3's holdout false positive is the standing reminder that
-a semantically correct finding at the wrong line is still a broken review.
+### Dataflow, not identifier comparison
 
-## Scope
+Implementing step 4 or 5 as
 
-Covers a **direct call whose returned value was used at base and is discarded
-at head**. Explicitly out of scope, each a later capability with its own
-evidence: unused assignments, discarded promises (`async_value_use` already
-owns that), ignored error codes, unused destructured fields, and values
-discarded inside a callee rather than at a call site.
+```
+returnExpression !== parameterIdentifier
+```
+
+would be another `UndefinedKeyword`-class proxy. These must mean the same
+thing as their direct forms:
+
+```ts
+return raw;
+const result = raw;
+return result; // both identity
+
+return raw.trim();
+const normalized = raw.trim();
+return normalized; // both a transform
+```
+
+So local aliasing is followed. The test is whether the returned value is the
+input itself, however many names it travelled under, or something computed
+from it.
+
+### Binding resolution is load-bearing
+
+The historical case plants a same-named `validate(): boolean` in a different
+module. A verifier matching by name reaches the wrong declaration and returns
+the wrong verdict with full confidence. Name matching is forbidden; step 1 is
+resolution through the Program or it is `inconclusive`.
+
+## Deferred to later capabilities in this family
+
+Named now so they are not smuggled in later as "the same thing":
+
+```
+string -> number conversions whose result is discarded
+Result<T> and error-return protocols
+Promise<T>
+builder / fluent APIs returning `this`
+state-token returns
+status codes
+```
+
+Each needs its own evidence and its own refutations. One heuristic does not
+cover the family, and pretending otherwise is how a capability's precision
+quietly becomes someone else's problem.
+
+## Anchoring
+
+M.3.3's invariant applies unchanged. The anchor is the changed statement that
+discards the value, established from head syntax.
+
+```
+exact_head    the discarding statement    -> inline eligible
+unavailable   no such statement in head   -> withheld and recorded
+```
+
+No fallback line.
 
 ## Base states
 
-M.3.0's four, unchanged:
-
-```
-present        may compare
-absent         the file is new; no base usage existed to lose
-unavailable    abstain and record
-not_indexed    abstain and record
-```
-
-Never "no base, so nothing was discarded".
+M.3.0's four, unchanged. `absent` is a positive determination; `unavailable`
+and `not_indexed` abstain and record. Never "no base, so nothing was
+discarded".
 
 ## Evidence required before freeze
 
-Production witnesses through `runRealAnalysis` covering: the genuine
-normalizer discard; a `void` callee refuted; a pure validator refuted; a
+Production witnesses through `runRealAnalysis` for: the genuine replacement
+discard; a `void` callee refuted; a predicate callee refuted; an identity
+callee refuted; the alias-dataflow forms of both identity and transform; a
 same-named decoy in another module resolved correctly; each unestablished base
 state; an unreproducible project; and the natural-FP sentinel.
 
 At least one case where the analyzer proposes and the verifier returns
-`rejected` — a verifier mutated to always confirm must die.
+`rejected`. A verifier mutated to always confirm must die.
 
-A separate mutation band, each mutation admitted only after a unique anchor, a
-source-changing edit, and a targeted run that executed more than zero tests,
-skipped none, and failed on the intended assertion. Survivors classified
-before anything is fixed.
-
-Then the full historical mutation harness, because this capability shares
-comparison inputs, planning, cache identity, the analyzer registry, verifier
-routing and promotion with everything already frozen.
+A separate mutation band, targeted-executed before manifest admission,
+survivors classified before anything is fixed. Then the full historical
+mutation harness before source freeze.
 
 ## Measurement
 
-Development corpus only. Epoch 2 stays sealed until this capability's source
-is frozen, and is then opened once by the evaluator, not by the implementation
-side. A failing Epoch 2 is recorded and spent; it is never tuned against.
-
-Baseline this is measured against:
+Development corpus only. Evaluation Epoch 2 is sealed and unseen; it is opened
+once, by the evaluator, after this capability's source freeze. A failing
+Epoch 2 is recorded and spent, never tuned against.
 
 ```
-historical   5/12
-development   2/8
-published FP    0
+baseline   historical 5/12 · development 2/8 · published FP 0
 ```
