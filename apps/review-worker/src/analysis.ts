@@ -529,7 +529,10 @@ export async function runRealAnalysis(
       return {
         findings: results.flatMap((result) => result.findings),
         suppressions: results.flatMap((result) => result.suppressions),
-        degradations: [],
+        // Carried, not dropped. An analyzer that abstained because it could
+        // not establish an input has said something, and discarding it here
+        // makes the review look complete when it was not.
+        degradations: results.flatMap((result) => result.degradations),
       };
     },
   });

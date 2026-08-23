@@ -271,6 +271,49 @@ describe("witness 5 — the base revision was not established", () => {
     expect(removals(outcome.report.findings)).toEqual([]);
   });
 
+  it.each([
+    ["unavailable", { kind: "unavailable", because: "object store timeout" }],
+    ["not_indexed", { kind: "not_indexed" }],
+  ] as const)(
+    "records WHY it abstained when the base is %s",
+    async (_l, base) => {
+      // Silence is the failure mode. An empty result carrying no reason is
+      // indistinguishable from a clean review, which is the confusion the four
+      // base states exist to prevent.
+      const outcome = await review({
+        head: { [BOUNDARY]: ALIASED },
+        base,
+        baseSha: BASE_SHA,
+      });
+
+      expect(
+        outcome.report.degradations.some(
+          (entry) =>
+            entry.reason === "analyzer_abstained" &&
+            entry.detail.includes(BOUNDARY),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("records NO degradation for a new file, because that is knowledge", async () => {
+    // `absent` is a positive determination: the file did not exist, so
+    // nothing it declares can have been removed. Recording a degradation here
+    // would report a successful conclusion as a failure to reach one, and
+    // every new file in every pull request would look like a gap.
+    const outcome = await review({
+      head: { [BOUNDARY]: ALIASED },
+      base: { kind: "absent" },
+      baseSha: BASE_SHA,
+    });
+
+    expect(
+      outcome.report.degradations.filter(
+        (entry) => entry.reason === "analyzer_abstained",
+      ),
+    ).toEqual([]);
+  });
+
   it("produces no candidate when the file is new at head", async () => {
     // `absent` is positive knowledge: nothing it declares can have been
     // removed, because there was nothing to remove from.

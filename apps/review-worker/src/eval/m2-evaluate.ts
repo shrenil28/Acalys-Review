@@ -40,6 +40,7 @@ import {
 } from "@acalys/review-engine";
 
 import { runRealAnalysis } from "../analysis.js";
+import type { BaseRevisionResolution } from "@acalys/code-intelligence";
 import {
   M1_DEVELOPMENT_CASES,
   M1_HOLDOUT_CASES,
@@ -54,6 +55,41 @@ const REPOSITORY_ID = "0192f8a1-0000-7000-8000-00000000m2e0".replace(
   "0",
 );
 const REVISION = "a1".repeat(20);
+const BASE_REVISION = "b2".repeat(20);
+
+/**
+ * Rule ids whose outcomes are reported per capability.
+ *
+ * "M.3 found two things" is not a measurement. When recall does not move, the
+ * question is always which stage it stopped at — the analyzer never proposed,
+ * the verifier refuted, the evidence was unavailable, or publication withheld
+ * it — and a single total forces that attribution to be redone by hand every
+ * time.
+ */
+export const M1_TRACKED_CAPABILITIES: Readonly<Record<string, string>> = {
+  "acalys.correctness/removed-export": "removed_export",
+  "acalys.correctness/required-parameter-added": "required_parameter_added",
+};
+
+export interface CapabilityCounts {
+  candidates: number;
+  verified: number;
+  rejected: number;
+  inconclusive: number;
+  unavailable: number;
+  promoted: number;
+  published: number;
+}
+
+const emptyCounts = (): CapabilityCounts => ({
+  candidates: 0,
+  verified: 0,
+  rejected: 0,
+  inconclusive: 0,
+  unavailable: 0,
+  promoted: 0,
+  published: 0,
+});
 
 /**
  * Refuses to proceed if the sealed corpus is not the sealed corpus.
@@ -80,6 +116,8 @@ export interface M1CaseObservation {
   readonly published: boolean;
   /** Published findings that were not the expected one. */
   readonly unexpectedPublished: number;
+  /** Per-capability funnel counts, keyed by capability name. */
+  readonly byCapability: Readonly<Record<string, CapabilityCounts>>;
 }
 
 /** Whether a candidate lands where the case says the defect is. */
@@ -99,6 +137,7 @@ function matchesExpectation(
 function adjudicate(
   candidate: CandidateFinding,
   files: Readonly<Record<string, string>>,
+  baseFiles?: Readonly<Record<string, string>>,
 ): VerificationAttempt {
   const input = {
     candidateId: candidate.identityHint,
@@ -128,8 +167,32 @@ function adjudicate(
         revisionId: REVISION,
         files: new Map(Object.entries(files)),
       },
+      ...(baseFiles === undefined
+        ? {}
+        : {
+            comparison: {
+              revisionId: BASE_REVISION,
+              files: new Map(Object.entries(baseFiles)),
+            },
+          }),
     }),
   );
+}
+
+/**
+ * The base state for one changed path in an authored case.
+ *
+ * `absent` when the corpus supplies no base text, which for these fixtures
+ * means the file is new — a positive determination, not a failure to look.
+ */
+function baseStateFor(
+  entry: M1CapabilityCase,
+  path: string,
+): BaseRevisionResolution {
+  const content = entry.baseFiles[path];
+  return content === undefined
+    ? { kind: "absent" }
+    : { kind: "present", content };
 }
 
 /** Runs one authored case through the whole funnel. */
@@ -147,8 +210,15 @@ export async function observeCase(
             path: change.path,
             content: entry.headFiles[change.path] ?? "",
             changedLines: change.changedLines,
+            // The comparison revision, supplied for every case rather than
+            // only for the ones a comparison capability might fire on.
+            // Supplying it selectively would make "has a base" a property of
+            // the case rather than of the harness, and any difference in
+            // outcome would then be uninterpretable.
+            base: baseStateFor(entry, change.path),
           })),
           repository: new Map(Object.entries(entry.headFiles)),
+          baseSha: BASE_REVISION,
         }),
     },
   });
@@ -159,8 +229,27 @@ export async function observeCase(
   let publishedExpected = false;
   let unexpectedPublished = 0;
 
+  const byCapability: Record<string, CapabilityCounts> = {};
+  const track = (ruleId: string): CapabilityCounts | undefined => {
+    const name = M1_TRACKED_CAPABILITIES[ruleId];
+    if (name === undefined) return undefined;
+    byCapability[name] ??= emptyCounts();
+    return byCapability[name];
+  };
+
   for (const candidate of candidates) {
-    const attempt = adjudicate(candidate, entry.headFiles);
+    const counts = track(candidate.ruleId);
+    if (counts !== undefined) counts.candidates += 1;
+
+    const attempt = adjudicate(candidate, entry.headFiles, entry.baseFiles);
+
+    if (counts !== undefined) {
+      if (attempt.status !== "completed") counts.unavailable += 1;
+      else if (attempt.decision === "verified") counts.verified += 1;
+      else if (attempt.decision === "rejected") counts.rejected += 1;
+      else counts.inconclusive += 1;
+    }
+
     if (attempt.status !== "completed" || attempt.decision !== "verified") {
       continue;
     }
@@ -176,6 +265,7 @@ export async function observeCase(
       },
     ]);
     if (promotion.kind !== "promoted") continue;
+    if (counts !== undefined) counts.promoted += 1;
 
     const plan = planPublication(
       [
@@ -191,6 +281,7 @@ export async function observeCase(
     );
 
     const wouldPublish = plan.publish.length > 0;
+    if (counts !== undefined && wouldPublish) counts.published += 1;
     if (matchesExpectation(candidate, entry)) {
       verifiedExpected = true;
       if (wouldPublish) publishedExpected = true;
@@ -209,12 +300,34 @@ export async function observeCase(
     verified: verifiedExpected,
     published: publishedExpected,
     unexpectedPublished,
+    byCapability,
   };
 }
 
 export interface M1SplitObservation {
   readonly outcome: M1SplitOutcome;
   readonly cases: readonly M1CaseObservation[];
+  /** Summed per-capability funnel counts across the split. */
+  readonly byCapability: Readonly<Record<string, CapabilityCounts>>;
+}
+
+function sumCapabilities(
+  observations: readonly M1CaseObservation[],
+): Readonly<Record<string, CapabilityCounts>> {
+  const total: Record<string, CapabilityCounts> = {};
+  for (const observation of observations) {
+    for (const [name, counts] of Object.entries(observation.byCapability)) {
+      const existing = (total[name] ??= emptyCounts());
+      existing.candidates += counts.candidates;
+      existing.verified += counts.verified;
+      existing.rejected += counts.rejected;
+      existing.inconclusive += counts.inconclusive;
+      existing.unavailable += counts.unavailable;
+      existing.promoted += counts.promoted;
+      existing.published += counts.published;
+    }
+  }
+  return total;
 }
 
 async function observeSplit(
@@ -233,6 +346,7 @@ async function observeSplit(
       ),
     },
     cases: observations,
+    byCapability: sumCapabilities(observations),
   };
 }
 

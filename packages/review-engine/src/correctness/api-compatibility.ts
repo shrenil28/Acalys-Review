@@ -311,7 +311,7 @@ export function analyzeRemovedExport(
 ): AnalysisResult {
   const findings: CandidateFinding[] = [];
   const clusterId = input.clusterId ?? "cluster:unscoped";
-  const { sources } = comparableSources(input);
+  const { sources, degradations } = comparableSources(input);
 
   for (const source of sources) {
     const before = exportedNames(source.base);
@@ -332,7 +332,21 @@ export function analyzeRemovedExport(
     }
   }
 
-  return { findings, suppressions: [], degradations: [] };
+  // Reported, not discarded.
+  //
+  // A comparison capability that abstained because it could not establish the
+  // base is producing an empty result for a reason, and an empty result with
+  // no reason attached is indistinguishable from a clean review. That is the
+  // exact confusion M.3.0's four states exist to prevent, and dropping these
+  // would reintroduce it one layer up.
+  return {
+    findings,
+    suppressions: [],
+    degradations: degradations.map((entry) => ({
+      clusterId,
+      reason: `${entry.path}: ${entry.because}`,
+    })),
+  };
 }
 
 function removedExportCandidate(
@@ -402,7 +416,7 @@ export function analyzeRequiredParameterAdded(
 ): AnalysisResult {
   const findings: CandidateFinding[] = [];
   const clusterId = input.clusterId ?? "cluster:unscoped";
-  const { sources } = comparableSources(input);
+  const { sources, degradations } = comparableSources(input);
 
   for (const source of sources) {
     const before = exportedCallables(source.base);
@@ -432,7 +446,21 @@ export function analyzeRequiredParameterAdded(
     }
   }
 
-  return { findings, suppressions: [], degradations: [] };
+  // Reported, not discarded.
+  //
+  // A comparison capability that abstained because it could not establish the
+  // base is producing an empty result for a reason, and an empty result with
+  // no reason attached is indistinguishable from a clean review. That is the
+  // exact confusion M.3.0's four states exist to prevent, and dropping these
+  // would reintroduce it one layer up.
+  return {
+    findings,
+    suppressions: [],
+    degradations: degradations.map((entry) => ({
+      clusterId,
+      reason: `${entry.path}: ${entry.because}`,
+    })),
+  };
 }
 
 function requiredParameterCandidate(

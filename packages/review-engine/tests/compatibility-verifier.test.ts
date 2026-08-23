@@ -290,6 +290,58 @@ describe("M.3.2 — the base-validity premise", () => {
   });
 });
 
+describe("only probe-local, recognised diagnostics establish anything", () => {
+  it("ignores an unrelated error elsewhere in the head revision", () => {
+    // HEAD may be broken in ways that have nothing to do with this claim. A
+    // verifier that read any diagnostic — or counted them — would report a
+    // compatibility break every time the branch happened to be red.
+    const outcome = removal(
+      { [BOUNDARY]: EXPORTED },
+      {
+        [BOUNDARY]: EXPORTED,
+        "src/unrelated.ts": 'export const broken: number = "not a number";',
+      },
+    );
+
+    expect(outcome.kind).toBe("rejected");
+  });
+
+  it("ignores an unrelated error inside the boundary itself", () => {
+    const outcome = removal(
+      { [BOUNDARY]: EXPORTED },
+      {
+        [BOUNDARY]: `${EXPORTED}\nexport const wrong: number = "no";`,
+      },
+    );
+
+    expect(outcome.kind).toBe("rejected");
+  });
+
+  it("does not treat an unrecognised probe diagnostic as a removal", () => {
+    // A value export that became type-only. The base-shaped value probe now
+    // produces TS2693 — a real diagnostic, at the probe, of a code this
+    // capability does not recognise.
+    //
+    // M.3.1 is about reachability through the boundary, and the name is still
+    // exported. Value/type migration is a different proposition with its own
+    // evidence, so this REJECTS rather than quietly widening the capability
+    // through its diagnostic filter.
+    const outcome = verifyRemovedExport(
+      { boundaryPath: BOUNDARY, exportName: "Config", namespace: "value" },
+      {
+        baseFiles: files({
+          [BOUNDARY]: "export const Config = { a: 1 };",
+        }),
+        headFiles: files({
+          [BOUNDARY]: "export type Config = { a: number };",
+        }),
+      },
+    );
+
+    expect(outcome.kind).toBe("rejected");
+  });
+});
+
 describe("the recognised code sets stay disjoint and minimal", () => {
   it("removal recognises only the three reachability codes", () => {
     expect([...REMOVED_EXPORT_CODES].sort()).toEqual([2305, 2459, 2460]);

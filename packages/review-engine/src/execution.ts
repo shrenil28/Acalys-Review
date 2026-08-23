@@ -77,6 +77,12 @@ export const DEGRADATION_REASONS = [
   "reasoning_call_cap_reached",
   "deadline_exceeded",
   "analyzer_failed",
+  // An analyzer ran successfully and declined to answer, because an input it
+  // needed could not be established. Distinct from `analyzer_failed`, which is
+  // a defect, and from silence, which is what this existed to stop: a review
+  // that abstained and a review that found nothing are the same empty result
+  // until one of them says why.
+  "analyzer_abstained",
   "cancelled",
 ] as const;
 
@@ -328,6 +334,15 @@ export async function runAnalysis(
         const result = await options.analyzer({ cluster, allocation });
         findings.push(...result.findings);
         suppressions.push(...result.suppressions);
+        // What the analyzer declined to say, and why. Dropping these was how
+        // an abstention became indistinguishable from a clean review.
+        for (const degradation of result.degradations) {
+          degradations.push({
+            clusterId: degradation.clusterId,
+            reason: "analyzer_abstained",
+            detail: degradation.reason,
+          });
+        }
         analyzed += 1;
         options.cache?.set(fingerprint, result);
       } catch (error) {

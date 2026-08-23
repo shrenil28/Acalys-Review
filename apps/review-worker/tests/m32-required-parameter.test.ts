@@ -213,6 +213,61 @@ describe("witness 5 — an overload added beside a surviving one", () => {
   });
 });
 
+describe("the base contract's own arity is read correctly", () => {
+  /** Analyzes one base/head pair and returns the single M.3.2 candidate. */
+  async function candidateFor(base: string, head: string) {
+    const outcome = await review({
+      head: { [BOUNDARY]: head },
+      base: { kind: "present", content: base },
+      baseSha: BASE_SHA,
+    });
+    return arityFindings(outcome.report.findings)[0];
+  }
+
+  it("takes the NARROWEST overload at base, not the widest", async () => {
+    // A caller satisfied by any base overload is a caller whose code compiled.
+    // Reading the widest would understate what the base accepted, and the
+    // probe would then be built from a call the base never required.
+    const candidate = await candidateFor(
+      [
+        "export function save(value: string): void;",
+        "export function save(value: string, flush: boolean): void;",
+        "export function save(value: string, flush?: boolean): void {}",
+      ].join("\n"),
+      "export function save(value: string, flush: boolean, extra: number): void {}",
+    );
+
+    expect(candidate?.claim).toContain("accepted 1 required argument(s)");
+  });
+
+  it("does not count an optional base parameter as required", async () => {
+    const candidate = await candidateFor(
+      "export function save(value: string, flush?: boolean): void {}",
+      "export function save(value: string, flush: boolean, extra: number): void {}",
+    );
+
+    expect(candidate?.claim).toContain("accepted 1 required argument(s)");
+  });
+
+  it("does not count a defaulted base parameter as required", async () => {
+    const candidate = await candidateFor(
+      "export function save(value: string, flush: boolean = false): void {}",
+      "export function save(value: string, flush: boolean, extra: number): void {}",
+    );
+
+    expect(candidate?.claim).toContain("accepted 1 required argument(s)");
+  });
+
+  it("does not count a base rest parameter as required", async () => {
+    const candidate = await candidateFor(
+      "export function save(value: string, ...flush: boolean[]): void {}",
+      "export function save(value: string, flush: boolean, extra: number): void {}",
+    );
+
+    expect(candidate?.claim).toContain("accepted 1 required argument(s)");
+  });
+});
+
 describe("witness 6 — the base revision was not established", () => {
   it.each([
     ["unavailable", { kind: "unavailable", because: "object store timeout" }],
@@ -229,6 +284,33 @@ describe("witness 6 — the base revision was not established", () => {
 
     expect(arityFindings(outcome.report.findings)).toEqual([]);
   });
+
+  it.each([
+    ["unavailable", { kind: "unavailable", because: "object store timeout" }],
+    ["not_indexed", { kind: "not_indexed" }],
+  ] as const)(
+    "records WHY it abstained when the base is %s",
+    async (_l, base) => {
+      // Silence is the failure mode. An empty result with no reason attached is
+      // indistinguishable from a clean review, which is precisely the confusion
+      // the four base states exist to prevent.
+      const outcome = await review({
+        head: {
+          [BOUNDARY]: "export function save(v: string, f: boolean): void {}",
+        },
+        base,
+        baseSha: BASE_SHA,
+      });
+
+      expect(
+        outcome.report.degradations.some(
+          (entry) =>
+            entry.reason === "analyzer_abstained" &&
+            entry.detail.includes(BOUNDARY),
+        ),
+      ).toBe(true);
+    },
+  );
 });
 
 describe("witness 7 — no comparison revision reaches the verifier", () => {
