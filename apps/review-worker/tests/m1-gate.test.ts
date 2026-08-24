@@ -12,10 +12,13 @@
 
 import { describe, expect, it } from "vitest";
 
+import { render } from "@acalys/review-engine";
+
 import {
   BASELINE_PUBLISHED_TRUE_POSITIVES,
   evaluateM1Gate,
   renderM1Gate,
+  verifierCompletion,
   type M1FunnelMeasurement,
 } from "../src/eval/m1-gate.js";
 
@@ -54,7 +57,7 @@ function passing(): M1FunnelMeasurement {
     ],
     naturalFalsePositivesReplayed: 1,
     naturalFalsePositivesPublished: 0,
-    verifier: { rejects: [], inconclusive: 2, unavailable: 0 },
+    verifier: { expectedDefectOutcomes: [], inconclusive: 2, unavailable: 0 },
     capabilities: [
       {
         family: "configuration_sensitive_type_safety",
@@ -68,6 +71,11 @@ function passing(): M1FunnelMeasurement {
 
 const verdictFor = (patch: Partial<M1FunnelMeasurement>) =>
   evaluateM1Gate({ ...passing(), ...patch });
+
+const measurementWith = (patch: Partial<M1FunnelMeasurement>) => ({
+  ...passing(),
+  ...patch,
+});
 
 describe("the passing baseline is genuinely passing", () => {
   it("closes on a measurement that satisfies every condition", () => {
@@ -220,7 +228,7 @@ describe("each condition can refuse on its own", () => {
   it("6. refuses an incorrect verifier reject", () => {
     const verdict = verdictFor({
       verifier: {
-        rejects: [
+        expectedDefectOutcomes: [
           {
             kind: "incorrect_verifier_reject",
             caseId: "e2-some-in-scope-case",
@@ -236,7 +244,7 @@ describe("each condition can refuse on its own", () => {
 
   it("6. refuses verifier unavailability", () => {
     const verdict = verdictFor({
-      verifier: { rejects: [], inconclusive: 0, unavailable: 1 },
+      verifier: { expectedDefectOutcomes: [], inconclusive: 0, unavailable: 1 },
     });
     expect(verdict.failing).toEqual([6]);
   });
@@ -261,7 +269,7 @@ describe("each condition can refuse on its own", () => {
     // points the next checkpoint at the wrong repair.
     const verdict = verdictFor({
       verifier: {
-        rejects: [
+        expectedDefectOutcomes: [
           {
             kind: "capability_recall_miss",
             caseId: "family-level-case",
@@ -279,7 +287,7 @@ describe("each condition can refuse on its own", () => {
   it("6. names the offending case when it does accuse the verifier", () => {
     const verdict = verdictFor({
       verifier: {
-        rejects: [
+        expectedDefectOutcomes: [
           {
             kind: "incorrect_verifier_reject",
             caseId: "e2-some-in-scope-case",
@@ -399,7 +407,7 @@ describe("the verdict is actionable", () => {
     const verdict = verdictFor({
       naturalFalsePositivesPublished: 2,
       verifier: {
-        rejects: [
+        expectedDefectOutcomes: [
           {
             kind: "incorrect_verifier_reject",
             caseId: "e2-some-in-scope-case",
@@ -505,5 +513,177 @@ describe("condition 7's economics reproduce the recorded epochs", () => {
     // Clamping to zero would conceal a regression inside an economics number.
     // Condition 5 is what names it; this declines to launder it.
     expect(economicsFor([1, 0], [0, 0], [0, 0])).toContain("-1 TP");
+  });
+});
+
+describe("the outcome an epoch needed and could not express", () => {
+  const inScope = {
+    kind: "verifier_in_scope_inconclusive" as const,
+    caseId: "e4-barrel-narrowed",
+    because: "the consumer environment was not delivered to the verifier",
+  };
+
+  it("does not count as an incorrect verifier reject", () => {
+    // Epoch 4's flagship primary case: proposed, in scope, and the verifier
+    // reached no verdict. Blaming the verifier would send the next checkpoint
+    // to repair something that behaved as specified.
+    const verdict = verdictFor({
+      verifier: {
+        expectedDefectOutcomes: [inScope],
+        inconclusive: 1,
+        unavailable: 0,
+      },
+    });
+
+    expect(verdict.failing).toEqual([]);
+  });
+
+  it("is nonetheless reported beside condition 6, by case", () => {
+    // The half that Epoch 4 lacked. Condition 6 keeps its frozen meaning, and
+    // a reader can no longer take its PASS as evidence that verification
+    // performed well.
+    const verdict = verdictFor({
+      verifier: {
+        expectedDefectOutcomes: [inScope],
+        inconclusive: 1,
+        unavailable: 0,
+      },
+    });
+
+    const observed = verdict.conditions.find(
+      (condition) => condition.id === 6,
+    )?.observed;
+
+    expect(observed).toContain("0 incorrect rejects");
+    expect(observed).toContain("1 in-scope inconclusive");
+    expect(observed).toContain("e4-barrel-narrowed");
+  });
+
+  it("says nothing extra when every expected defect was settled", () => {
+    const verdict = verdictFor({
+      verifier: {
+        expectedDefectOutcomes: [],
+        inconclusive: 0,
+        unavailable: 0,
+      },
+    });
+
+    expect(
+      verdict.conditions.find((condition) => condition.id === 6)?.observed,
+    ).not.toContain("in-scope inconclusive");
+  });
+});
+
+describe("verifier completion, advisory only", () => {
+  const base = {
+    historical: {
+      planted: 12,
+      publishedTruePositives: 6,
+      publishedFalsePositives: 0,
+    },
+    development: {
+      planted: 8,
+      publishedTruePositives: 3,
+      publishedFalsePositives: 0,
+    },
+    holdout: {
+      planted: 8,
+      publishedTruePositives: 1,
+      publishedFalsePositives: 1,
+    },
+  };
+
+  it("is 1.0 when every proposed expected defect was settled", () => {
+    expect(
+      render(
+        verifierCompletion(
+          measurementWith({
+            ...base,
+            verifier: {
+              expectedDefectOutcomes: [],
+              inconclusive: 0,
+              unavailable: 0,
+            },
+          }),
+        ),
+      ),
+    ).toBe("1");
+  });
+
+  it("falls below 1.0 when an in-scope case reached no verdict", () => {
+    // Epoch 4's shape: ten published, one proposed and never settled.
+    const quantity = verifierCompletion(
+      measurementWith({
+        ...base,
+        verifier: {
+          expectedDefectOutcomes: [
+            {
+              kind: "verifier_in_scope_inconclusive",
+              caseId: "e4-barrel-narrowed",
+              because: "environment not delivered",
+            },
+          ],
+          inconclusive: 1,
+          unavailable: 0,
+        },
+      }),
+    );
+
+    expect(render(quantity)).not.toBe("1");
+  });
+
+  it("does not count a capability recall miss against the verifier", () => {
+    // Out of frozen scope is not the verifier's to decide, so it belongs in
+    // neither the numerator nor the denominator.
+    const withMiss = verifierCompletion(
+      measurementWith({
+        ...base,
+        verifier: {
+          expectedDefectOutcomes: [
+            {
+              kind: "capability_recall_miss",
+              caseId: "e4-class-member",
+              because: "outside the frozen contract",
+            },
+          ],
+          inconclusive: 0,
+          unavailable: 0,
+        },
+      }),
+    );
+
+    expect(render(withMiss)).toBe("1");
+  });
+
+  it("is undefined when nothing was proposed", () => {
+    // 0/0 is the absence of a measurement, not a perfect score.
+    expect(
+      render(
+        verifierCompletion(
+          measurementWith({
+            historical: {
+              planted: 12,
+              publishedTruePositives: 0,
+              publishedFalsePositives: 0,
+            },
+            development: {
+              planted: 8,
+              publishedTruePositives: 0,
+              publishedFalsePositives: 0,
+            },
+            holdout: {
+              planted: 8,
+              publishedTruePositives: 0,
+              publishedFalsePositives: 0,
+            },
+            verifier: {
+              expectedDefectOutcomes: [],
+              inconclusive: 0,
+              unavailable: 0,
+            },
+          }),
+        ),
+      ),
+    ).toContain("undefined");
   });
 });

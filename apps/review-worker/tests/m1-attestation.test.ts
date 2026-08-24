@@ -130,7 +130,7 @@ describe("the gate reads the record rather than a supplied number", () => {
       ],
       naturalFalsePositivesReplayed: 1,
       naturalFalsePositivesPublished: 0,
-      verifier: { rejects: [], inconclusive: 3, unavailable: 0 },
+      verifier: { expectedDefectOutcomes: [], inconclusive: 3, unavailable: 0 },
       capabilities: attestationsForGate(M1_CAPABILITY_ATTESTATIONS),
     });
 

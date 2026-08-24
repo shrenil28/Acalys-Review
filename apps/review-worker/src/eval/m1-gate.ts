@@ -56,7 +56,7 @@ import type { M1CapabilityFamily } from "./m1-corpus.js";
  * miss it reads as "this shape needs its own capability" — and only the
  * second is true.
  */
-export type M1RejectAttribution =
+export type M1ExpectedDefectOutcome =
   | {
       readonly kind: "incorrect_verifier_reject";
       readonly caseId: string;
@@ -64,6 +64,28 @@ export type M1RejectAttribution =
     }
   | {
       readonly kind: "capability_recall_miss";
+      readonly caseId: string;
+      readonly because: string;
+    }
+  | {
+      /**
+       * Proposed, in scope, and the verifier reached no verdict.
+       *
+       * The category Epoch 4 needed and did not have. Its flagship primary
+       * case was proposed with the right name and boundary, fell inside the
+       * frozen contract, and came back inconclusive — so it was neither an
+       * incorrect reject nor a recall miss, and condition 6 passed while the
+       * capability's central case died at verification.
+       *
+       * Not a refusal and not a scope boundary. A third thing.
+       */
+      readonly kind: "verifier_in_scope_inconclusive";
+      readonly caseId: string;
+      readonly because: string;
+    }
+  | {
+      /** The verifier could not execute at all. */
+      readonly kind: "verifier_unavailable";
       readonly caseId: string;
       readonly because: string;
     };
@@ -114,7 +136,7 @@ export interface M1FunnelMeasurement {
   readonly naturalFalsePositivesPublished: number;
   readonly verifier: {
     /**
-     * Every refutation of an expected defect, each attributed.
+     * Every non-publishing outcome for an expected defect, each attributed.
      *
      * A bare count cannot express the distinction Epoch 2 exposed. A verifier
      * that refuses a case its own frozen contract places out of scope has
@@ -122,7 +144,7 @@ export interface M1FunnelMeasurement {
      * verifier of a defect it does not have, and points the next checkpoint
      * at the wrong repair.
      */
-    readonly rejects: readonly M1RejectAttribution[];
+    readonly expectedDefectOutcomes: readonly M1ExpectedDefectOutcome[];
     readonly inconclusive: number;
     readonly unavailable: number;
   };
@@ -285,6 +307,48 @@ export function attestationsForGate(
 export const M1_GATE_ATTESTATIONS: readonly M1CapabilityAttestation[] =
   attestationsForGate(M1_CAPABILITY_ATTESTATIONS);
 
+/**
+ * How often the verifier actually reached a verdict on what was proposed.
+ *
+ * Advisory. It is not a condition, it does not gate anything, and it is not
+ * part of the frozen nine — adding a tenth condition after seeing results is
+ * the goal-post move this project keeps refusing.
+ *
+ * It exists because two consecutive epochs had a passing condition 6 that
+ * concealed a different failure each time: Epoch 3's expected defects were
+ * never proposed, and Epoch 4's flagship case was proposed and never settled.
+ * A number that answers "of the expected defects we proposed, how many did the
+ * verifier decide?" would have made both visible on the day.
+ *
+ * `undefinedRatio` when nothing was proposed, for the reason every other ratio
+ * here is: 0/0 is the absence of a measurement, not a perfect one.
+ */
+export function verifierCompletion(measurement: M1FunnelMeasurement): Quantity {
+  const outcomes = measurement.verifier.expectedDefectOutcomes;
+  const unsettled = outcomes.filter(
+    (entry) =>
+      entry.kind === "verifier_in_scope_inconclusive" ||
+      entry.kind === "verifier_unavailable",
+  ).length;
+
+  // Everything proposed and in scope: settled ones plus the ones that stalled.
+  // A capability recall miss was never the verifier's to decide, so it is not
+  // in the denominator.
+  const settled = outcomes.filter(
+    (entry) => entry.kind === "incorrect_verifier_reject",
+  ).length;
+  const published =
+    measurement.historical.publishedTruePositives +
+    measurement.development.publishedTruePositives +
+    measurement.holdout.publishedTruePositives;
+
+  return ratio(
+    settled + published,
+    settled + published + unsettled,
+    "nothing was proposed for the verifier to settle",
+  );
+}
+
 export function evaluateM1Gate(
   measurement: M1FunnelMeasurement,
 ): M1GateVerdict {
@@ -310,8 +374,12 @@ export function evaluateM1Gate(
     economics.comments,
     "no additional comments were published",
   );
-  const incorrectRejects = measurement.verifier.rejects.filter(
+  const outcomes = measurement.verifier.expectedDefectOutcomes;
+  const incorrectRejects = outcomes.filter(
     (entry) => entry.kind === "incorrect_verifier_reject",
+  );
+  const inScopeInconclusive = outcomes.filter(
+    (entry) => entry.kind === "verifier_in_scope_inconclusive",
   );
 
   const withoutWitness = measurement.capabilities.filter(
@@ -370,7 +438,15 @@ export function evaluateM1Gate(
         `${String(measurement.verifier.inconclusive)} inconclusive` +
         (incorrectRejects.length === 0
           ? ""
-          : ` — ${incorrectRejects.map((entry) => entry.caseId).join(", ")}`),
+          : ` — ${incorrectRejects.map((entry) => entry.caseId).join(", ")}`) +
+        // Reported beside the verdict without changing it. Epoch 4 read as
+        // "0 incorrect rejects" while its central in-scope case reached no
+        // verdict at all, and a PASS that conceals that is worse than a FAIL
+        // nobody misreads.
+        (inScopeInconclusive.length === 0
+          ? ""
+          : `; ${String(inScopeInconclusive.length)} in-scope inconclusive — ` +
+            inScopeInconclusive.map((entry) => entry.caseId).join(", ")),
     },
     {
       id: 7,
