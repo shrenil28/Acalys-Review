@@ -128,6 +128,10 @@ export const INCLUSION_REASONS = [
   // would let a base revision be scored, budgeted and cited as if the author
   // had written it.
   "base_revision",
+  // A consumer-visible boundary and what it reaches, as a fact about the
+  // revision rather than about any one file. Separate from `base_revision`
+  // because it is not a file at all: losing it is losing an import path.
+  "boundary_surface",
   "prior_finding",
   "git_history",
 ] as const;
@@ -143,6 +147,7 @@ export const CONTEXT_ITEM_KINDS = [
   "test",
   "configuration",
   "base_revision",
+  "boundary_surface",
   "finding",
 ] as const;
 
@@ -189,6 +194,19 @@ export interface PlannerBaseRevision {
   readonly resolution: BaseRevisionResolution;
 }
 
+/** One boundary's surface, as the planner receives it. */
+export interface PlannerBoundarySurface {
+  readonly boundaryIdentity: string;
+  readonly consumerEntry: string | undefined;
+  readonly reachableNames: readonly {
+    readonly name: string;
+    readonly namespace: "value" | "type";
+    readonly provenance: string;
+    readonly establishedIn: string;
+  }[];
+  readonly completeness: { readonly kind: string; readonly because?: string };
+}
+
 export type ItemProvenance =
   | { readonly source: "direct_source" }
   | {
@@ -218,6 +236,15 @@ export type ItemProvenance =
         "not_indexed"
       >;
       readonly coverage: InstructionCoverage;
+    }
+  | {
+      readonly source: "boundary_surface_facts";
+      readonly factIdentity: string;
+      readonly citation: string;
+      /** Which revision this surface describes. */
+      readonly revision: "base" | "head";
+      readonly boundaryIdentity: string;
+      readonly completeness: string;
     }
   | {
       readonly source: "base_revision_facts";
@@ -304,6 +331,9 @@ export const REASON_WEIGHT: Readonly<Record<InclusionReason, number>> = {
   // capability is not degraded without its base, it is inoperative, so this
   // outranks every optional enrichment below it.
   base_revision: 890,
+  // Alongside the base revision it is compared against. A capability whose
+  // claim is defined at the boundary is inoperative without it.
+  boundary_surface: 890,
   prior_finding: 350,
   git_history: 200,
 };
@@ -393,6 +423,7 @@ export const PLANNER_FACT_FAMILIES = [
   "config_governance",
   "instruction_governance",
   "base_revision",
+  "boundary_surface",
 ] as const;
 
 export type PlannerFactFamily = (typeof PLANNER_FACT_FAMILIES)[number];
@@ -408,6 +439,7 @@ const NO_PLANNER_FACT_FAMILIES: PlannerFactFamilyAvailability = Object.freeze({
   config_governance: false,
   instruction_governance: false,
   base_revision: false,
+  boundary_surface: false,
 });
 
 export interface PlannerInput {
@@ -452,6 +484,20 @@ export interface PlannerInput {
   readonly baseSha?: string | undefined;
   /** Canonical identity of the base revision facts above. */
   readonly baseFactsIdentity?: string | undefined;
+  /**
+   * Boundary surfaces for both revisions, already built.
+   *
+   * Supplied rather than derived, because deriving them here would derive them
+   * from whatever this planner selects — and a surface that lost a budget
+   * contest is indistinguishable from a narrowed one.
+   */
+  readonly boundarySurfaces?:
+    | {
+        readonly base: readonly PlannerBoundarySurface[];
+        readonly head: readonly PlannerBoundarySurface[];
+        readonly identity: string;
+      }
+    | undefined;
   /**
    * Optional measurement seam for repository-intelligence A/B runs.
    * Omission preserves the production all-families-enabled behavior.
@@ -595,6 +641,60 @@ function relatedTests(
  * the planner smuggle whole untouched files into the budget under a reason
  * that scores just below the changed hunk.
  */
+/**
+ * One candidate per boundary surface, in both revisions.
+ *
+ * Emitted for every declared boundary rather than only the ones that changed,
+ * because "this boundary is absent from head" is a fact about the head
+ * surface *set* — and a consumer only learns it by comparing the two.
+ */
+function boundarySurfaceCandidates(
+  input: PlannerInput,
+): readonly ContextCandidate[] {
+  if (!factFamilyEnabled(input, "boundary_surface")) return [];
+  const supplied = input.boundarySurfaces;
+  if (supplied === undefined) return [];
+
+  const candidates: ContextCandidate[] = [];
+  for (const revision of ["base", "head"] as const) {
+    for (const surface of supplied[revision]) {
+      candidates.push({
+        kind: "boundary_surface",
+        // The entry file when there is one, so the item routes to the cluster
+        // that contains it; the identity otherwise.
+        path: surface.consumerEntry ?? surface.boundaryIdentity,
+        reason: "boundary_surface",
+        trust: "repository_source",
+        content: JSON.stringify(surface),
+        // Its own identity, like a base revision's.
+        //
+        // Without this the fallback key is `path|startLine|endLine`, and a
+        // surface anchored at an entry file collides with that file's own
+        // changed-hunk item on `src/index.ts|0|0` — so one of them is
+        // discarded and the analyzer silently loses either the head text or
+        // the boundary fact. That is the base/head collision #230 defends
+        // against, reappearing at a new layer, and a boundary carries TWO
+        // items for one path because base and head are both described.
+        deduplicationKey: `boundary_surface|${revision}|${surface.boundaryIdentity}`,
+        provenance: {
+          source: "boundary_surface_facts",
+          factIdentity: supplied.identity,
+          citation: `${surface.boundaryIdentity} at ${revision} revision`,
+          revision,
+          boundaryIdentity: surface.boundaryIdentity,
+          completeness: surface.completeness.kind,
+        },
+      });
+    }
+  }
+
+  return candidates.sort((left, right) => {
+    const a = `${left.path}|${JSON.stringify(left.provenance)}`;
+    const b = `${right.path}|${JSON.stringify(right.provenance)}`;
+    return a < b ? -1 : a > b ? 1 : 0;
+  });
+}
+
 function baseRevisionCandidates(
   input: PlannerInput,
 ): readonly ContextCandidate[] {
@@ -694,6 +794,7 @@ export function generateCandidates(
   }
 
   candidates.push(...baseRevisionCandidates(input));
+  candidates.push(...boundarySurfaceCandidates(input));
 
   if (factFamilyEnabled(input, "instruction_governance")) {
     candidates.push(...factualInstructionCandidates(input.instructionFacts));

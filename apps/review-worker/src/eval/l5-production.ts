@@ -398,6 +398,8 @@ export function plannerAvailabilityForMode(
     // quietly gained a new fact family is no longer the treatment the frozen
     // baseline measured.
     base_revision: false,
+    // Never on, for the same reason: f7b49af declared no boundaries to ablate.
+    boundary_surface: false,
   };
 }
 
@@ -618,6 +620,7 @@ function reportReason(
     case "prior_finding":
     case "git_history":
       return "other";
+    case "boundary_surface":
     case "base_revision":
       // Unreachable by construction: `plannerAvailabilityForMode` pins
       // base_revision off for every L.5 mode, so the planner cannot offer one
@@ -1465,6 +1468,10 @@ const FACT_FAMILIES_L5_NEVER_MEASURED: Readonly<Record<string, string>> = {
     "P1-M.3.0 introduced base-revision context. The f7b49af pipeline had no " +
     "base input at all, so there is no ablation of it to compare against and " +
     "every L.5 mode pins it off.",
+  boundary_surface:
+    "P1-M.3.5 introduced public boundary surfaces. The f7b49af pipeline had " +
+    "no notion of a consumer-visible boundary, so there is nothing to ablate " +
+    "and every L.5 mode pins it off.",
 };
 
 /**

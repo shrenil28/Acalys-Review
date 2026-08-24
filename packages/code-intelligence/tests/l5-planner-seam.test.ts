@@ -44,6 +44,7 @@ const ALL_ENABLED: PlannerFactFamilyAvailability = {
   config_governance: true,
   instruction_governance: true,
   base_revision: true,
+  boundary_surface: true,
 };
 
 function plannerInput(): PlannerInput {
@@ -102,6 +103,39 @@ function plannerInput(): PlannerInput {
     // treatment would make its ablation assertion vacuously true.
     baseSha: "0".repeat(40),
     baseFactsIdentity: "l5-planner-seam-fixture",
+    boundarySurfaces: {
+      identity: "l5-planner-seam-fixture",
+      base: [
+        {
+          boundaryIdentity: "fixture",
+          consumerEntry: "src/service.ts",
+          reachableNames: [
+            {
+              name: "work",
+              namespace: "value" as const,
+              provenance: "declared_at_entry",
+              establishedIn: "src/service.ts",
+            },
+          ],
+          completeness: { kind: "established" },
+        },
+      ],
+      head: [
+        {
+          boundaryIdentity: "fixture",
+          consumerEntry: "src/service.ts",
+          reachableNames: [
+            {
+              name: "work",
+              namespace: "value" as const,
+              provenance: "declared_at_entry",
+              establishedIn: "src/service.ts",
+            },
+          ],
+          completeness: { kind: "established" },
+        },
+      ],
+    },
     baseRevisions: [
       {
         path: "src/service.ts",
@@ -164,6 +198,7 @@ function familyOf(candidate: ContextCandidate): PlannerFactFamily | undefined {
     }
   }
   if (source === "base_revision_facts") return "base_revision";
+  if (source === "boundary_surface_facts") return "boundary_surface";
   if (source === "configuration_facts") return "config_governance";
   if (source === "instruction_facts" || source === "instruction_coverage") {
     return "instruction_governance";

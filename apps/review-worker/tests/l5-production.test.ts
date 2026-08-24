@@ -138,6 +138,7 @@ describe("P1-L.5 production measurement adapter", () => {
       // Off here and in every other mode. L.5 has no ablation of a family the
       // f7b49af pipeline never had, so this must not track `mode.families`.
       base_revision: false,
+      boundary_surface: false,
     });
     for (const family of L5_FACT_FAMILIES) {
       const mode =

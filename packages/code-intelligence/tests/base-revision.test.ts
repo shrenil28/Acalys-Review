@@ -26,6 +26,7 @@ const ALL_FAMILIES: PlannerFactFamilyAvailability = {
   config_governance: true,
   instruction_governance: true,
   base_revision: true,
+  boundary_surface: true,
 };
 
 function plan(options: {

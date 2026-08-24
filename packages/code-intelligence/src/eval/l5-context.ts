@@ -50,6 +50,7 @@ const REPORT_REASON_BY_PRODUCTION_REASON = {
   // Mapped because the Record must be total, not because L.5 can report one.
   // `factFamilyFor` refuses base-revision items outright; see there.
   base_revision: "other",
+  boundary_surface: "other",
 } as const satisfies Readonly<Record<InclusionReason, L5ReportReason>>;
 
 const PRODUCTION_REASON_SET = new Set<string>(INCLUSION_REASONS);
@@ -60,6 +61,7 @@ const PROVENANCE_SOURCE_MEMBERS = {
   instruction_facts: true,
   instruction_coverage: true,
   base_revision_facts: true,
+  boundary_surface_facts: true,
 } as const satisfies Readonly<Record<ItemProvenance["source"], true>>;
 
 const PROVENANCE_SOURCES = new Set<string>(
@@ -134,6 +136,21 @@ export function factFamilyFor(
     reason === "instruction_coverage"
   ) {
     return "instruction_governance";
+  }
+
+  if (
+    reason === "boundary_surface" ||
+    provenanceSource === "boundary_surface_facts"
+  ) {
+    // Same reasoning as the base revision below. The L.5 fact families are
+    // frozen at f7b49af, which had no notion of a consumer-visible boundary,
+    // so an observation containing one is not a worse L.5 observation — it is
+    // not an L.5 observation.
+    throw new InvalidL5ContextObservationError(
+      "Boundary-surface context cannot appear in an L.5 observation: the L.5 " +
+        "fact families are frozen at the f7b49af baseline, which had no " +
+        `boundary surface input (saw ${reason}/${provenanceSource}).`,
+    );
   }
 
   if (

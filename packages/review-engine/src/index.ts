@@ -151,6 +151,14 @@ export {
   EXPORT_REACHABILITY_RULE_ID,
   analyzeExportReachability,
 } from "./correctness/export-reachability.js";
+
+export {
+  boundarySurface,
+  declaredBoundaries,
+  type PublicBoundarySurface,
+  type ReachableName,
+  type SurfaceCompleteness,
+} from "./correctness/boundary-surface.js";
 export * from "./verification/index.js";
 export * from "./publication/index.js";
 export * from "./premerge/index.js";

@@ -64,6 +64,9 @@ import {
   type CandidateFinding,
   type ExecutionLimits,
   type ExecutionReport,
+  boundarySurface,
+  declaredBoundaries,
+  type PublicBoundarySurface,
 } from "@acalys/review-engine";
 
 type ConfigGovernanceResult = ReturnType<typeof governanceFor>;
@@ -268,6 +271,14 @@ export function candidateFingerprint(
   );
 }
 
+/** Both revisions' boundary surfaces, and why any could not be built. */
+export interface BoundaryFacts {
+  readonly base: readonly PublicBoundarySurface[];
+  readonly head: readonly PublicBoundarySurface[];
+  readonly abstentions: readonly { path: string; because: string }[];
+  readonly identity: string;
+}
+
 export interface RealAnalysisOptions {
   readonly repositoryId: string;
   readonly headSha: string;
@@ -457,6 +468,8 @@ export async function runRealAnalysis(
 
   const base = resolveBaseRevisions(baseSha, changed);
 
+  const boundaries = buildBoundaryFacts(repository, base);
+
   const config = buildConfigFacts(
     repository,
     changed.map((file) => file.path),
@@ -488,6 +501,15 @@ export async function runRealAnalysis(
             baseRevisions: base.revisions,
             baseSha: base.sha,
             baseFactsIdentity: base.digest,
+          }),
+      ...(boundaries === undefined
+        ? {}
+        : {
+            boundarySurfaces: {
+              base: boundaries.base,
+              head: boundaries.head,
+              identity: boundaries.identity,
+            },
           }),
       instructionFacts: {
         facts: instructionFacts,
@@ -772,6 +794,68 @@ function instructionApplicabilityResultFor(
     );
   }
   return { status: "undetermined", coverage, why: gaps.join("; ") };
+}
+
+/**
+ * The public boundary surfaces of both revisions, built from the snapshot.
+ *
+ * Built HERE and not inside the analyzer, for the reason `AnalyzerInput`
+ * states about itself: an analyzer sees the assembled context and nothing
+ * else, so an analyzer deriving this fact would derive it from whatever the
+ * planner happened to select. A boundary whose `export *` target lost a budget
+ * contest would report a smaller surface — and a smaller surface is
+ * indistinguishable from a narrowed one.
+ *
+ * That is the mistake the verifier already made once, compiling
+ * `context.items` instead of the revision. Construction takes the whole
+ * snapshot; the planner still decides whether the resulting fact is *shown*.
+ *
+ * The base revision is the snapshot with each changed file's base text put
+ * back and files new at head removed. An unchanged file is byte identical in
+ * both, which is what makes a boundary-only edit observable at all: the
+ * manifest differs and every source file is shared.
+ */
+function buildBoundaryFacts(
+  repository: ReadonlyMap<string, string>,
+  base: ResolvedBaseRevisions | undefined,
+): BoundaryFacts | undefined {
+  if (base === undefined) return undefined;
+
+  const baseFiles = new Map(repository);
+  const abstentions: { path: string; because: string }[] = [];
+
+  for (const revision of base.revisions) {
+    const resolution = revision.resolution;
+    if (resolution.kind === "present") {
+      baseFiles.set(revision.path, resolution.content);
+    } else if (resolution.kind === "absent") {
+      baseFiles.delete(revision.path);
+    } else {
+      abstentions.push({
+        path: revision.path,
+        because: `the base revision is ${resolution.kind}, so no boundary surface can be established from it`,
+      });
+    }
+  }
+
+  const surfacesFor = (
+    files: ReadonlyMap<string, string>,
+  ): readonly PublicBoundarySurface[] =>
+    declaredBoundaries(files).map((boundary) =>
+      boundarySurface(files, boundary),
+    );
+
+  const baseSurfaces = surfacesFor(baseFiles);
+  const headSurfaces = surfacesFor(repository);
+
+  return {
+    base: baseSurfaces,
+    head: headSurfaces,
+    abstentions,
+    identity: sha256(
+      JSON.stringify({ base: baseSurfaces, head: headSurfaces }),
+    ),
+  };
 }
 
 function buildConfigFacts(

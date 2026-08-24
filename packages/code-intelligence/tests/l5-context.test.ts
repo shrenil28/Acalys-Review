@@ -27,6 +27,7 @@ const EXPECTED_REPORT_REASONS = {
   prior_finding: "other",
   git_history: "other",
   base_revision: "other",
+  boundary_surface: "other",
 } as const satisfies Readonly<Record<InclusionReason, L5ReportReason>>;
 
 /**
@@ -37,7 +38,7 @@ const EXPECTED_REPORT_REASONS = {
  * exhaustive over everything L.5 can legitimately see, and a reason that
  * belongs in neither list fails the coverage assertion.
  */
-const REASONS_L5_REFUSES = ["base_revision"] as const;
+const REASONS_L5_REFUSES = ["base_revision", "boundary_surface"] as const;
 
 const VALID_PRODUCTION_COMBINATIONS = [
   ["changed_hunk", undefined, "none"],
@@ -124,7 +125,7 @@ describe("P1-L.5 production taxonomy", () => {
     // reason into REASONS_L5_REFUSES would be a way to make an unmapped
     // reason pass silently instead of a way to declare it out of scope.
     for (const reason of REASONS_L5_REFUSES) {
-      expect(() => factFamilyFor(reason, "base_revision_facts")).toThrow(
+      expect(() => factFamilyFor(reason, `${reason}_facts`)).toThrow(
         InvalidL5ContextObservationError,
       );
     }
