@@ -181,6 +181,13 @@ hulled.
 Sixteen named must-refuse shapes are distributed across all eight cases, so
 precision pressure comes from inside the primary family as well as across it.
 
+```
+EPOCH 4   OBSERVED at source freeze 071294b, then SPENT
+          Epoch 4 1/8 · 1 published FP · precision 0.5
+          gate FAIL on 1, 2, 3, 7
+          see docs/review/phase-1/epoch-4-observation.md
+```
+
 ## Anchor authoring, binding from Epoch 4 onward
 
 Epoch 3 rejected a correct finding, and the evaluator reported why without
