@@ -33,6 +33,7 @@
  */
 
 import { ratio, render, type Quantity } from "@acalys/review-engine";
+import { M1_CAPABILITY_ATTESTATIONS } from "./m1-attestation.js";
 import type { M1CapabilityFamily } from "./m1-corpus.js";
 
 /**
@@ -242,6 +243,47 @@ function additionalPublication(measurement: M1FunnelMeasurement): {
       measurement.holdout.publishedFalsePositives,
   };
 }
+
+/**
+ * Conditions 8 and 9's inputs, derived from the committed attestation record.
+ *
+ * The gate itself is untouched — same nine conditions, same thresholds, same
+ * arithmetic. What changes is where two of its inputs come from. Epoch 4
+ * passed condition 8 for a capability with no mutations targeting its source,
+ * because the attestation reached the gate as a number someone had assembled
+ * by reading things. A caller that builds this from
+ * `M1_CAPABILITY_ATTESTATIONS` is making a claim that
+ * `m1-attestation.test.ts` can contradict; a caller that types the numbers by
+ * hand is not.
+ *
+ * Same move as condition 7's formula in M.4.1: the judgement is unchanged, the
+ * evidence stops being supplied.
+ */
+export function attestationsForGate(
+  attestations: readonly {
+    readonly capability: string;
+    readonly productionWitness: string;
+    readonly semanticMutationIds: readonly number[];
+    readonly demandSelectedFactFamilies: readonly string[];
+  }[],
+): readonly M1CapabilityAttestation[] {
+  return attestations.map((entry) => ({
+    family: entry.capability as M1CapabilityFamily,
+    productionWitness: entry.productionWitness,
+    semanticMutationIds: entry.semanticMutationIds,
+    demandSelectedFactFamilies: entry.demandSelectedFactFamilies,
+  }));
+}
+
+/**
+ * The attestations this tree actually ships, ready for the gate.
+ *
+ * Exported so a measurement harness reaches for a derived value rather than
+ * assembling one. Typing the numbers by hand is what let Epoch 4 report
+ * condition 8 as satisfied by a capability with no mutations of its own.
+ */
+export const M1_GATE_ATTESTATIONS: readonly M1CapabilityAttestation[] =
+  attestationsForGate(M1_CAPABILITY_ATTESTATIONS);
 
 export function evaluateM1Gate(
   measurement: M1FunnelMeasurement,

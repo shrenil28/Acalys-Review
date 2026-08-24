@@ -182,10 +182,26 @@ Sixteen named must-refuse shapes are distributed across all eight cases, so
 precision pressure comes from inside the primary family as well as across it.
 
 ```
-EPOCH 4   OBSERVED at source freeze 071294b, then SPENT
-          Epoch 4 1/8 · 1 published FP · precision 0.5
+EPOCH 4   p1-m-epoch-4/public-api-reachability-loss.v1
+          digest a969020f0423fcc1baa3729ef01bcc60bcebdefe676ca271b20ebf0d3290100b
+          stored /home/shrenil/Desktop/acalys-evaluator/epoch-4/
+          observation epoch-4-observation.md (evaluator, immutable)
+                      docs/review/phase-1/epoch-4-observation.md (coordinator)
+
+          observed against source freeze 071294b, seal verified exit 0 first
+          historical 6/12 · development 3/8 · Epoch 4 1/8 with 1 published FP
+          precision: historical 1, development 1, Epoch 4 0.5
           gate FAIL on 1, 2, 3, 7
-          see docs/review/phase-1/epoch-4-observation.md
+          natural FP 0 published of 1 replayed
+
+          anchor-oracle note: the evaluator recorded that its own enumeration
+          for the boundary-only case is arguable on both sides. It enumerated
+          the manifest line and refused the declaration; the product anchored
+          the declaration. Unlike Epoch 3's oracle error this is a genuine open
+          question, and it is settled by contract for Epoch 5 rather than by
+          rescoring — the recorded result stands exactly as observed.
+
+          status SPENT · no retroactive rescoring
 ```
 
 ## Anchor authoring, binding from Epoch 4 onward
