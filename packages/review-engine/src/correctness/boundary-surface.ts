@@ -54,8 +54,25 @@ export interface ReachableName {
   readonly establishedIn: string;
 }
 
+/**
+ * Four states, and none of them is `reachableNames === []`.
+ *
+ * ```
+ * established   every path was followed; a missing name is genuinely missing
+ * empty         followed completely, and the boundary exposes nothing
+ * partial       a path could not be followed; absence proves nothing
+ * unavailable   the boundary's own entry could not be read
+ * ```
+ *
+ * `empty` and `partial` both yield zero reachable names and mean opposite
+ * things. Collapsing them would recreate the absence problem M.3.0 froze, one
+ * layer further out — and `absent`, a boundary that is no longer declared at
+ * all, is a fifth thing again, carried on the surface's presence rather than
+ * inside it.
+ */
 export type SurfaceCompleteness =
   | { readonly kind: "established" }
+  | { readonly kind: "empty" }
   | { readonly kind: "partial"; readonly because: string }
   | { readonly kind: "unavailable"; readonly because: string };
 
@@ -215,7 +232,18 @@ export function boundarySurface(
   const visited = new Set<string>();
 
   const walk = (path: string, depth: number): void => {
-    if (visited.has(path) || depth > 8) return;
+    // A cycle or an over-deep graph stops the walk, and stopping is not the
+    // same as finishing. Returning quietly here would report an `established`
+    // surface built from a traversal that gave up, so the reason is recorded
+    // and completeness degrades.
+    if (visited.has(path)) {
+      unfollowed.push(`${path} (already visited: re-export cycle)`);
+      return;
+    }
+    if (depth > 8) {
+      unfollowed.push(`${path} (re-export depth limit)`);
+      return;
+    }
     visited.add(path);
 
     const content = files.get(path);
@@ -347,11 +375,13 @@ export function boundarySurface(
       left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
     ),
     completeness:
-      unfollowed.length === 0
-        ? { kind: "established" }
-        : {
+      unfollowed.length > 0
+        ? {
             kind: "partial",
-            because: `could not follow ${unfollowed.sort().join(", ")}`,
-          },
+            because: `could not follow ${[...new Set(unfollowed)].sort().join(", ")}`,
+          }
+        : names.size === 0
+          ? { kind: "empty" }
+          : { kind: "established" },
   };
 }

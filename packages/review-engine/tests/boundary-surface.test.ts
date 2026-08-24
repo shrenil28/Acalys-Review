@@ -189,7 +189,8 @@ describe("completeness, because absence must be earned", () => {
   });
 
   it("does not confuse an empty surface with an unreadable one", () => {
-    // Both have zero reachable names. Only one of them proves anything.
+    // Both have zero reachable names and they mean opposite things. One says
+    // the boundary exposes nothing; the other says we could not find out.
     const empty = surfaceOf(
       { "package.json": MANIFEST, "src/index.ts": "const internal = 1;" },
       "pkg",
@@ -204,8 +205,29 @@ describe("completeness, because absence must be earned", () => {
 
     expect(empty.reachableNames).toEqual([]);
     expect(unreadable.reachableNames).toEqual([]);
-    expect(empty.completeness.kind).toBe("established");
+    expect(empty.completeness.kind).toBe("empty");
     expect(unreadable.completeness.kind).toBe("partial");
+  });
+
+  it("degrades on a re-export cycle rather than reporting completeness", () => {
+    // The walk stops, and stopping is not finishing. A cycle that returned
+    // quietly would report an established surface built from a traversal that
+    // gave up.
+    const surface = surfaceOf(
+      {
+        "package.json": MANIFEST,
+        "src/index.ts": 'export * from "./a.js";',
+        "src/a.ts": 'export * from "./b.js";',
+        "src/b.ts": 'export * from "./a.js";\nexport const shared = 1;',
+      },
+      "pkg",
+    );
+
+    expect(surface.completeness.kind).toBe("partial");
+    // What it did establish is kept, not discarded.
+    expect(surface.reachableNames.map((entry) => entry.name)).toContain(
+      "shared",
+    );
   });
 });
 
