@@ -1989,8 +1989,8 @@ const ALL_MUTATIONS = [
     id: 216,
     name: "governing configs no longer reach the clusters they govern",
     file: "packages/review-engine/src/cluster.ts",
-    find: "        governsThisCluster(item),",
-    replace: "        false,",
+    find: "        governsThisCluster(item) ||",
+    replace: "        false ||",
     suite: "apps/review-worker/tests/m2-wiring.test.ts",
   },
   {
@@ -2499,7 +2499,7 @@ const ALL_MUTATIONS = [
     id: 283,
     name: "M.3.4 the verifier resolves from the declaring module, not the boundary",
     file: "packages/review-engine/src/verification/export-reachability.ts",
-    find: "  const boundaryPath = resolvePublicBoundary(\n    revisions.baseFiles,\n    query.declarationPath,\n  );",
+    find: "  const boundaryPath =\n    named ?? resolvePublicBoundary(revisions.baseFiles, query.declarationPath);",
     replace: "  const boundaryPath = query.declarationPath;",
     suite: "packages/review-engine/tests/export-reachability.test.ts",
   },
@@ -2535,6 +2535,93 @@ const ALL_MUTATIONS = [
     replace:
       "        analyzeExportReachability(input),\n        analyzeExportReachability(input),",
     suite: "apps/review-worker/tests/m34-export-reachability.test.ts",
+  },
+  {
+    id: 288,
+    name: "M.3.6 the consumer probe imports a relative path again",
+    file: "packages/review-engine/src/verification/consumer-boundary.ts",
+    find: '          `import { ${query.exportName} } from "${query.consumerSpecifier}";`,',
+    replace:
+      '          `import { ${query.exportName} } from "./${query.consumerSpecifier.split("/").pop() ?? ""}";`,',
+    suite: "apps/review-worker/tests/m35-boundary-reachability.test.ts",
+  },
+  {
+    id: 289,
+    name: "M.3.6 a package boundary is routed to the module verifier",
+    file: "packages/review-engine/src/verification/deterministic.ts",
+    find: '    competence.capability === "public_boundary_consumer_verification"',
+    replace: "    (false as boolean)",
+    suite: "apps/review-worker/tests/m35-boundary-reachability.test.ts",
+  },
+  {
+    id: 290,
+    name: "M.3.6 the BASE-validity premise is removed",
+    file: "packages/review-engine/src/verification/consumer-boundary.ts",
+    find: "  if (!base.resolved) {",
+    replace: "  if (false as boolean) {",
+    suite: "packages/review-engine/tests/consumer-boundary.test.ts",
+  },
+  {
+    id: 291,
+    name: "M.3.6 HEAD is compiled against the BASE package",
+    file: "packages/review-engine/src/verification/consumer-boundary.ts",
+    find: "  const head = compileConsumer(revisions.headFiles, query, probeSource);",
+    replace:
+      "  const head = compileConsumer(revisions.baseFiles, query, probeSource);",
+    suite: "packages/review-engine/tests/consumer-boundary.test.ts",
+  },
+  {
+    id: 292,
+    name: "M.3.6 the probe is placed inside the package it tests",
+    file: "packages/review-engine/src/verification/consumer-boundary.ts",
+    find: "  const laid = new Map<string, string>([[PROBE, probeSource]]);",
+    replace:
+      "  const laid = new Map<string, string>([\n    [`node_modules/${query.packageName}/probe.ts`, probeSource],\n  ]);",
+    suite: "packages/review-engine/tests/consumer-boundary.test.ts",
+  },
+  {
+    id: 293,
+    name: "M.3.6 the resolver stops honouring package exports",
+    file: "packages/review-engine/src/verification/consumer-boundary.ts",
+    find: "  module: ts.ModuleKind.NodeNext,\n  moduleResolution: ts.ModuleResolutionKind.NodeNext,",
+    replace:
+      "  module: ts.ModuleKind.CommonJS,\n  moduleResolution: ts.ModuleResolutionKind.Node10,",
+    suite: "packages/review-engine/tests/consumer-boundary.test.ts",
+  },
+  {
+    id: 294,
+    name: "M.3.6 the verifier is bypassed and the hypothesis confirmed",
+    file: "packages/review-engine/src/verification/deterministic.ts",
+    find: "        return verifyConsumerBoundary(",
+    replace:
+      '        return { kind: "verified", detail: "trusted" } as const;\n        return verifyConsumerBoundary(',
+    suite: "packages/review-engine/tests/verifier.test.ts",
+  },
+  {
+    id: 296,
+    name: "M.3.6 HEAD is probed with a different specifier than BASE",
+    file: "packages/review-engine/src/verification/consumer-boundary.ts",
+    find: "  const head = compileConsumer(revisions.headFiles, query, probeSource);",
+    replace:
+      "  const head = compileConsumer(\n    revisions.headFiles,\n    query,\n    probeSource.replace(query.consumerSpecifier, `${query.consumerSpecifier}x`),\n  );",
+    suite: "packages/review-engine/tests/consumer-boundary.test.ts",
+  },
+  {
+    id: 297,
+    name: "M.3.6 a head that still resolves is reported as a break",
+    file: "packages/review-engine/src/verification/consumer-boundary.ts",
+    find: "  if (head.resolved) {",
+    replace: "  if (false as boolean) {",
+    suite: "packages/review-engine/tests/consumer-boundary.test.ts",
+  },
+  {
+    id: 298,
+    name: "M.3.6 an unrecognised head failure is reported as a break",
+    file: "packages/review-engine/src/verification/consumer-boundary.ts",
+    find: '    return {\n      kind: "inconclusive",\n      detail:\n        `the head consumer failed with ${head.codes.map((code) => `TS${String(code)}`).join(", ")}, ` +\n        "which is not the boundary-resolution failure this capability claims",\n    };',
+    replace:
+      '    return {\n      kind: "verified",\n      detail:\n        `the head consumer failed with ${head.codes.map((code) => `TS${String(code)}`).join(", ")}, ` +\n        "which is not the boundary-resolution failure this capability claims",\n    };',
+    suite: "packages/review-engine/tests/consumer-boundary.test.ts",
   },
   {
     id: 17,

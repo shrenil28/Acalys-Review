@@ -69,10 +69,20 @@ const PROBE = "acalys-consumer/probe.ts";
  *
  * The resolution mode is semantic input. The same sources and the same
  * manifest adjudicate differently under a resolver that honours package
- * exports and one that does not — `Bundler` and `Node10` resolve a subpath by
- * file path, which is the bypass this capability exists to close. Recording it
- * here means a future change to the mode is a change to what was proved, not a
- * tuning detail.
+ * exports and one that does not. Observed against the pinned compiler, with a
+ * layout where the specifier matches a file path the exports map does not
+ * offer:
+ *
+ * ```
+ * NodeNext   exports honoured   TS2307
+ * Bundler    exports honoured   TS2307
+ * Node10     exports BYPASSED   resolves by file path
+ * ```
+ *
+ * So `Node10` is the mode that would silently reopen the bypass this
+ * capability exists to close — not, as an earlier draft of this comment
+ * claimed, `Bundler` as well. Recording the measured behaviour means a future
+ * change to the mode is a change to what was proved, not a tuning detail.
  *
  * The claim is bounded accordingly: this proves what the frozen TypeScript
  * consumer procedure concludes, not what every runtime resolver in the
@@ -173,9 +183,9 @@ function compileConsumer(
     options: {
       noLib: true,
       strict: true,
-      // NodeNext is what makes the exports map participate at all. Under
-      // Bundler or Node10 the subpath would resolve by file path and the
-      // manifest would again be irrelevant.
+      // The exports map participates only under a resolver that honours it.
+      // Under Node10 the subpath resolves by file path and the manifest
+      // becomes irrelevant again.
       ...CONSUMER_BOUNDARY_RESOLUTION,
       noEmit: true,
     },

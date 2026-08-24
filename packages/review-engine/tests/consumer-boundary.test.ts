@@ -220,3 +220,31 @@ describe("a diagnostic must belong to THIS import", () => {
     ).toBeUndefined();
   });
 });
+
+describe("the resolver must honour the exports map", () => {
+  it("refuses a specifier the map does not offer, even when the file exists", () => {
+    // The layout that separates an exports-aware resolver from a path-based
+    // one: `pkg/codec` matches a real file, and the manifest does not offer
+    // it. Measured against the pinned compiler, NodeNext and Bundler both
+    // refuse while Node10 resolves — so the mode is semantic input, and a
+    // path-based resolver would call a withdrawn subpath reachable.
+    const base = {
+      "package.json": JSON.stringify({
+        name: "pkg",
+        exports: { "./codec": "./codec.ts" },
+      }),
+      "codec.ts": DECODE,
+    };
+    const head = {
+      "package.json": JSON.stringify({
+        name: "pkg",
+        exports: { ".": "./index.ts" },
+      }),
+      "index.ts": "export const version = 1;",
+      // Still present, still exporting, and no longer offered.
+      "codec.ts": DECODE,
+    };
+
+    expect(check(base, head).kind).toBe("verified");
+  });
+});
