@@ -7,9 +7,13 @@
  * that its predecessor confidently answered the wrong question.
  */
 
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
-import { verifyConsumerBoundary } from "../src/verification/consumer-boundary.js";
+import {
+  importSpecifierSpan,
+  verifyConsumerBoundary,
+} from "../src/verification/consumer-boundary.js";
 
 const files = (entries: Record<string, string>) =>
   new Map(Object.entries(entries));
@@ -175,5 +179,44 @@ describe("the consumer is genuinely external", () => {
     expect(
       check(base, head, { exportName: "Config", namespace: "type" }).kind,
     ).toBe("verified");
+  });
+});
+
+describe("a diagnostic must belong to THIS import", () => {
+  // The generated probe carries exactly one import, so probe-locality and
+  // specifier-locality coincide today. The span mechanism is what would keep
+  // them apart if a probe ever carried two, so it is tested directly rather
+  // than through an assertion that cannot currently fail.
+  const parse = (text: string) =>
+    ts.createSourceFile("probe.ts", text, ts.ScriptTarget.ES2022, true);
+
+  const TWO_IMPORTS = [
+    'import { a } from "pkg/other";',
+    'import { decode } from "pkg/codec";',
+    "void a;",
+    "void decode;",
+    "",
+  ].join("\n");
+
+  it("finds the span of the specifier it was asked about", () => {
+    const source = parse(TWO_IMPORTS);
+    const wanted = importSpecifierSpan(source, "pkg/codec");
+    const other = importSpecifierSpan(source, "pkg/other");
+
+    expect(wanted).toBeDefined();
+    expect(other).toBeDefined();
+    // Distinct regions, so a diagnostic at one cannot be counted at the other.
+    expect(wanted?.start).not.toBe(other?.start);
+    expect(
+      wanted !== undefined &&
+        other !== undefined &&
+        (wanted.start >= other.end || other.start >= wanted.end),
+    ).toBe(true);
+  });
+
+  it("finds nothing for a specifier the probe does not import", () => {
+    expect(
+      importSpecifierSpan(parse(TWO_IMPORTS), "pkg/absent"),
+    ).toBeUndefined();
   });
 });

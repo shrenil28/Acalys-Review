@@ -266,6 +266,10 @@ describe("The verifier decides what it can adjudicate before adjudicating", () =
         "The result of `validate(raw)` was used at the base revision and is discarded here, so any replacement value it returns for `raw` is lost.",
         ["The base revision consumed the result of `validate`"],
       ],
+      public_boundary_consumer_verification: [
+        "`decode` was reachable through the public boundary `pkg/codec` at the base revision and is no longer reachable through it, so a consumer importing it stops compiling.",
+        ["The boundary `pkg/codec` is declared by this manifest"],
+      ],
       public_export_reachability_loss: [
         "`parse` was reachable through src/parser.ts at the base revision and may no longer be reachable through that boundary, so consumers importing it stop compiling.",
         ["src/parser.ts exposed `parse` in its public value surface"],

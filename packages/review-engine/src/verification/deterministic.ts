@@ -38,6 +38,7 @@ import { verifyConditionValue } from "./condition.js";
 import { verifyExceptionFlow } from "./exception.js";
 import { verifyExactOptionalWrite } from "./exact-optional.js";
 import { verifyExportReachability } from "./export-reachability.js";
+import { verifyConsumerBoundary } from "./consumer-boundary.js";
 import { verifyDiscardedReplacement } from "./discarded-replacement.js";
 import { verifyRequiredParameterAdded } from "./required-parameter.js";
 import { adjudicateCompatibility } from "./compatibility-route.js";
@@ -266,6 +267,37 @@ function parseDiscardedReplacementClaim(
   return match?.[1] === undefined ? undefined : { calleeName: match[1] };
 }
 
+/** The specifier, name and package a consumer-boundary claim is about. */
+function parseConsumerBoundaryClaim(statement: string):
+  | {
+      readonly consumerSpecifier: string;
+      readonly exportName: string;
+      readonly namespace: "value" | "type";
+      readonly packageName: string;
+    }
+  | undefined {
+  const match =
+    /^`([^`]+)` was reachable through the public boundary `([^`]+)`/.exec(
+      statement,
+    );
+  const exportName = match?.[1];
+  const specifier = match?.[2];
+  if (exportName === undefined || specifier === undefined) return undefined;
+
+  // A scoped package owns its first two segments; anything else owns one.
+  const segments = specifier.split("/");
+  const packageName = specifier.startsWith("@")
+    ? segments.slice(0, 2).join("/")
+    : (segments[0] ?? specifier);
+
+  return {
+    consumerSpecifier: specifier,
+    exportName,
+    namespace: /\btype surface\b/.test(statement) ? "type" : "value",
+    packageName,
+  };
+}
+
 function parseReachabilityClaim(statement: string):
   | {
       readonly exportName: string;
@@ -464,6 +496,45 @@ export function verifyDeterministically(
 
     assertReasonsSupport(attempt.decision, attempt.reasons);
     assertReasonForCapability("discarded_replacement_return", attempt.reasons);
+    return attempt;
+  }
+
+  if (
+    competence.kind === "supported" &&
+    competence.capability === "public_boundary_consumer_verification"
+  ) {
+    // P1-M.3.6. Dispatched on the boundary KIND the claim names, not on
+    // whether a manifest happens to be mentioned. A package-boundary claim
+    // must never reach the relative-probe verifier above: that probe bypasses
+    // the manifest, so it would compile against an untouched module and call
+    // a withdrawn boundary reachable.
+    const attempt = adjudicateCompatibility({
+      input,
+      context,
+      capability: "public_boundary_consumer_verification",
+      run: (revisions) => {
+        const parsed = parseConsumerBoundaryClaim(input.claim.statement);
+        if (parsed === undefined) return undefined;
+        const manifest = input.evidence.find((entry) =>
+          entry.location?.path.endsWith("package.json"),
+        )?.location?.path;
+        if (manifest === undefined) return undefined;
+        return verifyConsumerBoundary(
+          {
+            ...parsed,
+            packageRoot: manifest.split("/").slice(0, -1).join("/"),
+          },
+          revisions,
+        );
+      },
+      verifiedReason: "consumer_boundary_unreachable_at_head",
+      rejectedReason: "consumer_boundary_still_importable",
+    });
+    assertReasonsSupport(attempt.decision, attempt.reasons);
+    assertReasonForCapability(
+      "public_boundary_consumer_verification",
+      attempt.reasons,
+    );
     return attempt;
   }
 

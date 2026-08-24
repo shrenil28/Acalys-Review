@@ -64,6 +64,10 @@ export const VERIFICATION_REASONS = [
   // proven valid against the base revision, so their reasons are stated in
   // terms of that consumer rather than of a declaration.
   "public_export_unreachable_at_head",
+  // P1-M.3.6. Stated about the consumer's import rather than the module's
+  // exports, because that is the difference the capability exists to make.
+  "consumer_boundary_unreachable_at_head",
+  "consumer_boundary_still_importable",
   "public_export_still_reachable",
   "base_valid_call_rejected_at_head",
   "base_valid_call_still_accepted",
@@ -197,6 +201,8 @@ export const REASON_SUPPORTS: Readonly<
   // A consumer valid against base stopped compiling. The break is exhibited,
   // not inferred from a declaration diff.
   public_export_unreachable_at_head: "verified",
+  consumer_boundary_unreachable_at_head: "verified",
+  consumer_boundary_still_importable: "rejected",
   base_valid_call_rejected_at_head: "verified",
   // REFUTATIONS. The same consumer still compiles, so the contract survived —
   // a re-export was preserved, or the new parameter was optional. Reporting

@@ -93,6 +93,17 @@ export const VERIFICATION_CAPABILITIES = [
    */
   "public_export_reachability_loss",
   /**
+   * Whether an external consumer can still import a name through a declared
+   * package specifier.
+   *
+   * A separate capability from the module-boundary one above rather than a
+   * widening of it. They ask different questions — "can another source file
+   * reach this module" versus "can a consumer import this package subpath" —
+   * and answering the first about the second is how a withdrawn boundary came
+   * back "still reachable".
+   */
+  "public_boundary_consumer_verification",
+  /**
    * Whether a call whose result the change discards was returning a
    * replacement for its own argument.
    *
@@ -220,6 +231,14 @@ export const REASONS_BY_CAPABILITY: Readonly<
     "discarded_value_carried_replacement",
     "discarded_value_carried_nothing",
     "replacement_evidence_unavailable",
+    "context_incomplete",
+  ],
+  public_boundary_consumer_verification: [
+    "consumer_boundary_unreachable_at_head",
+    "consumer_boundary_still_importable",
+    // Shared with the other comparison capabilities: without a base revision
+    // there is nothing to have been reachable *from*.
+    "comparison_revision_unavailable",
     "context_incomplete",
   ],
   public_export_reachability_loss: [
@@ -365,21 +384,23 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     dominates: ["async_value_use", "signature_compatibility"],
   },
   {
+    id: "public_boundary_consumer_verification",
+    capability: "public_boundary_consumer_verification",
+    declines: undefined,
+    // Routed on the claim naming a PUBLIC BOUNDARY, which only the boundary
+    // proposer states. The module-boundary claim above says "that boundary"
+    // about a file path and must not land here.
+    patterns: [/reachable through the public boundary/],
+    dominates: ["public_export_reachability_loss", "signature_compatibility"],
+  },
+  {
     id: "public_export_reachability_loss",
     capability: "public_export_reachability_loss",
     declines: undefined,
     // Anchored on reachability through a boundary, not on a name's absence
     // from a statement. The predecessor keyed on the latter and that is what
     // made it rename-shaped.
-    // Both generations of the proposal reach the same adjudication. M.3.4
-    // hedges ("may no longer be reachable") because a syntactic pass cannot
-    // see through a re-export; M.3.5 states it ("is no longer reachable")
-    // because it compared two authoritative surfaces. The verifier settles
-    // either one the same way.
-    patterns: [
-      /may no longer be reachable through that boundary/,
-      /is no longer reachable through that boundary/,
-    ],
+    patterns: [/may no longer be reachable through that boundary/],
     dominates: ["signature_compatibility"],
   },
   {

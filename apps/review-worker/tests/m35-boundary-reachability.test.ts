@@ -17,7 +17,10 @@ import { describe, expect, it } from "vitest";
 import { runRealAnalysis, type AnalysisSource } from "../src/index.js";
 import {
   BOUNDARY_REACHABILITY_RULE_ID,
+  DEFAULT_PUBLICATION_CONFIG,
+  planPublication,
   planVerificationContext,
+  promoteVerified,
   verifyDeterministically,
   type CandidateFinding,
 } from "@acalys/review-engine";
@@ -163,18 +166,15 @@ describe("witness A — a boundary-only edit", () => {
     );
   });
 
-  it("is INCONCLUSIVE, because this verifier cannot probe a withdrawn boundary", async () => {
-    // The honest outcome, and the boundary of this checkpoint. The proposal is
-    // correct — M.3.4 could not make it at all — but the existing verifier
-    // probes through a relative file specifier, so package-exports resolution
-    // plays no part in it. `src/codec.ts` is byte-identical at head and still
-    // exports `decode`, so the probe compiles.
+  it("is VERIFIED by a real external consumer, then promoted and published", async () => {
+    // The complete capability. M.3.5 proposes the loss that a module-export
+    // delta cannot see, and M.3.6 proves it by importing `pkg/codec` from
+    // outside a node_modules layout — so the manifest participates instead of
+    // being bypassed by a relative path.
     //
-    // A `rejected` here would be a false refutation teaching the funnel that
-    // boundary withdrawals are safe. Proving one needs consumer-style
-    // resolution, which is separate work with its own contract, and widening
-    // verification to make this witness green is exactly what the M.3.5
-    // contract forbids.
+    // A verifier probing "./codec" fails this witness: `src/codec.ts` is
+    // byte-identical at head and still exports `decode`, so it compiles and
+    // reports the boundary reachable.
     const outcome = await review(BASE, HEAD, ["package.json"]);
     const candidate = mine(outcome.report.findings)[0];
     if (candidate === undefined) throw new Error("no M.3.5 candidate");
@@ -182,7 +182,61 @@ describe("witness A — a boundary-only edit", () => {
     const attempt = adjudicate(candidate, HEAD, BASE);
     expect(attempt.status).toBe("completed");
     if (attempt.status !== "completed") return;
-    expect(attempt.decision).toBe("inconclusive");
+    expect(attempt.decision).toBe("verified");
+    expect(attempt.reasons).toContain("consumer_boundary_unreachable_at_head");
+
+    const promotion = promoteVerified([
+      {
+        candidateId: candidate.identityHint,
+        fingerprint: candidate.identityHint,
+        severity: attempt.severity,
+        category: candidate.category,
+        path: candidate.location.path,
+        attempt,
+      },
+    ]);
+    expect(promotion.kind).toBe("promoted");
+
+    const plan = planPublication(
+      [
+        {
+          findingId: candidate.identityHint,
+          fingerprint: candidate.identityHint,
+          severity: attempt.severity,
+          category: candidate.category,
+          path: candidate.location.path,
+        },
+      ],
+      DEFAULT_PUBLICATION_CONFIG,
+    );
+    expect(plan.publish).toHaveLength(1);
+  });
+
+  it("proposes NOTHING when the target moves but the specifier survives", async () => {
+    // Worth pinning as the analyzer's own refutation. `pkg/codec` still
+    // reaches `decode` through a different file, so there is no loss to
+    // propose and the verifier is never consulted.
+    //
+    // This is also why the routing-path rejection witness that belongs here
+    // does not exist: with a faithful surface, proposal and resolution agree
+    // by construction, so producing a rejection would mean fabricating an
+    // analyzer error. The independence proof lives in the mechanism tests,
+    // where a claim resolution disproves can be fed to the verifier directly
+    // and the rubber-stamp shape fails visibly.
+    const MOVED: Revision = {
+      files: {
+        "src/index.ts": "export const version = 1;",
+        "src/moved.ts": DECODE,
+        "package.json": manifest({
+          ".": "./src/index.ts",
+          "./codec": "./src/moved.ts",
+        }),
+      },
+    };
+
+    const outcome = await review(BASE, MOVED, ["package.json", "src/moved.ts"]);
+
+    expect(mine(outcome.report.findings)).toEqual([]);
   });
 });
 

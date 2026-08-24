@@ -49,6 +49,7 @@ interface DeliveredSurface {
     readonly establishedIn: string;
   }[];
   readonly completeness: { readonly kind: string; readonly because?: string };
+  readonly declaredIn: string;
 }
 
 /** The surfaces the planner delivered, split by revision. */
@@ -88,6 +89,7 @@ interface Observation {
 
 interface Loss {
   readonly boundary: string;
+  readonly declaredIn: string;
   readonly name: string;
   readonly namespace: "value" | "type";
   readonly establishedIn: string;
@@ -104,7 +106,10 @@ export function analyzeBoundaryReachability(
   const losses = new Map<string, Loss>();
 
   for (const [identity, before] of base) {
-    if (before.completeness.kind === "partial" || before.completeness.kind === "unavailable") {
+    if (
+      before.completeness.kind === "partial" ||
+      before.completeness.kind === "unavailable"
+    ) {
       degradations.push({
         path: before.consumerEntry ?? identity,
         because:
@@ -149,6 +154,7 @@ export function analyzeBoundaryReachability(
       const key = `${identity}|${lost.name}|${lost.namespace}`;
       const existing: Loss = losses.get(key) ?? {
         boundary: identity,
+        declaredIn: before.declaredIn,
         name: lost.name,
         namespace: lost.namespace,
         establishedIn: lost.establishedIn,
@@ -173,14 +179,12 @@ export function analyzeBoundaryReachability(
     }
   }
 
-  const findings: CandidateFinding[] = [...losses.keys()]
-    .sort()
-    .map((key) => {
-      const loss = losses.get(key);
-      /* c8 ignore next */
-      if (loss === undefined) throw new Error("unreachable");
-      return candidateFor(loss, clusterId);
-    });
+  const findings: CandidateFinding[] = [...losses.keys()].sort().map((key) => {
+    const loss = losses.get(key);
+    /* c8 ignore next */
+    if (loss === undefined) throw new Error("unreachable");
+    return candidateFor(loss, clusterId);
+  });
 
   return {
     findings,
@@ -216,8 +220,8 @@ function candidateFor(loss: Loss, clusterId: string): CandidateFinding {
     category: "correctness",
     family: "api_contract",
     claim:
-      `\`${loss.name}\` was reachable through \`${loss.boundary}\` at the base revision and is no longer ` +
-      `reachable through that boundary, so consumers importing it stop compiling.`,
+      `\`${loss.name}\` was reachable through the public boundary \`${loss.boundary}\` at the base ` +
+      `revision and is no longer reachable through it, so a consumer importing it stops compiling.`,
     causal: {
       anchor: location,
       steps: [
@@ -242,6 +246,12 @@ function candidateFor(loss: Loss, clusterId: string): CandidateFinding {
         strength: "supporting",
         observation: `\`${loss.boundary}\` reached \`${loss.name}\` at the base revision, established by ${loss.provenance.replace(/_/g, " ")} in ${loss.establishedIn}.`,
         location,
+      },
+      {
+        type: "static_analysis",
+        strength: "supporting",
+        observation: `The boundary \`${loss.boundary}\` is declared by this manifest.`,
+        location: { path: loss.declaredIn, startLine: 1, endLine: 1 },
       },
       ...observations.map((entry) => ({
         type: "static_analysis" as const,

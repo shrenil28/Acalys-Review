@@ -32,6 +32,15 @@
  * M.3.4 still refuses TS2307, and correctly: there the probe is relative and
  * these premises do not exist. One code, two meanings, separated by evidence.
  *
+ * # There is no `unavailable` here
+ *
+ * The procedure either reconstructs both packages or it does not, and a
+ * failure to reconstruct is indistinguishable from a package that never
+ * exposed the specifier — both come back `inconclusive` with the reason
+ * stated. A separate infrastructure-failure verdict was declared and removed:
+ * nothing could produce it, and a reason no verification can emit is a
+ * guarantee nobody holds.
+ *
  * # What this is not allowed to trust
  *
  * The boundary fact may say *which specifier to try*. It may never say whether
@@ -54,6 +63,28 @@ export interface ConsumerBoundaryQuery {
 }
 
 const PROBE = "acalys-consumer/probe.ts";
+
+/**
+ * The procedure this verifier performs, as an identity rather than a constant.
+ *
+ * The resolution mode is semantic input. The same sources and the same
+ * manifest adjudicate differently under a resolver that honours package
+ * exports and one that does not — `Bundler` and `Node10` resolve a subpath by
+ * file path, which is the bypass this capability exists to close. Recording it
+ * here means a future change to the mode is a change to what was proved, not a
+ * tuning detail.
+ *
+ * The claim is bounded accordingly: this proves what the frozen TypeScript
+ * consumer procedure concludes, not what every runtime resolver in the
+ * ecosystem would do.
+ */
+export const CONSUMER_BOUNDARY_PROCEDURE =
+  "public_boundary_consumer_verification/v1";
+
+export const CONSUMER_BOUNDARY_RESOLUTION = {
+  module: ts.ModuleKind.NodeNext,
+  moduleResolution: ts.ModuleResolutionKind.NodeNext,
+} as const;
 
 /**
  * Lays the revision out as a consumer would see it.
@@ -109,6 +140,25 @@ function hostOver(files: ReadonlyMap<string, string>): ts.CompilerHost {
 interface ProbeOutcome {
   readonly resolved: boolean;
   readonly codes: readonly number[];
+  /** Codes reported at the consumer specifier itself. */
+  readonly atSpecifier: readonly number[];
+}
+
+/** The span of the module specifier a probe imports from. */
+export function importSpecifierSpan(
+  source: ts.SourceFile,
+  specifier: string,
+): { readonly start: number; readonly end: number } | undefined {
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement)) continue;
+    if (!ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== specifier) continue;
+    return {
+      start: statement.getStart(source),
+      end: statement.getEnd(),
+    };
+  }
+  return undefined;
 }
 
 /** Compiles the consumer against one revision, laid out as a package. */
@@ -126,26 +176,47 @@ function compileConsumer(
       // NodeNext is what makes the exports map participate at all. Under
       // Bundler or Node10 the subpath would resolve by file path and the
       // manifest would again be irrelevant.
-      module: ts.ModuleKind.NodeNext,
-      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      ...CONSUMER_BOUNDARY_RESOLUTION,
       noEmit: true,
     },
     host: hostOver(laid),
   });
 
   const source = program.getSourceFile(PROBE);
-  if (source === undefined) return { resolved: false, codes: [] };
+  if (source === undefined) {
+    return { resolved: false, codes: [], atSpecifier: [] };
+  }
 
   const diagnostics = [
     ...program.getSemanticDiagnostics(source),
     ...program.getSyntacticDiagnostics(source),
   ].filter((diagnostic) => diagnostic.file?.fileName === PROBE);
 
+  // Which of them belong to THIS import's specifier.
+  //
+  // Probe-local is not enough on its own. A probe that produced an unrelated
+  // TS2307 — some other dependency, some other specifier — would otherwise
+  // verify a break that nothing in the claim describes. This is the
+  // package-boundary analogue of the probe-locality rule the module verifier
+  // already carries, one level finer: the right code, at the right import.
+  const specifierSpan = importSpecifierSpan(source, query.consumerSpecifier);
+  const atSpecifier = diagnostics.filter((diagnostic) => {
+    if (specifierSpan === undefined) return false;
+    if (diagnostic.start === undefined) return false;
+    return (
+      diagnostic.start >= specifierSpan.start &&
+      diagnostic.start <= specifierSpan.end
+    );
+  });
+
   return {
     resolved: diagnostics.length === 0,
     codes: [...new Set(diagnostics.map((diagnostic) => diagnostic.code))].sort(
       (left, right) => left - right,
     ),
+    atSpecifier: [
+      ...new Set(atSpecifier.map((diagnostic) => diagnostic.code)),
+    ].sort((left, right) => left - right),
   };
 }
 
@@ -197,7 +268,7 @@ export function verifyConsumerBoundary(
     };
   }
 
-  if (!head.codes.includes(MODULE_NOT_FOUND)) {
+  if (!head.atSpecifier.includes(MODULE_NOT_FOUND)) {
     // It failed for some other reason. Reporting a boundary withdrawal on
     // that basis would attribute an unrelated breakage to this change.
     return {

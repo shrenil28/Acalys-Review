@@ -173,7 +173,11 @@ export function declaredBoundaries(
 
     const exportsField = record["exports"];
     if (typeof exportsField === "string") {
-      found.push({ identity: name, entry: resolve(exportsField), declaredIn: path });
+      found.push({
+        identity: name,
+        entry: resolve(exportsField),
+        declaredIn: path,
+      });
     } else if (exportsField !== null && typeof exportsField === "object") {
       for (const [subpath, target] of Object.entries(
         exportsField as Record<string, unknown>,
@@ -197,7 +201,11 @@ export function declaredBoundaries(
       for (const key of ["main", "types"]) {
         const value = record[key];
         if (typeof value === "string") {
-          found.push({ identity: name, entry: resolve(value), declaredIn: path });
+          found.push({
+            identity: name,
+            entry: resolve(value),
+            declaredIn: path,
+          });
           break;
         }
       }

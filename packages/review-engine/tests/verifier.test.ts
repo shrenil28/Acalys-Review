@@ -397,6 +397,85 @@ describe("P1-M.4 discarded replacement verification", () => {
   });
 });
 
+const CONSUMER_CLAIM =
+  "`decode` was reachable through the public boundary `pkg/codec` at the base revision and is no longer reachable through it, so a consumer importing it stops compiling.";
+
+const PKG_DECODE =
+  "export function decode(raw: string): string {\n  return raw;\n}";
+
+const pkgManifest = (exports: Record<string, string>) =>
+  JSON.stringify({ name: "pkg", version: "1.0.0", exports });
+
+/** A real M.3.6 verification, used as behaviour and as reachability evidence. */
+function verifyConsumer(
+  baseFiles: Record<string, string>,
+  headFiles: Record<string, string>,
+): VerificationAttempt {
+  const input = inputFor({
+    claim: {
+      statement: CONSUMER_CLAIM,
+      steps: [],
+      trigger: "importing `decode` from `pkg/codec`",
+      consequence: "the consumer no longer compiles",
+    },
+    location: { path: "src/codec.ts", startLine: 1, endLine: 1 },
+    evidence: [
+      {
+        type: "static_analysis",
+        observation: "The boundary `pkg/codec` is declared by this manifest.",
+        location: { path: "package.json", startLine: 1, endLine: 1 },
+      },
+    ],
+  });
+
+  return verifyDeterministically(
+    input,
+    planVerificationContext({
+      verificationInput: input,
+      repository: repositoryOf(headFiles),
+      comparison: {
+        revisionId: "b".repeat(40),
+        files: new Map(Object.entries(baseFiles)),
+      },
+    }),
+  );
+}
+
+const CONSUMER_BASE = {
+  "package.json": pkgManifest({ "./codec": "./src/codec.ts" }),
+  "src/codec.ts": PKG_DECODE,
+};
+
+describe("P1-M.3.6 consumer boundary verification", () => {
+  it("VERIFIES when the exports map withdraws the subpath", () => {
+    const attempt = verifyConsumer(CONSUMER_BASE, {
+      "package.json": pkgManifest({ ".": "./src/codec.ts" }),
+      "src/codec.ts": PKG_DECODE,
+    });
+
+    expect(decisionOf(attempt)).toBe("verified");
+    expect(reasonsOf(attempt)).toContain(
+      "consumer_boundary_unreachable_at_head",
+    );
+  });
+
+  it("REJECTS when the consumer specifier still resolves", () => {
+    const attempt = verifyConsumer(CONSUMER_BASE, CONSUMER_BASE);
+
+    expect(decisionOf(attempt)).toBe("rejected");
+    expect(reasonsOf(attempt)).toContain("consumer_boundary_still_importable");
+  });
+
+  it("abstains when the base consumer never resolved", () => {
+    const attempt = verifyConsumer(
+      { "package.json": JSON.stringify({ name: "pkg" }) },
+      { "package.json": JSON.stringify({ name: "pkg" }) },
+    );
+
+    expect(decisionOf(attempt)).toBe("inconclusive");
+  });
+});
+
 describe("Every reason code is reachable", () => {
   it("is exercised by a real verification, not merely declared", () => {
     // A reason nothing can produce is a vocabulary entry that will be misused
@@ -407,6 +486,21 @@ describe("Every reason code is reachable", () => {
     };
 
     record(verify({ "src/caller.ts": CALLER, "src/store.ts": ASYNC_STORE }));
+
+    // P1-M.3.6, produced by real verifications rather than asserted into the set.
+    record(
+      verifyConsumer(CONSUMER_BASE, {
+        "package.json": pkgManifest({ ".": "./src/codec.ts" }),
+        "src/codec.ts": PKG_DECODE,
+      }),
+    );
+    record(verifyConsumer(CONSUMER_BASE, CONSUMER_BASE));
+    record(
+      verifyConsumer(
+        { "package.json": JSON.stringify({ name: "pkg" }) },
+        { "package.json": JSON.stringify({ name: "pkg" }) },
+      ),
+    );
 
     // P1-M.4, produced by real verifications rather than asserted into the set.
     record(
