@@ -130,6 +130,10 @@ export const ALL_ANALYZER_IDS = [
   // syntactic export names, so it found renames and missed the removals it was
   // named for; running both would propose one logical break twice.
   "acalys.correctness.public-export-reachability-loss",
+  // P1-M.3.5. Proposes at the consumer-visible boundary, which is where the
+  // verifier above already adjudicates. Its predecessor proposed from module
+  // export deltas and so could not see an edit to the boundary itself.
+  "acalys.correctness.public-boundary-reachability-loss",
   "acalys.correctness.required-parameter-added",
   // P1-M.4. The first analyzer whose hypothesis is about a value that still
   // flows: the call happens, nothing looks unused, and what is lost is the
@@ -151,6 +155,11 @@ export {
   EXPORT_REACHABILITY_RULE_ID,
   analyzeExportReachability,
 } from "./correctness/export-reachability.js";
+
+export {
+  BOUNDARY_REACHABILITY_RULE_ID,
+  analyzeBoundaryReachability,
+} from "./correctness/boundary-reachability.js";
 
 export {
   boundarySurface,

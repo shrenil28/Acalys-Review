@@ -61,7 +61,9 @@ describe("boundaries a repository declares", () => {
       }),
     );
 
-    expect(found).toEqual([{ identity: "pkg", entry: "src/index.ts" }]);
+    expect(found).toEqual([
+      { identity: "pkg", entry: "src/index.ts", declaredIn: "package.json" },
+    ]);
   });
 
   it("ignores an unparseable manifest rather than inventing a boundary", () => {
@@ -182,6 +184,7 @@ describe("completeness, because absence must be earned", () => {
     const surface = boundarySurface(map, {
       identity: "pkg",
       entry: undefined,
+      declaredIn: "package.json",
     });
 
     expect(surface.completeness.kind).toBe("unavailable");
@@ -268,5 +271,87 @@ describe("the case M.3.4 could not see", () => {
     expect(
       declaredBoundaries(files(head)).some((b) => b.identity === "pkg/codec"),
     ).toBe(false);
+  });
+});
+
+describe("boundary identity is the consumer contract, not the target", () => {
+  it("keeps two subpaths pointing at ONE file distinct", () => {
+    // Same implementation, two public contracts. Collapsing them would mean
+    // withdrawing `pkg/admin` looked like withdrawing nothing, because
+    // `pkg/codec` still resolves to the same file.
+    const found = declaredBoundaries(
+      files({
+        "package.json": JSON.stringify({
+          name: "pkg",
+          exports: { "./codec": "./src/index.ts", "./admin": "./src/index.ts" },
+        }),
+        "src/index.ts": DECODE,
+      }),
+    );
+
+    expect(found.map((entry) => entry.identity)).toEqual([
+      "pkg/admin",
+      "pkg/codec",
+    ]);
+    expect(found.every((entry) => entry.entry === "src/index.ts")).toBe(true);
+  });
+
+  it("keeps ONE identity when its target moves between revisions", () => {
+    // The converse. A consumer writes `pkg/codec` and does not care which file
+    // answers; treating the move as a boundary disappearing and another
+    // appearing would report a break that no consumer experiences.
+    const manifest = JSON.stringify({
+      name: "pkg",
+      exports: { "./codec": "./src/old.ts" },
+    });
+    const moved = JSON.stringify({
+      name: "pkg",
+      exports: { "./codec": "./src/new.ts" },
+    });
+
+    const before = declaredBoundaries(
+      files({ "package.json": manifest, "src/old.ts": DECODE }),
+    );
+    const after = declaredBoundaries(
+      files({ "package.json": moved, "src/new.ts": DECODE }),
+    );
+
+    expect(before.map((e) => e.identity)).toEqual(after.map((e) => e.identity));
+    expect(before[0]?.entry).toBe("src/old.ts");
+    expect(after[0]?.entry).toBe("src/new.ts");
+  });
+
+  it("names the package root without a subpath suffix", () => {
+    const found = declaredBoundaries(
+      files({
+        "package.json": JSON.stringify({
+          name: "pkg",
+          exports: { ".": "./src/index.ts", "./codec": "./src/codec.ts" },
+        }),
+        "src/index.ts": "",
+        "src/codec.ts": "",
+      }),
+    );
+
+    expect(found.map((entry) => entry.identity)).toEqual(["pkg", "pkg/codec"]);
+  });
+
+  it("never lets a raw specifier or resolved file become the identity", () => {
+    // `./codec` is how the manifest spells it and `src/codec.ts` is what it
+    // resolves to. Neither is what a consumer writes, and neither may key a
+    // candidate.
+    const found = declaredBoundaries(
+      files({
+        "package.json": JSON.stringify({
+          name: "pkg",
+          exports: { "./codec": "./src/codec.ts" },
+        }),
+        "src/codec.ts": DECODE,
+      }),
+    );
+
+    expect(found.map((entry) => entry.identity)).toEqual(["pkg/codec"]);
+    expect(found.map((entry) => entry.identity)).not.toContain("./codec");
+    expect(found.map((entry) => entry.identity)).not.toContain("src/codec.ts");
   });
 });

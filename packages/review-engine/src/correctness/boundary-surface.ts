@@ -79,6 +79,8 @@ export type SurfaceCompleteness =
 export interface PublicBoundarySurface {
   /** What a consumer writes in an import. */
   readonly boundaryIdentity: string;
+  /** The manifest that declared it. */
+  readonly declaredIn: string;
   /** The file that entry resolves to, when one could be resolved. */
   readonly consumerEntry: string | undefined;
   readonly reachableNames: readonly ReachableName[];
@@ -134,8 +136,14 @@ export function declaredBoundaries(
 ): readonly {
   readonly identity: string;
   readonly entry: string | undefined;
+  /** The manifest that declared it, which is where a withdrawal happens. */
+  readonly declaredIn: string;
 }[] {
-  const found: { identity: string; entry: string | undefined }[] = [];
+  const found: {
+    identity: string;
+    entry: string | undefined;
+    declaredIn: string;
+  }[] = [];
 
   for (const [path, content] of files) {
     if (!path.endsWith("package.json")) continue;
@@ -165,7 +173,7 @@ export function declaredBoundaries(
 
     const exportsField = record["exports"];
     if (typeof exportsField === "string") {
-      found.push({ identity: name, entry: resolve(exportsField) });
+      found.push({ identity: name, entry: resolve(exportsField), declaredIn: path });
     } else if (exportsField !== null && typeof exportsField === "object") {
       for (const [subpath, target] of Object.entries(
         exportsField as Record<string, unknown>,
@@ -173,7 +181,7 @@ export function declaredBoundaries(
         const identity =
           subpath === "." ? name : `${name}/${subpath.replace(/^\.\//, "")}`;
         if (typeof target === "string") {
-          found.push({ identity, entry: resolve(target) });
+          found.push({ identity, entry: resolve(target), declaredIn: path });
         } else if (target !== null && typeof target === "object") {
           const first = Object.values(target as Record<string, unknown>).find(
             (value) => typeof value === "string",
@@ -181,6 +189,7 @@ export function declaredBoundaries(
           found.push({
             identity,
             entry: typeof first === "string" ? resolve(first) : undefined,
+            declaredIn: path,
           });
         }
       }
@@ -188,7 +197,7 @@ export function declaredBoundaries(
       for (const key of ["main", "types"]) {
         const value = record[key];
         if (typeof value === "string") {
-          found.push({ identity: name, entry: resolve(value) });
+          found.push({ identity: name, entry: resolve(value), declaredIn: path });
           break;
         }
       }
@@ -213,11 +222,16 @@ export function declaredBoundaries(
  */
 export function boundarySurface(
   files: ReadonlyMap<string, string>,
-  boundary: { readonly identity: string; readonly entry: string | undefined },
+  boundary: {
+    readonly identity: string;
+    readonly entry: string | undefined;
+    readonly declaredIn: string;
+  },
 ): PublicBoundarySurface {
   if (boundary.entry === undefined) {
     return {
       boundaryIdentity: boundary.identity,
+      declaredIn: boundary.declaredIn,
       consumerEntry: undefined,
       reachableNames: [],
       completeness: {
@@ -370,6 +384,7 @@ export function boundarySurface(
 
   return {
     boundaryIdentity: boundary.identity,
+    declaredIn: boundary.declaredIn,
     consumerEntry: boundary.entry,
     reachableNames: [...names.values()].sort((left, right) =>
       left.name < right.name ? -1 : left.name > right.name ? 1 : 0,

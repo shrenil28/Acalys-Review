@@ -273,11 +273,28 @@ export function buildClusters(
       );
     };
 
+    // A boundary is not a file, so path adjacency cannot route it. It belongs
+    // to a cluster that contains any path it is about — the manifest that
+    // declared it, its entry, or a file one of its names came from. Scoped by
+    // those paths rather than broadcast, for the same reason a governing
+    // configuration is scoped by its citation: a boundary that describes
+    // nothing in this cluster says nothing about this cluster.
+    //
+    // Without this the fact is assembled correctly and then filtered away, and
+    // a boundary-only edit reaches no analyzer at all.
+    const describesThisCluster = (item: AssembledItem): boolean => {
+      if (item.kind !== "boundary_surface") return false;
+      const provenance = item.provenance;
+      if (provenance?.source !== "boundary_surface_facts") return false;
+      return provenance.describes.some((path) => paths.includes(path));
+    };
+
     const items = context.filter(
       (item) =>
         neighbourhood.has(item.path) ||
         item.kind === "instruction" ||
-        governsThisCluster(item),
+        governsThisCluster(item) ||
+        describesThisCluster(item),
     );
 
     const changedSymbols = items

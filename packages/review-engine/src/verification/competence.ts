@@ -371,7 +371,15 @@ export const CLAIM_MATCHERS: readonly ClaimMatcher[] = [
     // Anchored on reachability through a boundary, not on a name's absence
     // from a statement. The predecessor keyed on the latter and that is what
     // made it rename-shaped.
-    patterns: [/may no longer be reachable through that boundary/],
+    // Both generations of the proposal reach the same adjudication. M.3.4
+    // hedges ("may no longer be reachable") because a syntactic pass cannot
+    // see through a re-export; M.3.5 states it ("is no longer reachable")
+    // because it compared two authoritative surfaces. The verifier settles
+    // either one the same way.
+    patterns: [
+      /may no longer be reachable through that boundary/,
+      /is no longer reachable through that boundary/,
+    ],
     dominates: ["signature_compatibility"],
   },
   {

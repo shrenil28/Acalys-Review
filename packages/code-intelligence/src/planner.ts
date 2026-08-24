@@ -197,6 +197,7 @@ export interface PlannerBaseRevision {
 /** One boundary's surface, as the planner receives it. */
 export interface PlannerBoundarySurface {
   readonly boundaryIdentity: string;
+  readonly declaredIn: string;
   readonly consumerEntry: string | undefined;
   readonly reachableNames: readonly {
     readonly name: string;
@@ -245,6 +246,17 @@ export type ItemProvenance =
       readonly revision: "base" | "head";
       readonly boundaryIdentity: string;
       readonly completeness: string;
+      /**
+       * Every path this boundary is about: its entry, the files its names
+       * were established in, and the manifest that declared it.
+       *
+       * A boundary is not a file, so path adjacency cannot route it. Without
+       * this a boundary-only edit reaches no cluster at all — the change is in
+       * a manifest and the surface sits at an entry file somewhere else — and
+       * the fact is assembled correctly and then filtered away before any
+       * analyzer sees it.
+       */
+      readonly describes: readonly string[];
     }
   | {
       readonly source: "base_revision_facts";
@@ -683,6 +695,15 @@ function boundarySurfaceCandidates(
           revision,
           boundaryIdentity: surface.boundaryIdentity,
           completeness: surface.completeness.kind,
+          describes: [
+            ...new Set([
+              surface.declaredIn,
+              ...(surface.consumerEntry === undefined
+                ? []
+                : [surface.consumerEntry]),
+              ...surface.reachableNames.map((entry) => entry.establishedIn),
+            ]),
+          ].sort(),
         },
       });
     }

@@ -266,19 +266,25 @@ function parseDiscardedReplacementClaim(
   return match?.[1] === undefined ? undefined : { calleeName: match[1] };
 }
 
-function parseReachabilityClaim(
-  statement: string,
-):
-  | { readonly exportName: string; readonly namespace: "value" | "type" }
+function parseReachabilityClaim(statement: string):
+  | {
+      readonly exportName: string;
+      readonly namespace: "value" | "type";
+      readonly boundaryIdentity?: string;
+    }
   | undefined {
   const match = /^`([^`]+)` was reachable through /.exec(statement);
   if (match?.[1] === undefined) return undefined;
+  // M.3.5 names the boundary in backticks; M.3.4 names a module path bare.
+  // Only the first is a consumer-visible boundary identity.
+  const boundary = /was reachable through `([^`]+)`/.exec(statement)?.[1];
   // Value is the default. A type-shaped probe against a value export reports
   // a fact about the probe, which is the trap the namespace field exists to
   // avoid, so the type space is entered only when the claim says so.
   return {
     exportName: match[1],
     namespace: /\btype surface\b/.test(statement) ? "type" : "value",
+    ...(boundary === undefined ? {} : { boundaryIdentity: boundary }),
   };
 }
 

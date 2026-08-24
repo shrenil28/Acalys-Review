@@ -33,6 +33,7 @@
  */
 
 import ts from "typescript";
+import { declaredBoundaries } from "../correctness/boundary-surface.js";
 import {
   adjudicateComparison,
   specifierFor,
@@ -67,6 +68,31 @@ export interface ExportReachabilityQuery {
   readonly declarationPath: string;
   readonly exportName: string;
   readonly namespace: "value" | "type";
+  /**
+   * The consumer-visible boundary the claim is about, when the candidate
+   * knows it.
+   *
+   * M.3.5 proposes from boundary surfaces, so its candidates carry the
+   * boundary they lost. Re-deriving one from a declaration path would find
+   * whichever entry sits nearest above it — for a package exposing both `.`
+   * and `./codec`, that is the wrong one — and the verifier would then
+   * faithfully adjudicate a boundary nobody claimed anything about.
+   *
+   * Adjudication is unchanged either way: probe base, probe head, compare.
+   * Only which boundary is probed comes from the candidate now.
+   */
+  readonly boundaryIdentity?: string | undefined;
+}
+
+/** The entry a named boundary resolves to, when the revision declares it. */
+export function entryForBoundary(
+  files: ReadonlyMap<string, string>,
+  identity: string,
+): string | undefined {
+  for (const boundary of declaredBoundaries(files)) {
+    if (boundary.identity === identity) return boundary.entry;
+  }
+  return undefined;
 }
 
 /**
@@ -169,10 +195,39 @@ export function verifyExportReachability(
   // Resolved from BASE, because the boundary under test is the one the
   // consumer used. A head revision that moved its own entry point has not
   // thereby changed which import a published consumer already wrote.
-  const boundaryPath = resolvePublicBoundary(
-    revisions.baseFiles,
-    query.declarationPath,
-  );
+  const named =
+    query.boundaryIdentity === undefined
+      ? undefined
+      : entryForBoundary(revisions.baseFiles, query.boundaryIdentity);
+
+  // A boundary the head revision no longer declares cannot be probed.
+  //
+  // The probe imports through a RELATIVE file specifier, so package-exports
+  // resolution plays no part in it. That is adequate for a name leaving a
+  // module, and structurally inadequate for a manifest withdrawing a subpath:
+  // the file is untouched and still exports the name, so the probe compiles
+  // and the verifier would report "still reachable" about a boundary that no
+  // longer exists.
+  //
+  // Rather than emit that refutation, this says what is true — the evidence
+  // needed is a consumer-style resolution this procedure does not perform.
+  // Proving a manifest withdrawal is separate work with its own contract; a
+  // wrong verdict now would be worse than no verdict, and would teach the
+  // funnel that boundary withdrawals are safe.
+  if (
+    query.boundaryIdentity !== undefined &&
+    entryForBoundary(revisions.headFiles, query.boundaryIdentity) === undefined
+  ) {
+    return {
+      kind: "inconclusive",
+      detail:
+        `\`${query.boundaryIdentity}\` is no longer declared at head, so no consumer probe can be ` +
+        "constructed through it; a relative-path probe would bypass the manifest and prove nothing",
+    };
+  }
+
+  const boundaryPath =
+    named ?? resolvePublicBoundary(revisions.baseFiles, query.declarationPath);
 
   return adjudicateComparison({
     baseFiles: revisions.baseFiles,

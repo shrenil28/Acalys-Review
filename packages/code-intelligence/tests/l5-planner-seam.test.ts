@@ -108,6 +108,7 @@ function plannerInput(): PlannerInput {
       base: [
         {
           boundaryIdentity: "fixture",
+          declaredIn: "package.json",
           consumerEntry: "src/service.ts",
           reachableNames: [
             {
@@ -123,6 +124,7 @@ function plannerInput(): PlannerInput {
       head: [
         {
           boundaryIdentity: "fixture",
+          declaredIn: "package.json",
           consumerEntry: "src/service.ts",
           reachableNames: [
             {
