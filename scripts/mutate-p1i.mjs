@@ -2540,9 +2540,9 @@ const ALL_MUTATIONS = [
     id: 288,
     name: "M.3.6 the consumer probe imports a relative path again",
     file: "packages/review-engine/src/verification/consumer-boundary.ts",
-    find: '          `import { ${query.exportName} } from "${query.consumerSpecifier}";`,',
+    find: '        `import { ${query.exportName} } from "${query.consumerSpecifier}";`,',
     replace:
-      '          `import { ${query.exportName} } from "./${query.consumerSpecifier.split("/").pop() ?? ""}";`,',
+      '        `import { ${query.exportName} } from "./${query.consumerSpecifier.split("/").pop() ?? ""}";`,',
     suite: "apps/review-worker/tests/m35-boundary-reachability.test.ts",
   },
   {

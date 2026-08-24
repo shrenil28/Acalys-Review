@@ -233,6 +233,46 @@ function compileConsumer(
 /** Cannot find module — the consumer-boundary failure, under premises. */
 const MODULE_NOT_FOUND = 2307;
 
+/**
+ * The consumer this procedure synthesizes: exactly ONE package import.
+ *
+ * That cardinality is load-bearing beyond tidiness. A mutation asserting that
+ * "any probe diagnostic" differs from "a diagnostic at this specifier" was
+ * retired as an equivalent mutant, and the equivalence holds *only* while a
+ * probe carries a single import. If this ever emits a second one, diagnostic
+ * locality stops being free, and that mutation has to come back.
+ *
+ * `probeImportCount` exists so the property that licensed the retirement is
+ * pinned rather than remembered.
+ */
+export function consumerProbeSource(query: ConsumerBoundaryQuery): string {
+  return query.namespace === "type"
+    ? [
+        `import type { ${query.exportName} } from "${query.consumerSpecifier}";`,
+        `type __AcalysProbe = ${query.exportName};`,
+        "export type { __AcalysProbe };",
+        "",
+      ].join("\n")
+    : [
+        `import { ${query.exportName} } from "${query.consumerSpecifier}";`,
+        `void ${query.exportName};`,
+        "",
+      ].join("\n");
+}
+
+/** How many imports a probe carries. See {@link consumerProbeSource}. */
+export function probeImportCount(probeSource: string): number {
+  const source = ts.createSourceFile(
+    "probe.ts",
+    probeSource,
+    ts.ScriptTarget.ES2022,
+    true,
+  );
+  return source.statements.filter((statement) =>
+    ts.isImportDeclaration(statement),
+  ).length;
+}
+
 export function verifyConsumerBoundary(
   query: ConsumerBoundaryQuery,
   revisions: {
@@ -240,19 +280,7 @@ export function verifyConsumerBoundary(
     readonly headFiles: ReadonlyMap<string, string>;
   },
 ): ComparisonVerdict {
-  const probeSource =
-    query.namespace === "type"
-      ? [
-          `import type { ${query.exportName} } from "${query.consumerSpecifier}";`,
-          `type __AcalysProbe = ${query.exportName};`,
-          "export type { __AcalysProbe };",
-          "",
-        ].join("\n")
-      : [
-          `import { ${query.exportName} } from "${query.consumerSpecifier}";`,
-          `void ${query.exportName};`,
-          "",
-        ].join("\n");
+  const probeSource = consumerProbeSource(query);
 
   const base = compileConsumer(revisions.baseFiles, query, probeSource);
 

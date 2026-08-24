@@ -11,7 +11,9 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 import {
+  consumerProbeSource,
   importSpecifierSpan,
+  probeImportCount,
   verifyConsumerBoundary,
 } from "../src/verification/consumer-boundary.js";
 
@@ -246,5 +248,33 @@ describe("the resolver must honour the exports map", () => {
     };
 
     expect(check(base, head).kind).toBe("verified");
+  });
+});
+
+describe("the v1 probe carries exactly one package import", () => {
+  // This is why mutation #295 could be retired as an equivalent mutant. "Any
+  // probe diagnostic" and "a diagnostic at this specifier" are the same set
+  // only while a probe has one import to attribute anything to. The property
+  // is pinned here so the retirement rests on something checked rather than
+  // on something remembered — if a future probe grows a second import, this
+  // fails and that mutation has to come back.
+  it.each(["value", "type"] as const)("for a %s-space probe", (namespace) => {
+    const source = consumerProbeSource({
+      consumerSpecifier: "pkg/codec",
+      exportName: "decode",
+      namespace,
+      packageRoot: "",
+      packageName: "pkg",
+    });
+
+    expect(probeImportCount(source)).toBe(1);
+  });
+
+  it("counts a second import when one is present", () => {
+    // The premise. Without it, `toBe(1)` could be passing because the counter
+    // returns 1 for everything.
+    expect(probeImportCount('import a from "x";\nimport b from "y";\n')).toBe(
+      2,
+    );
   });
 });
