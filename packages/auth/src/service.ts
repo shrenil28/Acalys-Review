@@ -113,13 +113,13 @@ export function mapGithubPermissionsToRole(input: {
 export interface AuthServiceOptions {
   readonly store: AuthStore;
   readonly sessionTtlMillis?: number | undefined;
+  /** @deprecated Credential and OAuth-commit chronology is database-owned. */
   readonly now?: (() => Date) | undefined;
 }
 
 export class AuthService {
   readonly #store: AuthStore;
   readonly #sessionTtlMillis: number;
-  readonly #now: () => Date;
 
   public constructor(options: AuthServiceOptions) {
     this.#store = options.store;
@@ -127,17 +127,16 @@ export class AuthService {
     if (!Number.isSafeInteger(this.#sessionTtlMillis) || this.#sessionTtlMillis <= 0) {
       throw new ValidationError("Session TTL must be a positive safe integer");
     }
-    this.#now = options.now ?? (() => new Date());
   }
 
   /**
-   * Persists a provider-verified GitHub identity, synchronizes the tenant role
-   * from installation permissions, and issues the first opaque session.
+   * Persists a provider-verified GitHub identity, synchronizes the tenant role,
+   * and issues the first opaque session through one database-owned commit.
    *
-   * The proposed user id is only used on first sight. `upsertOAuthIdentity`
-   * returns the canonical existing id on repeat logins, preventing a duplicate
-   * OAuth callback from creating a membership for a non-existent replacement
-   * id.
+   * The proposed user id is only used on first sight. The store returns the
+   * canonical provider identity, exact membership row, persisted role, and
+   * database-clock expiry from the same transaction. A failed session insert
+   * therefore cannot leave an identity/membership update committed by itself.
    */
   public async establishGithubSession(input: {
     readonly organizationId: string;
@@ -145,28 +144,30 @@ export class AuthService {
     readonly organizationOwner: boolean;
     readonly permissions: Readonly<Record<string, string>>;
   }): Promise<EstablishedGithubSession> {
-    const now = this.#now();
-    const role = mapGithubPermissionsToRole({
+    const requestedRole = mapGithubPermissionsToRole({
       organizationOwner: input.organizationOwner,
       permissions: input.permissions,
     });
-    const userId = await this.#store.upsertOAuthIdentity({
-      userId: uuidv7(),
+    const sessionId = uuidv7();
+    const token = secureToken("acalys_session");
+    const established = await this.#store.establishOAuthSession({
+      proposedUserId: uuidv7(),
+      membershipId: uuidv7(),
+      sessionId,
+      organizationId: input.organizationId,
       provider: "github",
       providerUserId: input.identity.providerUserId,
       ...(input.identity.email === undefined ? {} : { primaryEmail: input.identity.email }),
       ...(input.identity.displayName === undefined ? {} : { displayName: input.identity.displayName }),
-      now,
+      role: requestedRole,
+      tokenHash: hashToken(token),
+      ttlMillis: this.#sessionTtlMillis,
     });
-    await this.#store.upsertMembership({
-      membershipId: uuidv7(),
-      organizationId: input.organizationId,
-      userId,
-      role,
-      now,
-    });
-    const credential = await this.issueSession(userId, input.organizationId);
-    return { userId, role, credential };
+    return {
+      userId: established.userId,
+      role: established.role as Role,
+      credential: { id: sessionId, token, expiresAt: established.expiresAt },
+    };
   }
 
   public async issueSession(userId: string, organizationId: string): Promise<IssuedCredential> {

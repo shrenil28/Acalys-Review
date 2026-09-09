@@ -348,22 +348,22 @@ describe("AuthService credential boundaries", () => {
     ).rejects.toThrow(ValidationError);
   });
 
-  it("reuses the canonical OAuth user id and persists the role mapped from verified GitHub permissions", async () => {
-    const membership: Record<string, unknown>[] = [];
-    const sessions: Record<string, unknown>[] = [];
+  it("commits GitHub identity, membership role, and first session through one store operation", async () => {
+    let commitInput: Record<string, unknown> | undefined;
+    const databaseExpiry = new Date(NOW.getTime() + 60_000);
     const store = asStore({
-      async upsertOAuthIdentity() {
-        return USER;
-      },
-      async upsertMembership(input: Record<string, unknown>) {
-        membership.push(input);
-      },
-      async createSession(input: Record<string, unknown>) {
-        sessions.push(input);
-        return { createdAt: NOW, expiresAt: new Date(NOW.getTime() + 60_000) };
+      async establishOAuthSession(input: Record<string, unknown>) {
+        commitInput = input;
+        return {
+          userId: USER,
+          membershipId: "0192f8a1-0000-7000-8000-000000000501",
+          role: "member",
+          createdAt: NOW,
+          expiresAt: databaseExpiry,
+        };
       },
     });
-    const auth = new AuthService({ store, now: () => NOW });
+    const auth = new AuthService({ store, now: () => new Date("2099-01-01T00:00:00.000Z") });
 
     const established = await auth.establishGithubSession({
       organizationId: ORG,
@@ -374,7 +374,15 @@ describe("AuthService credential boundaries", () => {
 
     expect(established.userId).toBe(USER);
     expect(established.role).toBe("member");
-    expect(membership[0]).toMatchObject({ organizationId: ORG, userId: USER, role: "member" });
-    expect(sessions[0]).toMatchObject({ organizationId: ORG, userId: USER });
+    expect(established.credential.expiresAt).toEqual(databaseExpiry);
+    expect(commitInput).toMatchObject({
+      organizationId: ORG,
+      provider: "github",
+      providerUserId: "42",
+      displayName: "Ada",
+      role: "member",
+    });
+    expect(commitInput?.["tokenHash"]).toBe(sha256(established.credential.token));
+    expect(commitInput).not.toHaveProperty("now");
   });
 });

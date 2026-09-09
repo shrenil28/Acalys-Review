@@ -16,10 +16,16 @@ if (!HAS_DOCKER) {
 const ORG = "0192f8a1-1000-7000-8000-000000000101";
 const USER = "0192f8a1-1000-7000-8000-000000000201";
 const OTHER_USER = "0192f8a1-1000-7000-8000-000000000202";
+const PROPOSED_USER = "0192f8a1-1000-7000-8000-000000000203";
+const PROPOSED_USER_2 = "0192f8a1-1000-7000-8000-000000000204";
 const MEMBERSHIP = "0192f8a1-1000-7000-8000-000000000301";
+const OAUTH_MEMBERSHIP = "0192f8a1-1000-7000-8000-000000000303";
+const OAUTH_MEMBERSHIP_2 = "0192f8a1-1000-7000-8000-000000000304";
 const REJOINED_MEMBERSHIP = "0192f8a1-1000-7000-8000-000000000302";
 const SESSION = "0192f8a1-1000-7000-8000-000000000401";
 const REPLACEMENT = "0192f8a1-1000-7000-8000-000000000402";
+const OAUTH_SESSION = "0192f8a1-1000-7000-8000-000000000403";
+const OAUTH_SESSION_2 = "0192f8a1-1000-7000-8000-000000000404";
 const KEY = "0192f8a1-1000-7000-8000-000000000501";
 const ORG_KEY = "0192f8a1-1000-7000-8000-000000000502";
 const LEGACY_KEY = "0192f8a1-1000-7000-8000-000000000503";
@@ -74,7 +80,6 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       provider: "github",
       providerUserId: "42",
       displayName: "Updated Name",
-      now: new Date(NOW.getTime() + 1_000),
     });
 
     expect(returned).toBe(USER);
@@ -337,4 +342,129 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
     await expect(store.revokeApiKey(ORG_KEY, ORG)).resolves.toBe(true);
     await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toBeUndefined();
   });
+  it("commits OAuth identity, membership role, and first session with one database timestamp", async () => {
+    const before = await dbNow();
+    const established = await store.establishOAuthSession({
+      proposedUserId: PROPOSED_USER,
+      membershipId: OAUTH_MEMBERSHIP,
+      sessionId: OAUTH_SESSION,
+      organizationId: ORG,
+      provider: "github",
+      providerUserId: "42",
+      displayName: "Ada Updated",
+      role: "admin",
+      tokenHash: hash("n"),
+      ttlMillis: 90_000,
+    });
+    const after = await dbNow();
+
+    expect(established.userId).toBe(USER);
+    expect(established.membershipId).toBe(MEMBERSHIP);
+    expect(established.role).toBe("admin");
+    expect(established.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(established.createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
+    expect(established.expiresAt.getTime() - established.createdAt.getTime()).toBe(90_000);
+
+    const persisted = await database.pool.query<{
+      user_updated_at: Date;
+      membership_updated_at: Date;
+      session_created_at: Date;
+      session_membership_id: string | null;
+      role: string;
+    }>(
+      `SELECT u.updated_at AS user_updated_at, m.updated_at AS membership_updated_at,
+              s.created_at AS session_created_at, s.membership_id AS session_membership_id, m.role
+         FROM users AS u
+         JOIN memberships AS m ON m.user_id = u.id AND m.organization_id = $1
+         JOIN auth_sessions AS s ON s.user_id = u.id AND s.id = $2
+        WHERE u.id = $3`,
+      [ORG, OAUTH_SESSION, USER],
+    );
+    expect(persisted.rows[0]).toMatchObject({ session_membership_id: MEMBERSHIP, role: "admin" });
+    expect(persisted.rows[0]?.user_updated_at.toISOString()).toBe(established.createdAt.toISOString());
+    expect(persisted.rows[0]?.membership_updated_at.toISOString()).toBe(established.createdAt.toISOString());
+    expect(persisted.rows[0]?.session_created_at.toISOString()).toBe(established.createdAt.toISOString());
+  });
+
+  it("rolls back identity and membership refresh when first-session insertion fails", async () => {
+    await store.createSession({
+      id: SESSION,
+      userId: USER,
+      organizationId: ORG,
+      tokenHash: hash("o"),
+      ttlMillis: 60_000,
+    });
+
+    await expect(
+      store.establishOAuthSession({
+        proposedUserId: PROPOSED_USER,
+        membershipId: OAUTH_MEMBERSHIP,
+        sessionId: SESSION,
+        organizationId: ORG,
+        provider: "github",
+        providerUserId: "42",
+        displayName: "Must Roll Back",
+        role: "owner",
+        tokenHash: hash("p"),
+        ttlMillis: 60_000,
+      }),
+    ).rejects.toThrow();
+
+    const state = await database.pool.query<{ display_name: string | null; role: string }>(
+      `SELECT u.display_name, m.role
+         FROM users AS u
+         JOIN memberships AS m ON m.user_id = u.id AND m.organization_id = $1
+        WHERE u.id = $2`,
+      [ORG, USER],
+    );
+    expect(state.rows[0]).toEqual({ display_name: null, role: "member" });
+    const proposed = await database.pool.query<{ count: number }>(
+      `SELECT COUNT(*)::int AS count FROM users WHERE id = $1`,
+      [PROPOSED_USER],
+    );
+    expect(proposed.rows[0]?.count).toBe(0);
+  });
+
+  it("concurrent OAuth callbacks converge on one canonical identity and membership", async () => {
+    const secondStore = new AuthStore(database.pool);
+    const [first, second] = await Promise.all([
+      store.establishOAuthSession({
+        proposedUserId: PROPOSED_USER,
+        membershipId: OAUTH_MEMBERSHIP,
+        sessionId: OAUTH_SESSION,
+        organizationId: ORG,
+        provider: "github",
+        providerUserId: "42",
+        role: "admin",
+        tokenHash: hash("q"),
+        ttlMillis: 60_000,
+      }),
+      secondStore.establishOAuthSession({
+        proposedUserId: PROPOSED_USER_2,
+        membershipId: OAUTH_MEMBERSHIP_2,
+        sessionId: OAUTH_SESSION_2,
+        organizationId: ORG,
+        provider: "github",
+        providerUserId: "42",
+        role: "read_only",
+        tokenHash: hash("r"),
+        ttlMillis: 60_000,
+      }),
+    ]);
+
+    expect(first.userId).toBe(USER);
+    expect(second.userId).toBe(USER);
+    expect(first.membershipId).toBe(MEMBERSHIP);
+    expect(second.membershipId).toBe(MEMBERSHIP);
+    const graph = await database.pool.query<{ users: number; memberships: number; sessions: number; distinct_memberships: number }>(
+      `SELECT
+         (SELECT COUNT(*)::int FROM users WHERE provider = 'github' AND provider_user_id = '42') AS users,
+         (SELECT COUNT(*)::int FROM memberships WHERE organization_id = $1 AND user_id = $2) AS memberships,
+         (SELECT COUNT(*)::int FROM auth_sessions WHERE id IN ($3,$4)) AS sessions,
+         (SELECT COUNT(DISTINCT membership_id)::int FROM auth_sessions WHERE id IN ($3,$4)) AS distinct_memberships`,
+      [ORG, USER, OAUTH_SESSION, OAUTH_SESSION_2],
+    );
+    expect(graph.rows[0]).toEqual({ users: 1, memberships: 1, sessions: 2, distinct_memberships: 1 });
+  });
+
 });

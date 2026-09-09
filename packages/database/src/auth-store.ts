@@ -39,7 +39,6 @@ export interface OAuthIdentityInput {
   readonly providerUserId: string;
   readonly primaryEmail?: string | undefined;
   readonly displayName?: string | undefined;
-  readonly now: Date;
 }
 
 export interface MembershipInput {
@@ -47,7 +46,20 @@ export interface MembershipInput {
   readonly organizationId: string;
   readonly userId: string;
   readonly role: AuthRole;
-  readonly now: Date;
+}
+
+export interface EstablishOAuthSessionInput {
+  readonly proposedUserId: string;
+  readonly membershipId: string;
+  readonly sessionId: string;
+  readonly organizationId: string;
+  readonly provider: string;
+  readonly providerUserId: string;
+  readonly primaryEmail?: string | undefined;
+  readonly displayName?: string | undefined;
+  readonly role: AuthRole;
+  readonly tokenHash: string;
+  readonly ttlMillis: number;
 }
 
 export class AuthStore {
@@ -55,12 +67,13 @@ export class AuthStore {
 
   public async upsertOAuthIdentity(input: OAuthIdentityInput): Promise<string> {
     const result = await this.pool.query<{ id: string }>(
-      `INSERT INTO users (id, provider, provider_user_id, primary_email, display_name, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$6)
+      `WITH database_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+       INSERT INTO users (id, provider, provider_user_id, primary_email, display_name, created_at, updated_at)
+       SELECT $1,$2,$3,$4,$5,clock.at,clock.at FROM database_clock AS clock
        ON CONFLICT (provider, provider_user_id) DO UPDATE SET
          primary_email = EXCLUDED.primary_email,
          display_name = EXCLUDED.display_name,
-         updated_at = EXCLUDED.updated_at
+         updated_at = GREATEST(users.updated_at, EXCLUDED.updated_at)
        RETURNING id`,
       [
         input.userId,
@@ -68,7 +81,6 @@ export class AuthStore {
         input.providerUserId,
         input.primaryEmail ?? null,
         input.displayName ?? null,
-        input.now,
       ],
     );
     const row = result.rows[0];
@@ -78,13 +90,101 @@ export class AuthStore {
 
   public async upsertMembership(input: MembershipInput): Promise<void> {
     await this.pool.query(
-      `INSERT INTO memberships (id, organization_id, user_id, role, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$5)
+      `WITH database_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
+       INSERT INTO memberships (id, organization_id, user_id, role, created_at, updated_at)
+       SELECT $1,$2,$3,$4,clock.at,clock.at FROM database_clock AS clock
        ON CONFLICT (organization_id, user_id) DO UPDATE SET
          role = EXCLUDED.role,
-         updated_at = EXCLUDED.updated_at`,
-      [input.membershipId, input.organizationId, input.userId, input.role, input.now],
+         updated_at = GREATEST(memberships.updated_at, EXCLUDED.updated_at)`,
+      [input.membershipId, input.organizationId, input.userId, input.role],
     );
+  }
+
+  /**
+   * Commits a verified OAuth identity refresh, membership-role synchronization,
+   * and first session issuance as one database transaction. A single Postgres
+   * clock value owns all timestamps, and the session is bound to the exact
+   * membership row returned by the same statement. If any insert/update fails,
+   * no identity or membership side effect survives independently.
+   */
+  public async establishOAuthSession(input: EstablishOAuthSessionInput): Promise<{
+    readonly userId: string;
+    readonly membershipId: string;
+    readonly role: AuthRole;
+    readonly createdAt: Date;
+    readonly expiresAt: Date;
+  }> {
+    if (!Number.isSafeInteger(input.ttlMillis) || input.ttlMillis <= 0) {
+      throw new Error("Session TTL must be a positive safe integer");
+    }
+
+    return this.inTransaction(async (client) => {
+      const result = await client.query<{
+        user_id: string;
+        membership_id: string;
+        role: AuthRole;
+        created_at: Date;
+        expires_at: Date;
+      }>(
+        `WITH database_clock AS MATERIALIZED (
+           SELECT clock_timestamp() AS at
+         ), oauth_user AS (
+           INSERT INTO users
+             (id, provider, provider_user_id, primary_email, display_name, created_at, updated_at)
+           SELECT $1,$2,$3,$4,$5,clock.at,clock.at
+             FROM database_clock AS clock
+           ON CONFLICT (provider, provider_user_id) DO UPDATE SET
+             primary_email = EXCLUDED.primary_email,
+             display_name = EXCLUDED.display_name,
+             updated_at = GREATEST(users.updated_at, EXCLUDED.updated_at)
+           RETURNING id
+         ), oauth_membership AS (
+           INSERT INTO memberships
+             (id, organization_id, user_id, role, created_at, updated_at)
+           SELECT $6,$7,user_row.id,$8,clock.at,clock.at
+             FROM oauth_user AS user_row
+             CROSS JOIN database_clock AS clock
+           ON CONFLICT (organization_id, user_id) DO UPDATE SET
+             role = EXCLUDED.role,
+             updated_at = GREATEST(memberships.updated_at, EXCLUDED.updated_at)
+           RETURNING id, user_id, role
+         ), oauth_session AS (
+           INSERT INTO auth_sessions
+             (id, user_id, organization_id, membership_id, token_hash, created_at, expires_at)
+           SELECT $9,membership.user_id,$7,membership.id,$10,clock.at,
+                  clock.at + ($11::double precision * INTERVAL '1 millisecond')
+             FROM oauth_membership AS membership
+             CROSS JOIN database_clock AS clock
+           RETURNING user_id, membership_id, created_at, expires_at
+         )
+         SELECT session.user_id, session.membership_id, membership.role,
+                session.created_at, session.expires_at
+           FROM oauth_session AS session
+           JOIN oauth_membership AS membership ON membership.id = session.membership_id`,
+        [
+          input.proposedUserId,
+          input.provider,
+          input.providerUserId,
+          input.primaryEmail ?? null,
+          input.displayName ?? null,
+          input.membershipId,
+          input.organizationId,
+          input.role,
+          input.sessionId,
+          input.tokenHash,
+          input.ttlMillis,
+        ],
+      );
+      const row = result.rows[0];
+      if (row === undefined) throw new Error("OAuth session establishment returned no row");
+      return {
+        userId: row.user_id,
+        membershipId: row.membership_id,
+        role: row.role,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at,
+      };
+    });
   }
 
   public async createSession(input: {

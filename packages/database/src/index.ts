@@ -116,6 +116,7 @@ export {
 export {
   AuthStore,
   type AuthRole,
+  type EstablishOAuthSessionInput,
   type StoredApiKeyPrincipal,
   type StoredSessionPrincipal,
   type MembershipInput,

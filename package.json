@@ -33,7 +33,9 @@
     "probe:phase3-tenant-graph": "node scripts/probe-phase3-tenant-graph.mjs",
     "probe:phase3-rate-limit": "node scripts/probe-phase3-rate-limit.mjs",
     "probe:phase3-error-boundary": "node scripts/probe-phase3-error-boundary.mjs",
-    "probe:phase3-auth-clock": "node scripts/probe-phase3-auth-clock.mjs"
+    "probe:phase3-auth-clock": "node scripts/probe-phase3-auth-clock.mjs",
+    "probe:phase3-mutation-clock": "node scripts/probe-phase3-mutation-clock.mjs",
+    "probe:phase3-oauth-commit": "node scripts/probe-phase3-oauth-commit.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

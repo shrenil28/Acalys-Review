@@ -460,3 +460,145 @@ Mutation definitions present: **4**. Mutation executions/kills claimed: **0 / 0*
 - `POST /reviews` still requires `pullRequestId`; the frozen API contract has no alternate commit/local-tree target shape.
 - `apps/web/src` remains frozen; Phase 4 live dashboard integration has not started.
 - No executable gate, database result, live mutation kill, structural-rule execution, or performance number is inferred from source/static evidence.
+
+## Checkpoint 3.8 — database-clock mutation authority + monotonic durable writes
+
+Status: **SOURCE FROZEN; EXECUTABLE ACCEPTANCE STILL BLOCKED BY LOCAL TOOLING**
+
+Checkpoint 3.8 closes the remaining replica-clock dependency in the frozen Phase-3 mutating API boundary without changing the public HTTP manifest or frontend. Before this checkpoint, the API process attached its local `Date` to `IdempotencyIdentity`, and `ApiMutationStore` reused that process timestamp for idempotency rows, review/request/dispatch creation, cancellation completion/transitions, finding dismissal, conversation resolution, and returned DTO timestamps. Clock-skewed API replicas could therefore disagree about durable chronology, and a writer that waited behind newer durable state could move an update timestamp backward.
+
+### Database-owned mutation chronology established in source
+
+- `IdempotencyIdentity` no longer contains a timestamp. `apps/api` therefore cannot inject a replica clock into persistence through the production mutation path.
+- Each `ApiMutationStore` transaction acquires exactly one `clock_timestamp()` value from Postgres and passes that database-owned instant through the idempotent mutation callback.
+- A create-review mutation uses that one instant for `api_idempotency.created_at/completed_at`, `review_requests.requested_at`, `review_runs.created_at`, all `review_dispatch_jobs` scheduling/audit timestamps, and the returned `ReviewRunDto.createdAt`.
+- Same-key replay therefore returns the original database-timestamped response rather than recomputing chronology on the replica handling the retry.
+- Cancellation keeps durable history monotonic with `GREATEST(database_mutation_time, created_at, started_at)` and uses the persisted completion timestamp for both the cancellation transition and returned DTO.
+- Finding dismissal and conversation resolution use `GREATEST(existing updated_at, database_mutation_time)` so a transaction that waited behind another writer cannot move `updated_at` backward. Conversation output is projected from the persisted returned timestamp rather than from an application clock.
+- The older `ApiStore` mutation/idempotency compatibility helpers were also hardened to ignore caller time for writes and use Postgres clock/monotonic expressions, preventing a dormant internal API from reintroducing the same clock-authority defect later.
+- No schema migration is required; this checkpoint changes timestamp authority and write semantics only.
+
+### Acceptance witness source added/expanded
+
+`packages/database/tests/phase3-mutation-clock.test.ts` adds four Postgres witnesses:
+
+1. create-review persists one identical database timestamp across idempotency, request, run, dispatch, and returned response fields, and that timestamp is bounded by database time observed immediately before/after the transaction;
+2. cancellation never writes completion/transition history behind an already-future durable `started_at`, and the response uses the persisted completion timestamp;
+3. concurrent same-key mutations through separate `ApiMutationStore` instances converge on one `result` + one `replay` with an identical database-timestamped response;
+4. even a completed idempotent not-found mutation cannot have `completed_at` precede its own database-created `created_at`.
+
+`scripts/probe-phase3-mutation-clock.mjs` provides a fail-closed source/execution entry point. `--preflight-only` requires Postgres-owned mutation time, removal of `IdempotencyIdentity.now`, one-timestamp propagation through the production idempotent mutation path, monotonic cancellation/finding/conversation updates, hardened compatibility helpers, and all four Postgres witness anchors. Full mode requires installed Vitest plus Docker and exits non-zero rather than turning missing prerequisites into evidence.
+
+The Phase-3 idempotency mutant was re-anchored after the `ApiMutationStore` rewrite. Mutation source preflight is again **4 / 4** unique current anchors with all four witness suites present.
+
+### Checkpoint 3.8 static/runtime evidence — 2026-09-09
+
+- complete repository TypeScript/TSX parse: **530 files, 0 syntax diagnostics**
+- frozen API route manifest: **14 entries**
+- implemented frozen route handlers: **14 / 14**
+- public route/frontend additions in this checkpoint: **0**
+- touched/new relative import specs checked: **6; unresolved: 0**
+- `apps/api` direct imports of review-worker internals: **0**
+- direct TypeScript `pg` imports outside `@acalys/database`: **0**
+- `apps/web/src` byte differences versus Checkpoint 3.7: **0**
+- `package-lock.json` byte differences versus Checkpoint 3.7: **0**
+- package-lock SHA-256: `13c705cd557c800139260e5fc7a428f5f0350eb69fedcc937dbc5f584029f46d`
+- mutation-clock source preflight: **pass; Postgres clock + monotonic writes + compatibility-helper hardening + 4 / 4 Postgres witnesses present**
+- credential-authority source preflight: **pass**
+- error-boundary source preflight: **pass; 12 / 12 taxonomy codes witnessed**
+- rate-limit source preflight: **pass; 4 / 4 Postgres witnesses present**
+- tenant-graph source preflight: **23 / 23 tenant FKs; 23 / 23 validations; 7 / 7 referenced-key indexes**
+- Phase-3 mutation source preflight: **4 / 4 anchors unique; 4 / 4 witness suites present**
+- Phase-3 architecture source preflight: **2 / 2 named rules present**
+- package/dependency-cruiser/probe script syntax/config parsing: **pass**
+- package-lock parity probe (`npm install --package-lock-only --offline --ignore-scripts --no-audit --no-fund`): **exit 0; lockfile unchanged**
+- retained `node_modules`, `dist`, `build`, `.next`, or `coverage` directories: **0**
+
+### Executable evidence still not claimed
+
+`npm ci --offline --ignore-scripts --no-audit --no-fund` still exits non-zero because `yallist` is not available in the local npm cache. Vitest is therefore not installed in the reconstructed checkpoint tree. Docker, Podman, and `psql` are also unavailable. The full mutation-clock probe exits **2** after a successful source preflight and explicitly states that no executable database result is claimed.
+
+Consequently this checkpoint does **not** claim execution of the four new Postgres witnesses, live mutation kills, dependency-cruiser planted-violation kills, repository formatting/typecheck/build gates, or the complete nine-gate Phase-3 acceptance run.
+
+Mutation definitions present: **4**. Mutation executions/kills claimed: **0 / 0**. Structural rules present: **2**. Structural planted-violation executions claimed: **0 / 2**. Mutation-clock source probe: **1 / 1 preflight pass; 0 executable suite runs claimed**.
+
+### Checkpoint 3.8 non-claims
+
+- This is not full Phase 3 completion.
+- No frozen public HTTP route was added or changed.
+- The browser GitHub OAuth start/callback contract gap remains explicit and still requires an approved contract addition before mounting.
+- Unsupported review overrides (`depth`, `categories`, `reviewDrafts`) remain intentionally rejected rather than accepted without runtime semantics.
+- `POST /reviews` still requires `pullRequestId`; the frozen API contract has no alternate commit/local-tree target shape.
+- `apps/web/src` remains frozen; Phase 4 live dashboard integration has not started.
+- No executable gate, database result, live mutation kill, structural-rule execution, or performance number is inferred from source/static evidence.
+
+## Checkpoint 3.9 — atomic OAuth identity/membership/session commit
+
+Status: **SOURCE FROZEN; EXECUTABLE ACCEPTANCE STILL BLOCKED BY LOCAL TOOLING**
+
+Checkpoint 3.9 closes the remaining split-commit boundary between verified GitHub identity refresh, organization-membership role synchronization, and first-session issuance. Before this checkpoint, `AuthService.establishGithubSession` called `upsertOAuthIdentity`, `upsertMembership`, and `createSession` as three independent database operations. Identity/membership timestamps also came from the API replica clock. A session-insert failure could therefore leave the identity or role refresh committed without the corresponding login, and concurrent callbacks crossed transaction boundaries before the session was bound to the resulting membership.
+
+### One database-owned OAuth commit established in source
+
+- `AuthService.establishGithubSession` now generates the opaque session credential in memory and delegates all durable work to exactly one `AuthStore.establishOAuthSession` operation. It no longer calls the standalone identity upsert, membership upsert, or `issueSession` path.
+- `AuthStore.establishOAuthSession` performs canonical provider-identity selection, membership upsert, exact membership provenance, and session insertion in one transaction using a data-modifying CTE graph (`oauth_user` -> `oauth_membership` -> `oauth_session`).
+- A single materialized `clock_timestamp()` row owns the identity/membership refresh timestamp, session `created_at`, and session expiry base. No API-process `Date` crosses this commit boundary.
+- Existing OAuth identities return their canonical stored user id; existing organization memberships return their canonical membership id. The newly issued session references that exact returned membership row.
+- If session insertion fails, the transaction rolls back the identity and membership refresh as well; partial authentication state cannot survive independently.
+- Identity and membership `updated_at` values use `GREATEST(existing, database_time)` so clock correction cannot move durable metadata backward.
+- The older standalone `upsertOAuthIdentity` and `upsertMembership` helpers were also moved to Postgres-owned time and no longer accept a caller-supplied timestamp, preventing an internal compatibility path from reintroducing replica-clock identity metadata.
+- `AuthServiceOptions.now` remains only as a deprecated compatibility field for existing callers/tests; credential and OAuth-commit chronology does not read it.
+
+### Acceptance witness source added/expanded
+
+`packages/auth/tests/auth.test.ts` now proves that GitHub session establishment calls one store operation, persists only the session hash, returns the database-provided expiry, and does not forward a process timestamp.
+
+`packages/database/tests/phase3-auth-store.test.ts` adds three focused Postgres witnesses:
+
+1. canonical identity, canonical membership role, first session, and expiry are committed from one database timestamp, with the session bound to the exact canonical membership;
+2. a forced session-key collision rolls back the attempted identity display-name and membership-role refresh instead of leaving a partial login side effect;
+3. concurrent callbacks through separate `AuthStore` instances converge on one provider identity and one organization membership while both successful sessions reference that same membership.
+
+`scripts/probe-phase3-oauth-commit.mjs` provides a fail-closed source/execution entry point. `--preflight-only` requires the single store delegation, database-clock CTE graph, exact membership projection, removal of caller timestamps from identity/membership persistence, monotonic metadata updates, and all four focused unit/Postgres witness anchors. Full mode requires installed Vitest plus Docker and exits non-zero when prerequisites are missing rather than converting source evidence into an execution claim.
+
+### Checkpoint 3.9 static/runtime evidence — 2026-09-09
+
+- complete repository TypeScript/TSX parse: **530 files, 0 syntax diagnostics**
+- frozen API route manifest: **14 entries**
+- implemented frozen route handlers: **14 / 14**
+- public route/frontend additions in this checkpoint: **0**
+- touched/new relative import specs checked: **21; unresolved: 0**
+- `apps/api` direct imports of review-worker internals: **0**
+- direct TypeScript `pg` imports outside `@acalys/database`: **0**
+- `apps/web/src` byte differences versus Checkpoint 3.8: **0**
+- `package-lock.json` byte differences versus Checkpoint 3.8: **0**
+- package-lock SHA-256: `13c705cd557c800139260e5fc7a428f5f0350eb69fedcc937dbc5f584029f46d`
+- OAuth-commit source preflight: **pass; one atomic database-owned commit + 4 focused witnesses present**
+- mutation-clock source preflight: **pass; 4 / 4 Postgres witnesses present**
+- credential-authority source preflight: **pass**
+- error-boundary source preflight: **pass; 12 / 12 taxonomy codes witnessed**
+- rate-limit source preflight: **pass; 4 / 4 Postgres witnesses present**
+- tenant-graph source preflight: **23 / 23 tenant FKs; 23 / 23 validations; 7 / 7 referenced-key indexes**
+- Phase-3 mutation source preflight: **4 / 4 anchors unique; 4 / 4 witness suites present**
+- Phase-3 architecture source preflight: **2 / 2 named rules present**
+- package/dependency-cruiser/probe script syntax/config parsing: **pass**
+- package-lock parity probe (`npm install --package-lock-only --offline --ignore-scripts --no-audit --no-fund`): **exit 0; lockfile unchanged**
+- retained `node_modules`, `dist`, `build`, `.next`, or `coverage` directories: **0**
+
+### Executable evidence still not claimed
+
+`npm ci --offline --ignore-scripts --no-audit --no-fund` still exits non-zero because `yallist` is not available in the local npm cache. Vitest is therefore not installed in the reconstructed checkpoint tree. Docker, Podman, and `psql` are also unavailable. The full OAuth-commit probe exits **2** after its successful source preflight and explicitly states that no executable auth/Postgres result is claimed.
+
+Consequently this checkpoint does **not** claim execution of the new Postgres rollback/concurrency witnesses, live mutation kills, dependency-cruiser planted-violation kills, repository formatting/typecheck/build gates, or the complete nine-gate Phase-3 acceptance run.
+
+Mutation definitions present: **4**. Mutation executions/kills claimed: **0 / 0**. Structural rules present: **2**. Structural planted-violation executions claimed: **0 / 2**. OAuth-commit source probe: **1 / 1 preflight pass; 0 executable suite runs claimed**.
+
+### Checkpoint 3.9 non-claims
+
+- This is not full Phase 3 completion.
+- No frozen public HTTP route was added or changed.
+- The browser GitHub OAuth start/callback contract gap remains explicit and still requires an approved contract addition before mounting.
+- Unsupported review overrides (`depth`, `categories`, `reviewDrafts`) remain intentionally rejected rather than accepted without runtime semantics.
+- `POST /reviews` still requires `pullRequestId`; the frozen API contract has no alternate commit/local-tree target shape.
+- `apps/web/src` remains frozen; Phase 4 live dashboard integration has not started.
+- No executable gate, database result, live mutation kill, structural-rule execution, or performance number is inferred from source/static evidence.
