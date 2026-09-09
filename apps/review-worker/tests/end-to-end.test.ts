@@ -116,8 +116,18 @@ describeWithPostgres("A signed delivery becomes a ReviewRun", () => {
       .send(body);
   }
 
-  async function drain(): Promise<number> {
-    const worker = createWorker({ inbox: inbox(), store: store() });
+  async function drain(
+    execute: () => Promise<
+      | { readonly kind: "settled"; readonly state: "completed" }
+      | { readonly kind: "deferred"; readonly state: string }
+    > = async () => ({ kind: "settled", state: "completed" }),
+  ): Promise<number> {
+    const worker = createWorker({
+      inbox: inbox(),
+      store: store(),
+      reviewExecution: { execute },
+      retryBackoffMillis: 0,
+    });
     // `tick` rather than the loop: the test drives the batch and asserts on
     // what it produced, instead of racing a background timer.
     const handled = await worker.tick();
@@ -170,6 +180,27 @@ describeWithPostgres("A signed delivery becomes a ReviewRun", () => {
       attempt: 1,
       organization_id: ORG,
     });
+  }, 60_000);
+
+  it("keeps review work owed when execution is only deferred", async () => {
+    await deliver();
+
+    expect(
+      await drain(async () => ({ kind: "deferred", state: "verifying" })),
+    ).toBe(1);
+
+    const job = await database.pool.query<{ attempts: number }>(
+      "SELECT attempts FROM webhook_jobs",
+    );
+    expect(job.rows[0]?.attempts).toBe(0);
+    const delivery = await database.pool.query<{ state: string }>(
+      "SELECT state FROM webhook_deliveries",
+    );
+    expect(delivery.rows[0]?.state).toBe("received");
+
+    // A later claimant can finish the same durable obligation.
+    expect(await drain()).toBe(1);
+    expect((await counts())["webhook_jobs"]).toBe(0);
   }, 60_000);
 
   it("carries the provider's identity through without leaking its vocabulary", async () => {

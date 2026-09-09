@@ -52,7 +52,7 @@ import {
   type BaseRevisionResolution,
   type PlannerBaseRevision,
 } from "@acalys/code-intelligence";
-import { gitObjectId, isRepositoryPath } from "@acalys/contracts/domain";
+import { canonicalJson, gitObjectId, isRepositoryPath } from "@acalys/contracts/domain";
 import type { CandidateFindingRow } from "@acalys/database";
 import {
   ALL_ANALYZER_IDS,
@@ -67,6 +67,12 @@ import {
   boundarySurface,
   declaredBoundaries,
   type PublicBoundarySurface,
+  analyzeLlmCorrectness,
+  LLM_CORRECTNESS_ANALYZER_ID,
+  LLM_CORRECTNESS_ANALYZER_VERSION,
+  LLM_CORRECTNESS_PROMPT_VERSION,
+  type ModelCompleter,
+  type LlmCorrectnessOutcome,
 } from "@acalys/review-engine";
 
 type ConfigGovernanceResult = ReturnType<typeof governanceFor>;
@@ -131,6 +137,8 @@ export interface AnalysisSourceSnapshot {
    * against two bases is two different reviews.
    */
   readonly baseSha?: string | undefined;
+  /** Distinct from the target branch/base ref when the provider exposes both. */
+  readonly mergeBaseSha?: string | undefined;
 }
 
 /**
@@ -145,6 +153,8 @@ export interface AnalysisSource {
   read(input: {
     readonly repositoryId: string;
     readonly headSha: string;
+    /** Immutable platform revision identity. Production sources require this. */
+    readonly revisionId?: string | undefined;
   }): Promise<AnalysisSourceSnapshot>;
 }
 
@@ -210,7 +220,7 @@ export function analyzerCacheKey(input: {
   readonly modelIdentity?: string | undefined;
 }): string {
   return sha256(
-    JSON.stringify({
+    canonicalJson({
       repositoryId: input.repositoryId,
       headSha: input.headSha,
       comparisonIdentity: input.comparisonIdentity ?? null,
@@ -256,12 +266,78 @@ export function contextSnapshotDigest(
  * same defect moved down a file reconciles to the same finding instead of being
  * reported again on every push.
  */
+export function modelAnalyzerInputDigest(input: {
+  readonly repositoryId: string;
+  readonly baseSha?: string | undefined;
+  readonly mergeBaseSha?: string | undefined;
+  readonly headSha: string;
+  readonly changed: readonly ChangedFileSource[];
+  readonly configFactsDigest: string;
+  readonly instructionFactsDigest: string;
+  readonly contextDigest: string;
+  readonly analyzerId: string;
+  readonly analyzerVersion: string;
+  readonly model: {
+    readonly provider: string;
+    readonly modelId: string;
+    readonly tier: string;
+    readonly routingPolicyVersion: string;
+    readonly promptTemplateVersion: string;
+  };
+}): string {
+  const changeManifest = [...input.changed]
+    .map((file) => ({
+      path: file.path,
+      changedLines: [...file.changedLines].sort((a, b) => a - b),
+      contentDigest: sha256(file.content),
+      base:
+        file.base === undefined
+          ? null
+          : file.base.kind === "present"
+            ? { kind: "present", contentDigest: sha256(file.base.content) }
+            : { kind: file.base.kind },
+    }))
+    .sort((left, right) => compare(left.path, right.path));
+
+  return sha256(
+    canonicalJson({
+      code: {
+        repositoryId: input.repositoryId,
+        baseSha: input.baseSha ?? null,
+        mergeBaseSha: input.mergeBaseSha ?? null,
+        headSha: input.headSha,
+        changeManifest,
+      },
+      resolvedConfiguration: input.configFactsDigest,
+      resolvedInstructions: input.instructionFactsDigest,
+      contextSnapshot: input.contextDigest,
+      analyzer: { id: input.analyzerId, version: input.analyzerVersion },
+      model: input.model,
+    }),
+  );
+}
+
+function llmCandidateFingerprint(
+  repositoryId: string,
+  finding: import("@acalys/review-engine").AnalyzerFinding,
+): string {
+  return sha256(
+    canonicalJson({
+      algorithm: "acalys.fingerprint.symbol-anchor",
+      anchor: finding.identityHint,
+      category: finding.category,
+      issueKey: finding.ruleId,
+      repositoryId,
+    }),
+  );
+}
+
 export function candidateFingerprint(
   repositoryId: string,
   finding: CandidateFinding,
 ): string {
   return sha256(
-    JSON.stringify({
+    canonicalJson({
       algorithm: "acalys.fingerprint.symbol-anchor",
       anchor: finding.identityHint,
       category: finding.category,
@@ -283,6 +359,12 @@ export interface BoundaryFacts {
 export interface RealAnalysisOptions {
   readonly repositoryId: string;
   readonly headSha: string;
+  /**
+   * Immutable revision identity used by production sources to disambiguate the
+   * same head commit reviewed against different bases. Fixture sources may
+   * omit it because their snapshot is already explicit.
+   */
+  readonly revisionId?: string | undefined;
   /**
    * Who this review belongs to, for the index identity.
    *
@@ -314,6 +396,27 @@ export interface RealAnalysisOptions {
   readonly contextPlanner?:
     | ((input: PlannerInput, budgetTokens: number) => AssembledContext)
     | undefined;
+  /** Optional only so deterministic replay/crash suites remain network-free. */
+  readonly llm?:
+    | {
+        readonly scope: {
+          readonly organizationId: string;
+          readonly reviewRunId: string;
+        };
+        readonly model: ModelCompleter;
+        readonly timeoutMs?: number | undefined;
+      }
+    | undefined;
+}
+
+export class LlmAnalysisUnavailableError extends Error {
+  public readonly reason: string;
+
+  public constructor(reason: string) {
+    super(`LLM correctness analysis is unavailable: ${reason}`);
+    this.name = "LlmAnalysisUnavailableError";
+    this.reason = reason;
+  }
 }
 
 export interface RealAnalysisOutcome {
@@ -321,6 +424,9 @@ export interface RealAnalysisOutcome {
   readonly report: ExecutionReport;
   readonly contextDigest: string;
   readonly cacheKey: string;
+  /** Present exactly when the model-backed analyzer was requested. */
+  readonly llm?: LlmCorrectnessOutcome | undefined;
+  readonly llmInputDigest?: string | undefined;
   /**
    * The index this run planned against.
    *
@@ -421,7 +527,7 @@ function resolveBaseRevisions(
     // genuinely receives different input when it changes. Excluding it would
     // be excluding something the analyzer can see.
     digest: sha256(
-      JSON.stringify({
+      canonicalJson({
         baseSha,
         revisions: revisions.map((entry) => ({
           path: entry.path,
@@ -439,10 +545,18 @@ function resolveBaseRevisions(
 export async function runRealAnalysis(
   options: RealAnalysisOptions,
 ): Promise<RealAnalysisOutcome> {
-  const { changed, repository, instructionObservation, baseSha } =
-    await options.source.read({
+  const {
+    changed,
+    repository,
+    instructionObservation,
+    baseSha,
+    mergeBaseSha,
+  } = await options.source.read({
       repositoryId: options.repositoryId,
       headSha: options.headSha,
+      ...(options.revisionId === undefined
+        ? {}
+        : { revisionId: options.revisionId }),
     });
 
   assertCanonicalChangedPaths(changed);
@@ -588,11 +702,50 @@ export async function runRealAnalysis(
     contextDigest,
   });
 
+  const llm =
+    options.llm === undefined
+      ? undefined
+      : await analyzeLlmCorrectness(
+          context,
+          options.llm.scope,
+          options.llm.model,
+          options.llm.timeoutMs,
+        );
+  if (llm?.kind === "unavailable") {
+    // A requested model path that could not run is not equivalent to the model
+    // finding nothing. Failing here prevents a deterministic-only result from
+    // being rendered or measured as a complete Phase-2 review.
+    throw new LlmAnalysisUnavailableError(llm.reason);
+  }
+
+  const llmInputDigest =
+    llm?.kind === "completed"
+      ? modelAnalyzerInputDigest({
+          repositoryId: options.repositoryId,
+          ...(baseSha === undefined ? {} : { baseSha }),
+          ...(mergeBaseSha === undefined ? {} : { mergeBaseSha }),
+          headSha: options.headSha,
+          changed,
+          configFactsDigest: config.digest,
+          instructionFactsDigest: instructionIdentity,
+          contextDigest,
+          analyzerId: LLM_CORRECTNESS_ANALYZER_ID,
+          analyzerVersion: LLM_CORRECTNESS_ANALYZER_VERSION,
+          model: {
+            provider: llm.modelIdentity.provider,
+            modelId: llm.modelIdentity.modelId,
+            tier: llm.modelIdentity.tier,
+            routingPolicyVersion: llm.modelIdentity.routingPolicyVersion,
+            promptTemplateVersion: LLM_CORRECTNESS_PROMPT_VERSION,
+          },
+        })
+      : undefined;
+
   // Sorted so that two runs over the same change persist rows in the same
   // order. Insertion order is observable through `readOutputs`, and a
   // convergence test that compares histories would otherwise fail on ordering
   // that carries no meaning.
-  const candidates = [...report.findings]
+  const deterministicCandidates = [...report.findings]
     .sort((left, right) =>
       candidateFingerprint(options.repositoryId, left) <
       candidateFingerprint(options.repositoryId, right)
@@ -620,11 +773,54 @@ export async function runRealAnalysis(
       } satisfies CandidateFindingRow;
     });
 
+  const conflictsWithDeterministic = (
+    proposed: import("@acalys/review-engine").AnalyzerFinding,
+  ): boolean =>
+    report.findings.some(
+      (deterministic) =>
+        deterministic.location.path === proposed.location.path &&
+        deterministic.category === proposed.category &&
+        deterministic.location.startLine <= proposed.location.endLine &&
+        proposed.location.startLine <= deterministic.location.endLine,
+    );
+
+  const llmCandidates: CandidateFindingRow[] =
+    llm?.kind === "completed" && llmInputDigest !== undefined
+      ? llm.candidates
+          // The model's identityHint is not an authority. A deterministic
+          // capability wins when both procedures point at the same semantic
+          // region/category, even if the model invents a different hint.
+          .filter((finding) => !conflictsWithDeterministic(finding))
+          .map((finding) => ({
+            producerId: LLM_CORRECTNESS_ANALYZER_ID,
+            producerVersion: LLM_CORRECTNESS_ANALYZER_VERSION,
+            inputDigest: llmInputDigest,
+            title: finding.claim,
+            claim: finding.claim,
+            explanation: finding.rationale,
+            category: finding.category,
+            proposedSeverity: finding.proposedSeverity,
+            path: finding.location.path,
+            startLine: finding.location.startLine,
+            endLine: finding.location.endLine,
+            fingerprintValue: llmCandidateFingerprint(
+              options.repositoryId,
+              finding,
+            ),
+          }))
+      : [];
+
+  const candidates = [...deterministicCandidates, ...llmCandidates].sort(
+    (left, right) => compare(left.fingerprintValue, right.fingerprintValue),
+  );
+
   return {
     candidates,
     report,
     contextDigest,
     cacheKey,
+    ...(llm === undefined ? {} : { llm }),
+    ...(llmInputDigest === undefined ? {} : { llmInputDigest }),
     index,
     context,
     configFacts: config.facts,
@@ -855,7 +1051,7 @@ function buildBoundaryFacts(
     head: headSurfaces,
     abstentions,
     identity: sha256(
-      JSON.stringify({ base: baseSurfaces, head: headSurfaces }),
+      canonicalJson({ base: baseSurfaces, head: headSurfaces }),
     ),
   };
 }
@@ -890,7 +1086,7 @@ function buildConfigFacts(
     ),
   };
   const digest = sha256(
-    JSON.stringify({
+    canonicalJson({
       failures: [...facts.failures].sort((left, right) =>
         compare(
           `${left.configPath}:${left.failure}`,

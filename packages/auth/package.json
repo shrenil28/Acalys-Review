@@ -1,0 +1,21 @@
+{
+  "name": "@acalys/auth",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Authentication and authorization services for Acalys Review.",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@acalys/contracts": "*",
+    "@acalys/database": "*",
+    "uuidv7": "^1.0.2"
+  }
+}

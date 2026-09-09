@@ -14,7 +14,8 @@
       ],
       "@acalys/provider-github": ["packages/providers/github/src/index.ts"],
       "@acalys/database": ["packages/database/src/index.ts"],
-      "@acalys/code-intelligence": ["packages/code-intelligence/src/index.ts"]
+      "@acalys/code-intelligence": ["packages/code-intelligence/src/index.ts"],
+      "@acalys/model-gateway": ["packages/model-gateway/src/index.ts"]
     }
   }
 }

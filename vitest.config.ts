@@ -58,6 +58,10 @@ export default defineConfig({
         find: /^@acalys\/review-engine$/,
         replacement: workspace("packages/review-engine/src/index.ts"),
       },
+      {
+        find: /^@acalys\/model-gateway$/,
+        replacement: workspace("packages/model-gateway/src/index.ts"),
+      },
     ],
   },
   test: {

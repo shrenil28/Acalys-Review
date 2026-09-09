@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@acalys/contracts": ["../contracts/src/index.ts"],
+      "@acalys/contracts/domain": ["../contracts/src/domain/index.ts"]
+    }
+  },
+  "include": ["src", "tests"]
+}

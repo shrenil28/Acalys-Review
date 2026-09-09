@@ -28,10 +28,42 @@ import type {
 
 import { ingestDelivery, type PipelineOutcome } from "./pipeline.js";
 
+export type WorkerOutcomeKind =
+  | PipelineOutcome["kind"]
+  | "review_deferred"
+  | "review_retryable_failure"
+  | "review_permanent_failure";
+
+export type ReviewExecutionOutcome =
+  | {
+      readonly kind: "settled";
+      readonly state: "publishing" | "completed" | "failed" | "cancelled" | "superseded";
+    }
+  | { readonly kind: "deferred"; readonly state: string }
+  | { readonly kind: "retryable_failure"; readonly errorCode: string }
+  | { readonly kind: "permanent_failure"; readonly errorCode: string };
+
+/**
+ * Required worker-to-review-lifecycle boundary.
+ *
+ * The inbox worker may not acknowledge current review work merely because the
+ * ReviewRun row exists. Production composition must drive the resumable review
+ * lifecycle through this port and return only after it either reaches a
+ * terminal run state or explicitly classifies why ownership should remain owed.
+ */
+export interface ReviewExecutionPort {
+  execute(input: {
+    readonly runId: string;
+    readonly revisionId: string;
+    readonly pullRequestId: string;
+    readonly deliveryRowId: string;
+  }): Promise<ReviewExecutionOutcome>;
+}
+
 export interface WorkerObserver {
   readonly onOutcome?: (event: {
     readonly jobId: string;
-    readonly outcome: PipelineOutcome["kind"];
+    readonly outcome: WorkerOutcomeKind;
     readonly errorCode?: string | undefined;
     readonly deadLettered?: boolean | undefined;
   }) => void;
@@ -41,6 +73,7 @@ export interface WorkerObserver {
 export interface WorkerOptions {
   readonly inbox: WebhookInbox;
   readonly store: ReviewIngestionStore;
+  readonly reviewExecution: ReviewExecutionPort;
   /** Jobs claimed per poll. */
   readonly batchSize?: number | undefined;
   /**
@@ -92,7 +125,7 @@ export function createWorker(options: WorkerOptions): RunningWorker {
       // The delivery row is gone — only possible if it was deleted, since the
       // job has a cascading foreign key. Nothing can be done with the job, and
       // retrying would spin.
-      await options.inbox.releaseJob(job.id, {
+      await options.inbox.releaseJob(job.id, job.claimGeneration, {
         retryable: false,
         errorCode: "acalys.error.delivery-missing",
       });
@@ -110,11 +143,74 @@ export function createWorker(options: WorkerOptions): RunningWorker {
     });
 
     switch (outcome.kind) {
-      case "ingested":
-        await options.inbox.markDeliveryState(delivery.id, "processed");
-        await options.inbox.completeJob(job.id);
-        report({ jobId: job.id, outcome: outcome.kind });
-        return;
+      case "ingested": {
+        // The pipeline has already persisted a terminal superseded state for a
+        // stale revision. No model work is owed for code the repository has
+        // moved past, so this delivery can settle without dispatching analysis.
+        if (outcome.stale) {
+          await options.inbox.markDeliveryState(delivery.id, "processed");
+          await options.inbox.completeJob(job.id, job.claimGeneration);
+          report({ jobId: job.id, outcome: outcome.kind });
+          return;
+        }
+
+        const execution = await options.reviewExecution.execute({
+          runId: outcome.runId,
+          revisionId: outcome.revisionId,
+          pullRequestId: outcome.pullRequestId,
+          deliveryRowId: delivery.id,
+        });
+
+        switch (execution.kind) {
+          case "settled":
+            await options.inbox.markDeliveryState(delivery.id, "processed");
+            await options.inbox.completeJob(job.id, job.claimGeneration);
+            report({ jobId: job.id, outcome: outcome.kind });
+            return;
+
+          case "deferred":
+            await options.inbox.deferJob(
+              job.id,
+              job.claimGeneration,
+              retryBackoffMillis,
+            );
+            report({ jobId: job.id, outcome: "review_deferred" });
+            return;
+
+          case "retryable_failure":
+          case "permanent_failure": {
+            const released = await options.inbox.releaseJob(
+              job.id,
+              job.claimGeneration,
+              {
+                retryable: execution.kind === "retryable_failure",
+                errorCode: execution.errorCode,
+                retryAfterMillis:
+                  execution.kind === "retryable_failure"
+                    ? retryBackoffMillis
+                    : 0,
+              },
+            );
+            if (released.deadLettered) {
+              await options.inbox.markDeliveryState(
+                delivery.id,
+                "failed",
+                execution.errorCode,
+              );
+            }
+            report({
+              jobId: job.id,
+              outcome:
+                execution.kind === "retryable_failure"
+                  ? "review_retryable_failure"
+                  : "review_permanent_failure",
+              errorCode: execution.errorCode,
+              deadLettered: released.deadLettered,
+            });
+            return;
+          }
+        }
+      }
 
       case "ignored":
         // Distinct from processed, so "did we act on this?" stays answerable.
@@ -123,18 +219,22 @@ export function createWorker(options: WorkerOptions): RunningWorker {
           "ignored",
           outcome.reason,
         );
-        await options.inbox.completeJob(job.id);
+        await options.inbox.completeJob(job.id, job.claimGeneration);
         report({ jobId: job.id, outcome: outcome.kind });
         return;
 
       case "retryable_failure":
       case "permanent_failure": {
-        const released = await options.inbox.releaseJob(job.id, {
-          retryable: outcome.kind === "retryable_failure",
-          errorCode: outcome.errorCode,
-          retryAfterMillis:
-            outcome.kind === "retryable_failure" ? retryBackoffMillis : 0,
-        });
+        const released = await options.inbox.releaseJob(
+          job.id,
+          job.claimGeneration,
+          {
+            retryable: outcome.kind === "retryable_failure",
+            errorCode: outcome.errorCode,
+            retryAfterMillis:
+              outcome.kind === "retryable_failure" ? retryBackoffMillis : 0,
+          },
+        );
         if (released.deadLettered) {
           // Terminal. The delivery is marked failed so recovery can find it —
           // GitHub will not redeliver, so this row is the only remaining

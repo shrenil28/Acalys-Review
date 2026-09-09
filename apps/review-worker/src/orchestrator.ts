@@ -42,12 +42,7 @@ import type {
 } from "@acalys/database";
 import type { FindingSeverity } from "@acalys/contracts/domain";
 
-import {
-  analyze,
-  deterministicVerifier,
-  inputDigest,
-  type AnalysisInput,
-} from "./stages.js";
+import { inputDigest, type AnalysisInput } from "./stages.js";
 import {
   reconcileAndPlan,
   runVerification,
@@ -107,8 +102,18 @@ export interface OrchestratorOptions {
   readonly verifications: VerificationStore;
   readonly decisions: PolicyDecisionStore;
   readonly premerge: PreMergeStore;
-  /** Swappable so a test can force `unavailable` without a whole verifier. */
-  readonly verifier?: CandidateVerifier | undefined;
+  /**
+   * Required analysis boundary. Production composition supplies the real Phase-2
+   * analyzer; deterministic crash suites opt into the stub explicitly.
+   */
+  readonly analyzer: (
+    input: AnalysisInput,
+    context: RunContext,
+  ) =>
+    | readonly import("@acalys/database").CandidateFindingRow[]
+    | Promise<readonly import("@acalys/database").CandidateFindingRow[]>;
+  /** Required independent verification boundary; there is no silent stub fallback. */
+  readonly verifier: CandidateVerifier;
   readonly config?: FunnelConfig | undefined;
   readonly now?: (() => Date) | undefined;
 }
@@ -210,8 +215,8 @@ export async function advance(
     case "preparing":
       // Analysis output and the transition commit together, so
       // `state = analyzing` entails candidates exist.
-      return step("preparing", "analyzing", () => ({
-        candidates: analyze(input),
+      return step("preparing", "analyzing", async () => ({
+        candidates: await options.analyzer(input, context),
       }));
 
     case "analyzing":
@@ -232,10 +237,18 @@ export async function advance(
       const outcome = await runVerification(
         context.scope,
         context.runId,
+        context.revisionId,
         outputs.candidates,
-        options.verifier ?? deterministicVerifier,
+        options.verifier,
         stores,
       );
+
+      if (outcome.kind === "in_progress") {
+        // Another live claimant owns at least one stochastic verification.
+        // Staying in `verifying` is neither failure nor success; a later queue
+        // delivery resumes after that claim settles or expires.
+        return { kind: "settled", state: "verifying" };
+      }
 
       if (outcome.kind === "unavailable") {
         // Strict production behaviour: an unverifiable candidate fails the run

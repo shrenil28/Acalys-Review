@@ -10,7 +10,8 @@
   },
   "references": [
     { "path": "../contracts/tsconfig.build.json" },
-    { "path": "../code-intelligence/tsconfig.build.json" }
+    { "path": "../code-intelligence/tsconfig.build.json" },
+    { "path": "../model-gateway/tsconfig.build.json" }
   ],
   "include": ["src"]
 }

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "paths": {
+      "@acalys/auth": ["../../packages/auth/src/index.ts"],
+      "@acalys/contracts": ["../../packages/contracts/src/index.ts"],
+      "@acalys/contracts/domain": ["../../packages/contracts/src/domain/index.ts"],
+      "@acalys/contracts/api/v1": ["../../packages/contracts/src/api/v1/index.ts"],
+      "@acalys/database": ["../../packages/database/src/index.ts"]
+    }
+  },
+  "include": ["src", "tests"]
+}

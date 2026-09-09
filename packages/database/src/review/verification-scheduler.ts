@@ -90,7 +90,7 @@ export interface ScheduledInvocation {
   readonly reviewRunId: string;
   readonly attempt: number;
   readonly reason: InvocationReason;
-  readonly state: "scheduled" | "settled";
+  readonly state: "scheduled" | "claimed" | "settled";
   /**
    * True when this call allocated the ordinal.
    *
@@ -98,6 +98,36 @@ export interface ScheduledInvocation {
    * the scheduler knows, not inferred from a failed insert.
    */
   readonly allocated: boolean;
+}
+
+export interface VerificationClaim {
+  readonly invocationId: string;
+  readonly candidateFindingId: string;
+  readonly reviewRunId: string;
+  readonly attempt: number;
+  readonly reason: InvocationReason;
+  readonly claimToken: string;
+  readonly claimGeneration: number;
+  readonly claimExpiresAt: string;
+}
+
+export type ClaimOutcome =
+  | { readonly kind: "claimed"; readonly claim: VerificationClaim }
+  | { readonly kind: "busy"; readonly claimExpiresAt: string }
+  | { readonly kind: "settled" };
+
+/**
+ * A worker presented ownership that is no longer current.
+ *
+ * This is fencing, not a retry hint. Once generation N+1 owns an invocation,
+ * generation N can no longer persist or settle it even if its external model
+ * call eventually returns.
+ */
+export class StaleVerificationClaim extends Error {
+  public constructor(public readonly invocationId: string) {
+    super(`Verification invocation ${invocationId} is no longer owned by this claim.`);
+    this.name = "StaleVerificationClaim";
+  }
 }
 
 /**
@@ -127,7 +157,10 @@ interface InvocationRow {
   review_run_id: string;
   attempt: number;
   reason: InvocationReason;
-  state: "scheduled" | "settled";
+  state: "scheduled" | "claimed" | "settled";
+  claim_token?: string | null;
+  claim_generation?: string | number;
+  claim_expires_at?: string | Date | null;
 }
 
 function toInvocation(
@@ -237,20 +270,152 @@ export class VerificationScheduler {
   }
 
   /**
+   * Claims the expensive execution step.
+   *
+   * Lease time comes from PostgreSQL, not a worker clock. A process with a
+   * skewed clock therefore cannot steal or retain ownership. Before claiming,
+   * a durable attempt left by a crash-after-write is converted to `settled`;
+   * recovery never re-executes work whose result already exists.
+   */
+  public async claim(
+    invocationId: string,
+    claimedBy: string,
+    leaseMillis: number,
+  ): Promise<ClaimOutcome> {
+    if (!Number.isInteger(leaseMillis) || leaseMillis < 1_000) {
+      throw new RangeError("verification lease must be at least 1000ms");
+    }
+
+    return this.#inTransaction(async (client) => {
+      await client.query(
+        `UPDATE verification_invocations AS i
+            SET state = 'settled', settled_at = clock_timestamp()
+          WHERE i.id = $1
+            AND i.state <> 'settled'
+            AND EXISTS (
+              SELECT 1 FROM verification_attempts a
+               WHERE a.invocation_id = i.id
+            )`,
+        [invocationId],
+      );
+
+      const token = randomUUID();
+      const claimed = await client.query<InvocationRow>(
+        `UPDATE verification_invocations
+            SET state = 'claimed',
+                claim_token = $2,
+                claim_generation = claim_generation + 1,
+                claimed_by = $3,
+                claimed_at = clock_timestamp(),
+                claim_expires_at = clock_timestamp() + ($4 * interval '1 millisecond'),
+                settled_at = NULL
+          WHERE id = $1
+            AND (
+              state = 'scheduled'
+              OR (state = 'claimed' AND claim_expires_at <= clock_timestamp())
+            )
+          RETURNING id, candidate_finding_id, review_run_id, attempt, reason, state,
+                    claim_token, claim_generation, claim_expires_at`,
+        [invocationId, token, claimedBy, leaseMillis],
+      );
+
+      const row = claimed.rows[0];
+      if (row !== undefined) {
+        if (row.claim_token === null || row.claim_token === undefined ||
+            row.claim_expires_at === null || row.claim_expires_at === undefined) {
+          throw new Error("claimed verification invocation has no lease identity");
+        }
+        return {
+          kind: "claimed",
+          claim: {
+            invocationId: row.id,
+            candidateFindingId: row.candidate_finding_id,
+            reviewRunId: row.review_run_id,
+            attempt: row.attempt,
+            reason: row.reason,
+            claimToken: row.claim_token,
+            claimGeneration: Number(row.claim_generation),
+            claimExpiresAt:
+              row.claim_expires_at instanceof Date
+                ? row.claim_expires_at.toISOString()
+                : row.claim_expires_at,
+          },
+        };
+      }
+
+      const current = await client.query<InvocationRow>(
+        `SELECT id, candidate_finding_id, review_run_id, attempt, reason, state,
+                claim_token, claim_generation, claim_expires_at
+           FROM verification_invocations
+          WHERE id = $1`,
+        [invocationId],
+      );
+      const found = current.rows[0];
+      if (found === undefined) {
+        throw new Error(`Verification invocation ${invocationId} does not exist.`);
+      }
+      if (found.state === "settled") return { kind: "settled" };
+      if (found.claim_expires_at === null || found.claim_expires_at === undefined) {
+        throw new Error("claimed verification invocation has no expiry");
+      }
+      return {
+        kind: "busy",
+        claimExpiresAt:
+          found.claim_expires_at instanceof Date
+            ? found.claim_expires_at.toISOString()
+            : found.claim_expires_at,
+      };
+    });
+  }
+
+  /** Extend a live claim without changing its fencing identity. */
+  public async renew(
+    invocationId: string,
+    claimToken: string,
+    claimGeneration: number,
+    leaseMillis: number,
+  ): Promise<void> {
+    const updated = await this.#inTransaction((client) =>
+      client.query<{ id: string }>(
+        `UPDATE verification_invocations
+            SET claim_expires_at = clock_timestamp() + ($4 * interval '1 millisecond')
+          WHERE id = $1 AND state = 'claimed'
+            AND claim_token = $2 AND claim_generation = $3
+            AND claim_expires_at > clock_timestamp()
+          RETURNING id`,
+        [invocationId, claimToken, claimGeneration, leaseMillis],
+      ),
+    );
+    if (updated.rows[0] === undefined) {
+      throw new StaleVerificationClaim(invocationId);
+    }
+  }
+
+  /**
    * Marks a command discharged.
    *
    * Separate from writing the attempt, and deliberately *after* it: a command
    * settled before its result is durable would let a crash lose the attempt
    * while the command claims to be done, and nothing would reschedule it.
    */
-  public async settle(invocationId: string): Promise<void> {
+  public async settle(
+    invocationId: string,
+    claimToken: string,
+    claimGeneration: number,
+  ): Promise<void> {
     await this.#inTransaction(async (client) => {
-      await client.query(
+      const result = await client.query<{ state: string }>(
         `UPDATE verification_invocations
-            SET state = 'settled', settled_at = $2
-          WHERE id = $1 AND state = 'scheduled'`,
-        [invocationId, this.#now()],
+            SET state = 'settled', settled_at = $4
+          WHERE id = $1
+            AND claim_token = $2 AND claim_generation = $3
+            AND state IN ('claimed', 'settled')
+          RETURNING state`,
+        [invocationId, claimToken, claimGeneration, this.#now()],
       );
+      if (result.rows[0] === undefined) {
+        throw new StaleVerificationClaim(invocationId);
+      }
     });
   }
 
@@ -262,7 +427,9 @@ export class VerificationScheduler {
       const result = await client.query<InvocationRow>(
         `SELECT id, candidate_finding_id, review_run_id, attempt, reason, state
            FROM verification_invocations
-          WHERE review_run_id = $1 AND state = 'scheduled'
+          WHERE review_run_id = $1
+            AND (state = 'scheduled'
+                 OR (state = 'claimed' AND claim_expires_at <= clock_timestamp()))
           ORDER BY candidate_finding_id, attempt`,
         [reviewRunId],
       );

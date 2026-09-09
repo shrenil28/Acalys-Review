@@ -6,6 +6,7 @@
     "paths": {
       "@acalys/contracts": ["../../packages/contracts/src/index.ts"],
       "@acalys/review-engine": ["../../packages/review-engine/src/index.ts"],
+      "@acalys/model-gateway": ["../../packages/model-gateway/src/index.ts"],
       "@acalys/code-intelligence": [
         "../../packages/code-intelligence/src/index.ts"
       ],

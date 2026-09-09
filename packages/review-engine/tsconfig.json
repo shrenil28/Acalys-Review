@@ -9,6 +9,7 @@
     "paths": {
       "@acalys/contracts": ["../contracts/src/index.ts"],
       "@acalys/code-intelligence": ["../code-intelligence/src/index.ts"],
+      "@acalys/model-gateway": ["../model-gateway/src/index.ts"],
       "@acalys/code-intelligence/eval": [
         "../code-intelligence/src/eval/index.ts"
       ],

@@ -58,6 +58,10 @@ export interface PgClient {
 
 export interface PgPool {
   connect(): Promise<PgClient>;
+  query<TRow = Record<string, unknown>>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<PgQueryResult<TRow>>;
 }
 
 interface DeliveryRow {
@@ -114,6 +118,15 @@ export interface PostgresWebhookInboxOptions {
   readonly pool: PgPool;
   readonly now?: (() => Date) | undefined;
   readonly faults?: InboxFaultInjector | undefined;
+}
+
+export class WebhookJobClaimLost extends Error {
+  public constructor(jobId: string, claimGeneration: number) {
+    super(
+      `Webhook job ${jobId} is no longer owned by claim generation ${String(claimGeneration)}`,
+    );
+    this.name = "WebhookJobClaimLost";
+  }
 }
 
 export class PostgresWebhookInbox implements WebhookInbox {
@@ -273,9 +286,11 @@ export class PostgresWebhookInbox implements WebhookInbox {
         payload: unknown;
         available_at: Date;
         attempts: number;
+        claim_generation: string | number;
       }>(
         `UPDATE webhook_jobs
-            SET locked_at = $1, lease_expires_at = $3, attempts = attempts + 1
+            SET locked_at = $1, lease_expires_at = $3, attempts = attempts + 1,
+                claim_generation = claim_generation + 1
           WHERE id IN (
             SELECT id FROM webhook_jobs
              WHERE available_at <= $1
@@ -286,19 +301,26 @@ export class PostgresWebhookInbox implements WebhookInbox {
              LIMIT $2
              FOR UPDATE SKIP LOCKED
           )
-          RETURNING id, delivery_row_id, kind, payload, available_at, attempts`,
+          RETURNING id, delivery_row_id, kind, payload, available_at, attempts, claim_generation`,
         [now, limit, leaseExpiry],
       );
       await client.query("COMMIT");
 
-      return result.rows.map((row) => ({
-        id: row.id,
-        deliveryRowId: row.delivery_row_id,
-        kind: row.kind,
-        payload: row.payload,
-        availableAt: row.available_at,
-        attempts: row.attempts,
-      }));
+      return result.rows.map((row) => {
+        const claimGeneration = Number(row.claim_generation);
+        if (!Number.isSafeInteger(claimGeneration) || claimGeneration <= 0) {
+          throw new Error(`Invalid webhook claim generation for job ${row.id}`);
+        }
+        return {
+          id: row.id,
+          deliveryRowId: row.delivery_row_id,
+          kind: row.kind,
+          payload: row.payload,
+          availableAt: row.available_at,
+          attempts: row.attempts,
+          claimGeneration,
+        };
+      });
     } catch (error) {
       await client.query("ROLLBACK").catch(() => undefined);
       throw error;
@@ -314,10 +336,41 @@ export class PostgresWebhookInbox implements WebhookInbox {
    * partial index that makes the claim query fast stays proportional to the
    * backlog rather than to history.
    */
-  public async completeJob(jobId: string): Promise<void> {
+  public async completeJob(jobId: string, claimGeneration: number): Promise<void> {
     const client = await this.#pool.connect();
     try {
-      await client.query("DELETE FROM webhook_jobs WHERE id = $1", [jobId]);
+      const result = await client.query(
+        "DELETE FROM webhook_jobs WHERE id = $1 AND claim_generation = $2",
+        [jobId, claimGeneration],
+      );
+      if (result.rowCount !== 1) {
+        throw new WebhookJobClaimLost(jobId, claimGeneration);
+      }
+    } finally {
+      client.release();
+    }
+  }
+
+  public async deferJob(
+    jobId: string,
+    claimGeneration: number,
+    retryAfterMillis = 1_000,
+  ): Promise<void> {
+    const client = await this.#pool.connect();
+    try {
+      const now = this.#now();
+      const result = await client.query(
+        `UPDATE webhook_jobs
+            SET locked_at = NULL,
+                lease_expires_at = NULL,
+                available_at = $3,
+                attempts = GREATEST(attempts - 1, 0)
+          WHERE id = $1 AND claim_generation = $2`,
+        [jobId, claimGeneration, new Date(now.getTime() + retryAfterMillis)],
+      );
+      if (result.rowCount !== 1) {
+        throw new WebhookJobClaimLost(jobId, claimGeneration);
+      }
     } finally {
       client.release();
     }
@@ -339,6 +392,7 @@ export class PostgresWebhookInbox implements WebhookInbox {
    */
   public async releaseJob(
     jobId: string,
+    claimGeneration: number,
     options: {
       readonly retryable: boolean;
       readonly errorCode: string;
@@ -357,7 +411,7 @@ export class PostgresWebhookInbox implements WebhookInbox {
                 dead_lettered_at = CASE
                   WHEN $4 = false OR attempts >= max_attempts THEN $5
                   ELSE dead_lettered_at END
-          WHERE id = $1
+          WHERE id = $1 AND claim_generation = $6
           RETURNING dead_lettered_at`,
         [
           jobId,
@@ -365,8 +419,12 @@ export class PostgresWebhookInbox implements WebhookInbox {
           new Date(now.getTime() + (options.retryAfterMillis ?? 0)),
           options.retryable,
           now,
+          claimGeneration,
         ],
       );
+      if (result.rowCount !== 1) {
+        throw new WebhookJobClaimLost(jobId, claimGeneration);
+      }
       return { deadLettered: result.rows[0]?.dead_lettered_at != null };
     } finally {
       client.release();

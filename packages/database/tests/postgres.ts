@@ -24,7 +24,7 @@
  */
 
 import { execFileSync, execFile } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
@@ -566,30 +566,29 @@ async function connect(port: number, database: string): Promise<TestDatabase> {
     max: 20,
   });
 
-  // Applied in order, as a real deployment would. 0002 alters tables 0001
-  // creates, so running them independently would not exercise the schema that
-  // actually ships.
-  const migrations = [
-    "0001_webhook_inbox.sql",
-    "0002_review_ingestion.sql",
-    "0003_review_stages.sql",
-    "0004_publication_ledger.sql",
-    "0005_analysis_coverage.sql",
-    "0006_verification_attempts.sql",
-    "0007_verification_scheduling.sql",
-    "0008_promotion_referent.sql",
-  ].map((name) =>
-    readFileSync(
-      fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)),
-      "utf8",
-    ),
+  // Applied in filename order, exactly as deployment applies them. Discover
+  // the migration set rather than maintaining a second hand-written list: the
+  // latter silently stopped at 0009 while Phase 2 had already added 0011/0012,
+  // so integration tests could report green against a schema we no longer
+  // shipped.
+  const migrationsDirectory = fileURLToPath(
+    new URL("../migrations/", import.meta.url),
+  );
+  const migrationNames = readdirSync(migrationsDirectory)
+    .filter((name) => /^\d{4}_.+\.sql$/u.test(name))
+    .sort((left, right) => left.localeCompare(right));
+  const migrations = migrationNames.map((name) =>
+    readFileSync(fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)), "utf8"),
   );
 
   const apply = async (): Promise<void> => {
     await pool.query(
-      `DROP TABLE IF EXISTS premerge_check_results, publication_intents,
-         publication_decisions, verification_attempts, verification_invocations,
-         review_findings, verifications, candidate_findings,
+      `DROP TABLE IF EXISTS conversation_messages, review_conversations, knowledge_items,
+         review_summaries, review_dispatch_jobs, api_rate_windows, api_idempotency, api_keys, auth_sessions,
+         provider_connections, memberships, users, model_budget_reservations,
+         model_credential_admissions, model_interactions, premerge_check_results,
+         publication_intents, publication_decisions, verification_attempts,
+         verification_invocations, review_findings, verifications, candidate_findings,
          review_run_transitions, review_runs, review_requests,
          pull_request_revisions, pull_requests, repositories, organizations,
          webhook_jobs, webhook_deliveries CASCADE`,

@@ -93,6 +93,8 @@ export interface WebhookDelivery {
   /** Why it was ignored or how it failed. Never secret material. */
   readonly outcomeReason: string | null;
   readonly attempts: number;
+  /** Fencing generation for this exact claim. Increments on every reclaim. */
+  readonly claimGeneration: number;
 }
 
 export const deliveryStateSchema = z.enum(DELIVERY_STATES);
@@ -148,6 +150,8 @@ export interface ScheduledJob {
   readonly payload: unknown;
   readonly availableAt: Date;
   readonly attempts: number;
+  /** Monotonic fencing generation for the worker that owns this claim. */
+  readonly claimGeneration: number;
 }
 
 export interface JobRequest {
@@ -192,12 +196,23 @@ export interface WebhookInbox {
     leaseMillis?: number,
   ): Promise<readonly ScheduledJob[]>;
 
-  /** Releases a finished job. */
-  completeJob(jobId: string): Promise<void>;
+  /** Releases a finished job. A stale claimant must be rejected. */
+  completeJob(jobId: string, claimGeneration: number): Promise<void>;
+
+  /**
+   * Reschedules healthy coordination without consuming the bounded failure
+   * attempt budget (for example, another worker owns verification).
+   */
+  deferJob(
+    jobId: string,
+    claimGeneration: number,
+    retryAfterMillis?: number,
+  ): Promise<void>;
 
   /** Returns a job for a later attempt, or dead-letters it. */
   releaseJob(
     jobId: string,
+    claimGeneration: number,
     options: {
       readonly retryable: boolean;
       readonly errorCode: string;

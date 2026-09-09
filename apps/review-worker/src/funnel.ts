@@ -101,10 +101,23 @@ import {
 export interface CandidateVerifier {
   readonly id: string;
   readonly version: string;
-  verify(candidate: {
-    readonly id: string;
-    readonly fingerprintValue: string;
-  }): Promise<VerificationAttempt> | VerificationAttempt;
+  verify(
+    candidate: {
+      readonly id: string;
+      readonly fingerprintValue: string;
+      readonly path?: string | undefined;
+      readonly startLine?: number | undefined;
+      readonly endLine?: number | undefined;
+      readonly claim?: string | undefined;
+      readonly category?: string | undefined;
+      readonly proposedSeverity?: string | undefined;
+    },
+    execution: {
+      readonly scope: TenantScope;
+      readonly reviewRunId: string;
+      readonly revisionId: string;
+    },
+  ): Promise<VerificationAttempt> | VerificationAttempt;
 }
 
 export interface FunnelStores {
@@ -154,6 +167,10 @@ export type VerificationStageOutcome =
   | {
       readonly kind: "unavailable";
       readonly candidateIds: readonly string[];
+    }
+  | {
+      readonly kind: "in_progress";
+      readonly candidateIds: readonly string[];
     };
 
 /**
@@ -181,15 +198,23 @@ export type VerificationStageOutcome =
 export async function runVerification(
   scope: TenantScope,
   reviewRunId: string,
+  revisionId: string,
   candidates: readonly {
     readonly id: string;
     readonly fingerprintValue: string;
+    readonly path?: string | undefined;
+    readonly startLine?: number | undefined;
+    readonly endLine?: number | undefined;
+    readonly claim?: string | undefined;
+    readonly category?: string | undefined;
+    readonly proposedSeverity?: string | undefined;
   }[],
   verifier: CandidateVerifier,
   stores: FunnelStores,
   pass = 1,
 ): Promise<VerificationStageOutcome> {
   const unavailable: string[] = [];
+  const inProgress: string[] = [];
   let attempts = 0;
 
   for (const candidate of candidates) {
@@ -201,21 +226,65 @@ export async function runVerification(
       reason: pass === 1 ? "initial" : "retry_unavailable",
     });
 
-    const attempt = await verifier.verify(candidate);
+    const ownership = await stores.scheduler.claim(
+      invocation.invocationId,
+      process.env.ACALYS_WORKER_ID ?? `review-worker:${String(process.pid)}`,
+      120_000,
+    );
+    if (ownership.kind === "settled") continue;
+    if (ownership.kind === "busy") {
+      inProgress.push(candidate.id);
+      continue;
+    }
+
+    const { claim } = ownership;
+    let leaseLost: unknown;
+    const heartbeat = setInterval(() => {
+      void stores.scheduler
+        .renew(
+          claim.invocationId,
+          claim.claimToken,
+          claim.claimGeneration,
+          120_000,
+        )
+        .catch((error: unknown) => {
+          leaseLost ??= error;
+        });
+    }, 30_000);
+    heartbeat.unref?.();
+
+    let attempt: VerificationAttempt;
+    try {
+      attempt = await verifier.verify(candidate, {
+        scope,
+        reviewRunId,
+        revisionId,
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
+    if (leaseLost !== undefined) throw leaseLost;
+
+    // A final renewal closes the race between the last heartbeat and the
+    // persistence fence. If ownership moved, this worker stops before writing.
+    await stores.scheduler.renew(
+      claim.invocationId,
+      claim.claimToken,
+      claim.claimGeneration,
+      120_000,
+    );
 
     const stored = await stores.verifications.recordAttempt({
-      invocationId: invocation.invocationId,
-      attempt: invocation.attempt,
+      invocationId: claim.invocationId,
+      claimToken: claim.claimToken,
+      claimGeneration: claim.claimGeneration,
+      attempt: claim.attempt,
       candidateFindingId: candidate.id,
       reviewRunId,
       organizationId: scope.organizationId,
       verifierId: verifier.id,
       verifierVersion: verifier.version,
-      // Digest of what the verifier planned for *itself*. The verifier's
-      // context is independently derived; this records which one it saw.
       contextDigest: sha256(`${verifier.id}|${candidate.fingerprintValue}`),
-      // Built from the claim and the verifier's procedure, and from nothing
-      // about the analyzer, so two candidates carrying one claim share it.
       cacheKey: sha256(
         `${verifier.id}|${verifier.version}|${candidate.fingerprintValue}`,
       ),
@@ -231,18 +300,23 @@ export async function runVerification(
           : { status: "unavailable", failure: attempt.failure },
     });
 
-    // Settled only after the result is durable. The other order would let a
-    // crash lose the attempt while the command claims to be discharged, and
-    // nothing would ever reschedule it.
-    await stores.scheduler.settle(invocation.invocationId);
+    await stores.scheduler.settle(
+      claim.invocationId,
+      claim.claimToken,
+      claim.claimGeneration,
+    );
 
     attempts += 1;
     if (stored.status !== "completed") unavailable.push(candidate.id);
   }
 
-  return unavailable.length > 0
-    ? { kind: "unavailable", candidateIds: unavailable }
-    : { kind: "examined", attempts };
+  if (unavailable.length > 0) {
+    return { kind: "unavailable", candidateIds: unavailable };
+  }
+  if (inProgress.length > 0) {
+    return { kind: "in_progress", candidateIds: inProgress };
+  }
+  return { kind: "examined", attempts };
 }
 
 export interface ReconciledCandidate {

@@ -46,3 +46,8 @@ export {
   type InstallationTokenProviderOptions,
   type InstallationTokenRequest,
 } from "./installation-token.js";
+
+export {
+  createGithubInstallationTokenExchange,
+  type GithubInstallationTokenExchangeOptions,
+} from "./installation-token-exchange.js";

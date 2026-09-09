@@ -21,6 +21,7 @@ import {
 import {
   advance,
   advanceToSettled,
+  analyze,
   type CandidateVerifier,
   type FunnelConfig,
   type RunContext,
@@ -234,7 +235,7 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     };
 
     // queued → preparing → analyzing, driven by the real orchestrator.
-    const options = { ...stores(), verifier: verifier(), config };
+    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
     await advance(context, options); // queued  → preparing
     await advance(context, options); // preparing → analyzing
     await database.pool.query(
@@ -296,6 +297,7 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
   const drive = (context: RunContext, overrides = {}) =>
     advanceToSettled(context, {
       ...stores(),
+      analyzer: analyze,
       verifier: verifier(),
       config,
       ...overrides,
@@ -469,7 +471,7 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
   // ── 6 ──────────────────────────────────────────────────────────────────
   it("crashing after the attempts, before promotion, converges", async () => {
     const context = await seedRun();
-    const options = { ...stores(), verifier: verifier(), config };
+    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
 
     // Drive only as far as `reconciling`: attempts are durable, nothing is
     // promoted, and the worker dies.
@@ -502,7 +504,7 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     // transition itself. A crash inside it must leave none of them, or
     // `state = publishing` could exist with findings nobody decided about.
     const context = await seedRun();
-    const options = { ...stores(), verifier: verifier(), config };
+    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
 
     for (let step = 0; step < 6; step += 1) {
       const run = await stores().ingestion.getRun(context.runId);
@@ -660,6 +662,7 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     ]);
     const outcome = await advanceToSettled(context, {
       ...stores(),
+      analyzer: analyze,
       verifier: verifier(),
       config: {
         ...config,
@@ -824,9 +827,18 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
       requestKey: `recovered:${context.runId}:${victim ?? ""}`,
       reason: "retry_unavailable",
     });
+    const recoveryClaim = await stores().scheduler.claim(
+      recovery.invocationId,
+      "funnel-test",
+      60_000,
+    );
+    expect(recoveryClaim.kind).toBe("claimed");
+    if (recoveryClaim.kind !== "claimed") throw new Error("expected recovery claim");
     await stores().verifications.recordAttempt({
-      invocationId: recovery.invocationId,
-      attempt: recovery.attempt,
+      invocationId: recoveryClaim.claim.invocationId,
+      claimToken: recoveryClaim.claim.claimToken,
+      claimGeneration: recoveryClaim.claim.claimGeneration,
+      attempt: recoveryClaim.claim.attempt,
       candidateFindingId: victim ?? "",
       reviewRunId: context.runId,
       organizationId: ORG,

@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Acalys Review \u2014 cloud code-review platform",
+  "description": "Acalys Review — cloud code-review platform",
   "workspaces": [
     "apps/*",
     "packages/*",
@@ -27,7 +27,13 @@
     "test:ci": "node scripts/run-gate.mjs test:ci -- node scripts/test-ci.mjs",
     "references": "node scripts/run-gate.mjs references -- node scripts/assert-project-references.mjs",
     "export-conformance": "node scripts/run-gate.mjs export-conformance -- node scripts/assert-export-conformance.mjs",
-    "typecheck:projects": "npm run typecheck --workspaces --if-present && tsc -p scripts/tsconfig.json"
+    "typecheck:projects": "npm run typecheck --workspaces --if-present && tsc -p scripts/tsconfig.json",
+    "mutate:phase3": "node scripts/mutate-phase3.mjs",
+    "probe:phase3-architecture": "node scripts/probe-phase3-architecture.mjs",
+    "probe:phase3-tenant-graph": "node scripts/probe-phase3-tenant-graph.mjs",
+    "probe:phase3-rate-limit": "node scripts/probe-phase3-rate-limit.mjs",
+    "probe:phase3-error-boundary": "node scripts/probe-phase3-error-boundary.mjs",
+    "probe:phase3-auth-clock": "node scripts/probe-phase3-auth-clock.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

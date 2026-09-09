@@ -1,0 +1,25 @@
+{
+  "name": "@acalys/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Acalys Review public API v1. Implements only the frozen route manifest.",
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@acalys/auth": "*",
+    "@acalys/contracts": "*",
+    "@acalys/database": "*",
+    "express": "^5.1.0",
+    "uuidv7": "^1.0.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.1.1"
+  }
+}

@@ -97,15 +97,18 @@ export type SignatureVerification =
  * condition on a public endpoint — anyone can POST to it — and an exception
  * per unauthenticated request is both a performance problem and a noisy log.
  */
+export type WebhookSecretSet = string | readonly string[];
+
 export function verifyWebhookSignature(
-  secret: string,
+  secret: WebhookSecretSet,
   rawBody: Buffer | string,
   signatureHeader: string | undefined,
 ): SignatureVerification {
-  // An empty secret would make the HMAC trivially forgeable by anyone who
-  // knows the algorithm. Refusing here turns a misconfigured deployment into a
-  // loud failure rather than a silently open endpoint.
-  if (secret.length === 0) {
+  const candidates = typeof secret === "string" ? [secret] : secret;
+  // An empty candidate would make part of a rotation configuration trivially
+  // forgeable. Treat the whole set as misconfigured rather than silently
+  // ignoring the broken generation.
+  if (candidates.length === 0 || candidates.some((candidate) => candidate.length === 0)) {
     return { ok: false, reason: "empty_secret" };
   }
 
@@ -137,20 +140,24 @@ export function verifyWebhookSignature(
     return { ok: false, reason: "malformed_signature" };
   }
 
-  const expected = createHmac("sha256", secret).update(body).digest();
   const actual = Buffer.from(provided, "hex");
+  let matched = false;
+  for (const candidate of candidates) {
+    const expected = createHmac("sha256", candidate).update(body).digest();
 
-  // Both buffers are 32 bytes: `expected` by construction, `actual` because the
-  // hex string was length-checked above. The guard stays anyway — a future edit
-  // that loosens the regex would otherwise turn a validation gap into a thrown
-  // exception on the request path.
-  if (expected.length !== actual.length) {
-    return { ok: false, reason: "malformed_signature" };
+    // Both buffers are 32 bytes: `expected` by construction, `actual` because
+    // the hex string was length-checked above. The guard stays anyway — a
+    // future edit that loosens the regex would otherwise turn validation into
+    // an exception on the public request path.
+    if (expected.length !== actual.length) {
+      return { ok: false, reason: "malformed_signature" };
+    }
+    // Deliberately evaluate every configured generation. Besides being simple,
+    // this avoids making the active-vs-previous position observable in timing.
+    matched = timingSafeEqual(expected, actual) || matched;
   }
 
-  return timingSafeEqual(expected, actual)
-    ? { ok: true }
-    : { ok: false, reason: "mismatch" };
+  return matched ? { ok: true } : { ok: false, reason: "mismatch" };
 }
 
 /**

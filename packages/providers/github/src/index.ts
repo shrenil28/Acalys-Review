@@ -19,6 +19,7 @@ export {
   type DeliveryHeaders,
   type SignatureFailure,
   type SignatureVerification,
+  type WebhookSecretSet,
   readDeliveryHeaders,
   signWebhookBody,
   verifyWebhookSignature,
@@ -75,3 +76,21 @@ export {
   type RemoteReview,
   type ReviewContent,
 } from "./publish/review-publisher.js";
+
+export {
+  DEFAULT_GITHUB_REPOSITORY_READER_LIMITS,
+  GithubRepositoryReadError,
+  GithubRepositoryReader,
+  type GithubBaseFile,
+  type GithubChangedFile,
+  type GithubRepositoryReaderLimits,
+  type GithubRepositoryRequest,
+  type GithubRepositoryResponse,
+  type GithubRepositoryRevision,
+  type GithubRepositorySnapshot,
+} from "./source/repository-reader.js";
+
+export {
+  createAuthenticatedGithubRepositoryRequest,
+  type GithubRepositoryRequestOptions,
+} from "./source/authenticated-request.js";

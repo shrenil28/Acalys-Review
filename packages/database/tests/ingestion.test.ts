@@ -620,10 +620,14 @@ describeWithPostgres(
         for (let attempt = 0; attempt < 10 && !deadLettered; attempt += 1) {
           const jobs = await inbox.claimJobs(1, 60_000);
           if (jobs.length === 0) break;
-          const released = await inbox.releaseJob(jobs[0]?.id ?? "", {
-            retryable: true,
-            errorCode: "acalys.error.provider-timeout",
-          });
+          const released = await inbox.releaseJob(
+            jobs[0]?.id ?? "",
+            jobs[0]?.claimGeneration ?? 0,
+            {
+              retryable: true,
+              errorCode: "acalys.error.provider-timeout",
+            },
+          );
           deadLettered = released.deadLettered;
         }
 
@@ -652,14 +656,81 @@ describeWithPostgres(
         );
 
         const jobs = await inbox.claimJobs(1, 60_000);
-        const released = await inbox.releaseJob(jobs[0]?.id ?? "", {
-          retryable: false,
-          errorCode: "acalys.error.normalization-failed",
-        });
+        const released = await inbox.releaseJob(
+          jobs[0]?.id ?? "",
+          jobs[0]?.claimGeneration ?? 0,
+          {
+            retryable: false,
+            errorCode: "acalys.error.normalization-failed",
+          },
+        );
 
         expect(released.deadLettered).toBe(true);
         expect(await inbox.claimJobs(10, 60_000)).toHaveLength(0);
       });
+    });
+
+    it("fences a stale webhook claimant after lease reclamation", async () => {
+      const inbox = new PostgresWebhookInbox({ pool: database.pool });
+      const body = Buffer.from("{}", "utf8");
+      await inbox.ingest(
+        {
+          provider: "github",
+          sourceEndpointId: "e",
+          deliveryId: "fenced-claim",
+          event: "pull_request",
+          action: "opened",
+          bodyDigest: digestBody(body),
+          payload: body,
+          receivedAt: at,
+        },
+        [{ kind: "github.pull_request", payload: {} }],
+      );
+
+      const first = (await inbox.claimJobs(1, 1))[0];
+      expect(first).toBeDefined();
+      await database.pool.query(
+        "UPDATE webhook_jobs SET lease_expires_at = $2 WHERE id = $1",
+        [first?.id, new Date(0)],
+      );
+      const second = (await inbox.claimJobs(1, 60_000))[0];
+      expect(second).toBeDefined();
+      expect(second?.claimGeneration).toBeGreaterThan(first?.claimGeneration ?? 0);
+
+      await expect(
+        inbox.completeJob(first?.id ?? "", first?.claimGeneration ?? 0),
+      ).rejects.toMatchObject({ name: "WebhookJobClaimLost" });
+      await inbox.completeJob(second?.id ?? "", second?.claimGeneration ?? 0);
+    });
+
+    it("defers coordination without consuming the failure-attempt budget", async () => {
+      const inbox = new PostgresWebhookInbox({ pool: database.pool });
+      const body = Buffer.from("{}", "utf8");
+      await inbox.ingest(
+        {
+          provider: "github",
+          sourceEndpointId: "e",
+          deliveryId: "deferred-claim",
+          event: "pull_request",
+          action: "opened",
+          bodyDigest: digestBody(body),
+          payload: body,
+          receivedAt: at,
+        },
+        [{ kind: "github.pull_request", payload: {} }],
+      );
+
+      const first = (await inbox.claimJobs(1, 60_000))[0];
+      expect(first?.attempts).toBe(1);
+      await inbox.deferJob(
+        first?.id ?? "",
+        first?.claimGeneration ?? 0,
+        0,
+      );
+      const second = (await inbox.claimJobs(1, 60_000))[0];
+      expect(second?.attempts).toBe(1);
+      expect(second?.claimGeneration).toBeGreaterThan(first?.claimGeneration ?? 0);
+      await inbox.completeJob(second?.id ?? "", second?.claimGeneration ?? 0);
     });
 
     // Tenant isolation ───────────────────────────────────────────────────────

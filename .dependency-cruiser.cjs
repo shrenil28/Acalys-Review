@@ -51,6 +51,16 @@ module.exports = {
       },
     },
     {
+      name: "model-sdks-only-in-model-gateway",
+      severity: "error",
+      comment:
+        "Provider model SDKs are an adapter detail. Every other workspace consumes the provider-neutral @acalys/model-gateway boundary.",
+      from: { path: "^(?!packages/model-gateway/)" },
+      to: {
+        path: "node_modules/(@anthropic-ai|openai|cohere-ai|@google-cloud)",
+      },
+    },
+    {
       name: "contracts-no-transport",
       severity: "error",
       comment:
@@ -195,6 +205,20 @@ module.exports = {
       to: { path: "^packages/contracts/src/domain" },
     },
     {
+      name: "api-must-not-import-review-worker",
+      severity: "error",
+      comment: "The public API creates durable review obligations; it must not invoke worker internals directly.",
+      from: { path: "^apps/api/" },
+      to: { path: "^apps/review-worker/" },
+    },
+    {
+      name: "database-driver-only-in-database-package",
+      severity: "error",
+      comment: "Applications reach Postgres only through @acalys/database.",
+      from: { path: "^(?!packages/database/)" },
+      to: { path: "node_modules/pg" },
+    },
+    {
       name: "backend-must-not-import-web",
       severity: "error",
       comment:
@@ -225,7 +249,9 @@ module.exports = {
       "database",
       "code-intelligence",
       "review-engine",
+      "model-gateway",
       "api-client",
+      "auth",
     ].map((pkg) => ({
       name: `no-unreachable-in-${pkg}`,
       severity: "error",

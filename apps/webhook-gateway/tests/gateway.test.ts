@@ -88,6 +88,10 @@ class MemoryInbox implements WebhookInbox {
     return Promise.resolve();
   }
 
+  public deferJob(): Promise<void> {
+    return Promise.resolve();
+  }
+
   public releaseJob(): Promise<{ readonly deadLettered: boolean }> {
     return Promise.resolve({ deadLettered: false });
   }

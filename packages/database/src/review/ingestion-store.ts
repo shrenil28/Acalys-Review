@@ -83,6 +83,7 @@ export interface ReviewRequestInput {
   readonly executionStrategy: string;
   readonly idempotencyKey: string;
   readonly requestedAt: Date;
+  readonly correlationId?: string | undefined;
 }
 
 export interface StoredReviewRequest {
@@ -97,6 +98,16 @@ export interface StoredReviewRun {
   readonly attempt: number;
   readonly state: string;
   readonly existed: boolean;
+}
+
+export interface ReviewRunExecutionContext {
+  readonly organizationId: string;
+  readonly repositoryId: string;
+  readonly runId: string;
+  readonly revisionId: string;
+  readonly headSha: string;
+  readonly provider: "github" | "gitlab";
+  readonly pullRequestId: string;
 }
 
 export type TransitionOutcome =
@@ -457,8 +468,8 @@ export class ReviewIngestionStore {
         `INSERT INTO review_requests (
            id, organization_id, repository_id, pull_request_id, revision_id,
            target, trigger, requested_by, execution_mode, execution_strategy,
-           idempotency_scope, idempotency_key, requested_at
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+           idempotency_scope, idempotency_key, requested_at, correlation_id
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
          ON CONFLICT (idempotency_scope, idempotency_key)
            DO UPDATE SET requested_at = review_requests.requested_at
          RETURNING id, (xmax = 0) AS inserted`,
@@ -476,6 +487,7 @@ export class ReviewIngestionStore {
           scope.organizationId,
           input.idempotencyKey,
           input.requestedAt,
+          input.correlationId ?? null,
         ],
       );
 
@@ -674,10 +686,64 @@ export class ReviewIngestionStore {
     });
   }
 
+  /** Immutable inputs required to resume one run in any worker process. */
+  public getRunExecutionContext(
+    runId: string,
+  ): Promise<ReviewRunExecutionContext | undefined> {
+    return this.#withClient(async (client) => {
+      const result = await client.query<{
+        organization_id: string;
+        repository_id: string;
+        revision_id: string | null;
+        head_sha: string | null;
+        provider: string;
+        pull_request_id: string | null;
+      }>(
+        `SELECT r.organization_id, r.repository_id, r.revision_id,
+                rev.head_sha, repo.provider, rev.pull_request_id
+           FROM review_runs r
+           JOIN repositories repo ON repo.id = r.repository_id
+           LEFT JOIN pull_request_revisions rev ON rev.id = r.revision_id
+          WHERE r.id = $1`,
+        [runId],
+      );
+      const row = result.rows[0];
+      if (row === undefined) return undefined;
+      if (
+        row.revision_id === null ||
+        row.head_sha === null ||
+        row.pull_request_id === null ||
+        (row.provider !== "github" && row.provider !== "gitlab")
+      ) {
+        return undefined;
+      }
+      return {
+        organizationId: row.organization_id,
+        repositoryId: row.repository_id,
+        runId,
+        revisionId: row.revision_id,
+        headSha: row.head_sha,
+        provider: row.provider,
+        pullRequestId: row.pull_request_id,
+      };
+    });
+  }
+
   public getRun(
     runId: string,
   ): Promise<
-    | { readonly id: string; readonly state: string; readonly attempt: number }
+    | {
+        readonly id: string;
+        readonly state: string;
+        readonly attempt: number;
+        readonly modelUsage: {
+          readonly calls: number;
+          readonly inputTokens: number;
+          readonly outputTokens: number;
+          readonly cachedInputTokens: number;
+          readonly costMicroUsd: number;
+        };
+      }
     | undefined
   > {
     return this.#withClient(async (client) => {
@@ -685,8 +751,110 @@ export class ReviewIngestionStore {
         id: string;
         state: string;
         attempt: number;
-      }>("SELECT id, state, attempt FROM review_runs WHERE id = $1", [runId]);
-      return result.rows[0];
+        model_calls: string | number;
+        input_tokens: string | number;
+        output_tokens: string | number;
+        cached_input_tokens: string | number;
+        cost_microusd: string | number;
+      }>(
+        `SELECT r.id, r.state, r.attempt,
+                COUNT(m.id) FILTER (WHERE m.provider_dispatched) AS model_calls,
+                COALESCE(SUM(m.input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(m.output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(m.cached_input_tokens), 0) AS cached_input_tokens,
+                COALESCE(SUM(m.cost_microusd), 0) AS cost_microusd
+           FROM review_runs r
+           LEFT JOIN model_interactions m ON m.review_run_id = r.id
+          WHERE r.id = $1
+          GROUP BY r.id, r.state, r.attempt`,
+        [runId],
+      );
+      const row = result.rows[0];
+      if (row === undefined) return undefined;
+      const safe = (value: string | number): number => {
+        const parsed = typeof value === "number" ? value : Number(value);
+        if (!Number.isSafeInteger(parsed) || parsed < 0) {
+          throw new Error("model usage exceeds JavaScript safe integer range");
+        }
+        return parsed;
+      };
+      return {
+        id: row.id,
+        state: row.state,
+        attempt: row.attempt,
+        modelUsage: {
+          calls: safe(row.model_calls),
+          inputTokens: safe(row.input_tokens),
+          outputTokens: safe(row.output_tokens),
+          cachedInputTokens: safe(row.cached_input_tokens),
+          costMicroUsd: safe(row.cost_microusd),
+        },
+      };
+    });
+  }
+
+  /**
+   * Resolves the immutable provider coordinates for one exact review revision.
+   *
+   * The lookup is deliberately keyed by revision id *and* checks repository/head
+   * identity. A head SHA alone is ambiguous: the same commit can be reviewed
+   * against two different bases after a retarget/rebase. Returning the wrong
+   * base would poison both analyzer identity and the independent verifier.
+   */
+  public findAnalysisRevision(input: {
+    readonly revisionId: string;
+    readonly repositoryId: string;
+    readonly headSha?: string | undefined;
+  }): Promise<
+    | {
+        readonly organizationId: string;
+        readonly provider: string;
+        readonly providerRepositoryId: string;
+        readonly owner: string;
+        readonly name: string;
+        readonly installationId: string | null;
+        readonly headSha: string;
+        readonly baseSha: string;
+        readonly mergeBaseSha: string | null;
+      }
+    | undefined
+  > {
+    return this.#withClient(async (client) => {
+      const result = await client.query<{
+        organization_id: string;
+        provider: string;
+        provider_external_id: string;
+        owner: string;
+        name: string;
+        installation_id: string | null;
+        head_sha: string;
+        base_sha: string;
+        merge_base_sha: string | null;
+      }>(
+        `SELECT r.organization_id, repo.provider, repo.provider_external_id,
+                repo.owner, repo.name, repo.installation_id,
+                r.head_sha, r.base_sha, r.merge_base_sha
+           FROM pull_request_revisions r
+           JOIN repositories repo ON repo.id = r.repository_id
+          WHERE r.id = $1
+            AND r.repository_id = $2
+            AND ($3::text IS NULL OR r.head_sha = $3)`,
+        [input.revisionId, input.repositoryId, input.headSha ?? null],
+      );
+      const row = result.rows[0];
+      return row === undefined
+        ? undefined
+        : {
+            organizationId: row.organization_id,
+            provider: row.provider,
+            providerRepositoryId: row.provider_external_id,
+            owner: row.owner,
+            name: row.name,
+            installationId: row.installation_id,
+            headSha: row.head_sha,
+            baseSha: row.base_sha,
+            mergeBaseSha: row.merge_base_sha,
+          };
     });
   }
 

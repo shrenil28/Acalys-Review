@@ -41,6 +41,21 @@ describe("Webhook signature verification", () => {
     ).toBe(true);
   });
 
+  it("accepts the previous webhook secret during an explicit rotation grace set", () => {
+    const previous = "previous webhook secret";
+    const signature = signWebhookBody(previous, BODY);
+    expect(
+      verifyWebhookSignature([SECRET, previous], BODY, signature),
+    ).toEqual({ ok: true });
+  });
+
+  it("rejects an empty generation in a rotated webhook-secret set", () => {
+    expect(verifyWebhookSignature([SECRET, ""], BODY, validSignature)).toEqual({
+      ok: false,
+      reason: "empty_secret",
+    });
+  });
+
   describe("rejects", () => {
     it("a body that differs by one byte", () => {
       const tampered = BODY.replace("412", "413");

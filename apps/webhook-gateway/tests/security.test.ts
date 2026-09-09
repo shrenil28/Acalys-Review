@@ -58,6 +58,10 @@ class NullInbox implements WebhookInbox {
     return Promise.resolve();
   }
 
+  public deferJob(): Promise<void> {
+    return Promise.resolve();
+  }
+
   public releaseJob(): Promise<{ readonly deadLettered: boolean }> {
     return Promise.resolve({ deadLettered: false });
   }
@@ -322,6 +326,7 @@ describe("Error handling never leaks internals", () => {
       findDelivery: () => Promise.resolve(undefined),
       claimJobs: () => Promise.resolve([]),
       completeJob: () => Promise.resolve(),
+      deferJob: () => Promise.resolve(),
       releaseJob: () => Promise.resolve({ deadLettered: false }),
       markDeliveryState: () => Promise.resolve(),
     };

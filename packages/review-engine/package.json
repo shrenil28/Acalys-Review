@@ -29,6 +29,8 @@
   "dependencies": {
     "@acalys/code-intelligence": "*",
     "@acalys/contracts": "*",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "@acalys/model-gateway": "*",
+    "zod": "^4.1.13"
   }
 }

@@ -41,6 +41,7 @@ import {
   readDeliveryHeaders,
   verifyWebhookSignature,
   type SignatureFailure,
+  type WebhookSecretSet,
 } from "@acalys/provider-github";
 
 import {
@@ -93,7 +94,8 @@ export interface GatewayObserver {
 }
 
 export interface GithubWebhookRouteOptions {
-  readonly secret: string;
+  /** Active webhook secret followed by any grace-period predecessors. */
+  readonly secret: WebhookSecretSet;
   /** Identifies this endpoint; the uniqueness scope for delivery ids. */
   readonly sourceEndpointId: string;
   readonly inbox: WebhookInbox;
@@ -200,7 +202,9 @@ export function createGithubWebhookRoute(
   // At construction, so a weak secret fails the deploy rather than serving a
   // forgeable endpoint.
   if (options.allowWeakSecretForTesting !== true) {
-    assertStrongWebhookSecret(options.secret);
+    const secrets = typeof options.secret === "string" ? [options.secret] : options.secret;
+    if (secrets.length === 0) throw new Error("At least one GitHub webhook secret is required");
+    for (const secret of secrets) assertStrongWebhookSecret(secret);
   }
 
   router.post(

@@ -296,9 +296,15 @@ describeWithPostgres("Verification attempt allocation is durable", () => {
     // nothing would reschedule it.
     expect(await scheduler().scheduledFor(runId)).toHaveLength(1);
 
+    const ownership = await scheduler().claim(invocation.invocationId, "test-worker", 60_000);
+    expect(ownership.kind).toBe("claimed");
+    if (ownership.kind !== "claimed") throw new Error("expected verification claim");
+
     await new VerificationStore(database.pool, () => now).recordAttempt({
-      invocationId: invocation.invocationId,
-      attempt: invocation.attempt,
+      invocationId: ownership.claim.invocationId,
+      claimToken: ownership.claim.claimToken,
+      claimGeneration: ownership.claim.claimGeneration,
+      attempt: ownership.claim.attempt,
       candidateFindingId: candidate,
       reviewRunId: runId,
       organizationId: ORG,
@@ -314,7 +320,11 @@ describeWithPostgres("Verification attempt allocation is durable", () => {
         severity: "medium",
       },
     });
-    await scheduler().settle(invocation.invocationId);
+    await scheduler().settle(
+      ownership.claim.invocationId,
+      ownership.claim.claimToken,
+      ownership.claim.claimGeneration,
+    );
 
     expect(await scheduler().scheduledFor(runId)).toHaveLength(0);
   }, 60_000);
@@ -408,4 +418,94 @@ describeWithPostgres("Verification attempt allocation is durable", () => {
       { numRuns: 8 },
     );
   }, 180_000);
+  // ── 10 ─────────────────────────────────────────────────────────────────
+  it("leases one stochastic invocation to only one live worker", async () => {
+    const { runId, candidateIds } = await seed();
+    const invocation = await scheduler().schedule({
+      organizationId: ORG,
+      reviewRunId: runId,
+      candidateFindingId: candidateIds[0] ?? "",
+      requestKey: "lease:single-flight",
+      reason: "initial",
+    });
+
+    const first = await scheduler().claim(invocation.invocationId, "worker-a", 60_000);
+    expect(first.kind).toBe("claimed");
+    const second = await scheduler().claim(invocation.invocationId, "worker-b", 60_000);
+    expect(second.kind).toBe("busy");
+  }, 60_000);
+
+  // ── 11 ─────────────────────────────────────────────────────────────────
+  it("fences a stale worker after an expired claim is recovered", async () => {
+    const { runId, candidateIds } = await seed();
+    const candidate = candidateIds[0] ?? "";
+    const invocation = await scheduler().schedule({
+      organizationId: ORG,
+      reviewRunId: runId,
+      candidateFindingId: candidate,
+      requestKey: "lease:fence",
+      reason: "initial",
+    });
+    const first = await scheduler().claim(invocation.invocationId, "worker-a", 60_000);
+    if (first.kind !== "claimed") throw new Error("expected first claim");
+
+    // Simulate a worker that disappeared without a heartbeat. Database time is
+    // the authority, so recovery is independent of either worker's clock.
+    await database.pool.query(
+      "UPDATE verification_invocations SET claim_expires_at = clock_timestamp() - interval '1 second' WHERE id = $1",
+      [invocation.invocationId],
+    );
+    const second = await scheduler().claim(invocation.invocationId, "worker-b", 60_000);
+    if (second.kind !== "claimed") throw new Error("expected replacement claim");
+    expect(second.claim.claimGeneration).toBe(first.claim.claimGeneration + 1);
+    expect(second.claim.claimToken).not.toBe(first.claim.claimToken);
+
+    const store = new VerificationStore(database.pool, () => now);
+    await expect(
+      store.recordAttempt({
+        invocationId: first.claim.invocationId,
+        claimToken: first.claim.claimToken,
+        claimGeneration: first.claim.claimGeneration,
+        attempt: first.claim.attempt,
+        candidateFindingId: candidate,
+        reviewRunId: runId,
+        organizationId: ORG,
+        verifierId: "stale",
+        verifierVersion: "1",
+        contextDigest: "c".repeat(64),
+        cacheKey: "k".repeat(64),
+        outcome: {
+          status: "completed",
+          decision: "verified",
+          reasons: ["evidence_supports_claim"],
+          confidence: 0.9,
+          severity: "medium",
+        },
+      }),
+    ).rejects.toThrow();
+
+    await expect(
+      store.recordAttempt({
+        invocationId: second.claim.invocationId,
+        claimToken: second.claim.claimToken,
+        claimGeneration: second.claim.claimGeneration,
+        attempt: second.claim.attempt,
+        candidateFindingId: candidate,
+        reviewRunId: runId,
+        organizationId: ORG,
+        verifierId: "current",
+        verifierVersion: "1",
+        contextDigest: "c".repeat(64),
+        cacheKey: "k".repeat(64),
+        outcome: {
+          status: "completed",
+          decision: "rejected",
+          reasons: ["claim_contradicted_by_context"],
+          confidence: 0.9,
+          severity: "medium",
+        },
+      }),
+    ).resolves.toMatchObject({ inserted: true });
+  }, 60_000);
+
 });

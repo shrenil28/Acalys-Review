@@ -11,10 +11,17 @@ export {
 } from "./pipeline.js";
 export {
   createWorker,
+  type ReviewExecutionOutcome,
+  type ReviewExecutionPort,
   type RunningWorker,
   type WorkerObserver,
   type WorkerOptions,
+  type WorkerOutcomeKind,
 } from "./worker.js";
+export {
+  createReviewExecutionPort,
+  type ReviewRunContextResolver,
+} from "./execution.js";
 export {
   advance,
   advanceToSettled,
@@ -59,6 +66,7 @@ export {
 } from "./publisher.js";
 export {
   REVIEW_PROCEDURE_VERSION,
+  LlmAnalysisUnavailableError,
   analyzerCacheKey,
   candidateFingerprint,
   contextSnapshotDigest,
@@ -70,3 +78,24 @@ export {
   type RealAnalysisOptions,
   type RealAnalysisOutcome,
 } from "./analysis.js";
+export {
+  createModelCandidateVerifier,
+  type ModelVerifierOptions,
+} from "./model-verifier.js";
+
+export {
+  AnalysisRevisionUnavailableError,
+  createGithubAnalysisSource,
+  createGithubIndependentSource,
+  type GithubAnalysisSourceOptions,
+} from "./github-source.js";
+
+export {
+  createProductionReviewRuntime,
+  type ProductionModelRuntimeConfig,
+  type ProductionReviewRuntime,
+  type ProductionReviewRuntimeOptions,
+  type ProductionWorkerConfig,
+} from "./runtime.js";
+
+export { createApiDispatchWorker, type ApiDispatchWorkerOptions, type RunningApiDispatchWorker } from "./api-dispatch-worker.js";

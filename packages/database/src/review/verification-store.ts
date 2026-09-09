@@ -59,6 +59,8 @@ import type { PgClient, PgPool } from "../webhook/postgres-inbox.js";
 
 export interface AttemptRecord {
   readonly invocationId: string;
+  readonly claimToken: string;
+  readonly claimGeneration: number;
   readonly attempt: number;
   readonly candidateFindingId: string;
   readonly reviewRunId: string;
@@ -169,6 +171,16 @@ export class AttemptIdentityConflict extends Error {
  * second worker does not execute it at all. This is the detection half, and it
  * is what tells you the lease is missing rather than leaving you to infer it.
  */
+export class AttemptClaimConflict extends Error {
+  public constructor(public readonly invocationId: string) {
+    super(
+      `Invocation ${invocationId} was persisted by a different verification claim. ` +
+        "A stale execution cannot converge on or overwrite the current owner's result.",
+    );
+    this.name = "AttemptClaimConflict";
+  }
+}
+
 export class AttemptResultConflict extends Error {
   public constructor(
     public readonly invocationId: string,
@@ -259,6 +271,8 @@ export class VerificationStore {
     const result = await client.query<{
       id: string;
       invocation_id: string;
+      claim_token: string;
+      claim_generation: string | number;
       attempt: number;
       status: string;
       decision: string | null;
@@ -272,12 +286,15 @@ export class VerificationStore {
          id, organization_id, review_run_id, candidate_finding_id,
          status, decision, reasons, confidence, severity, failure,
          verifier_id, verifier_version, context_digest, cache_key,
-         invocation_id, attempt, created_at
-       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+         invocation_id, claim_token, claim_generation, attempt, created_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        ON CONFLICT (invocation_id)
          DO UPDATE SET invocation_id = verification_attempts.invocation_id
-       RETURNING id, invocation_id, attempt, status, decision, reasons, failure,
-                 severity, confidence, (xmax = 0) AS inserted`,
+         WHERE verification_attempts.claim_token = EXCLUDED.claim_token
+           AND verification_attempts.claim_generation = EXCLUDED.claim_generation
+       RETURNING id, invocation_id, claim_token, claim_generation, attempt,
+                 status, decision, reasons, failure, severity, confidence,
+                 (xmax = 0) AS inserted`,
       [
         randomUUID(),
         record.organizationId,
@@ -294,14 +311,17 @@ export class VerificationStore {
         record.contextDigest,
         record.cacheKey,
         record.invocationId,
+        record.claimToken,
+        record.claimGeneration,
         record.attempt,
         this.#now(),
       ],
     );
 
     const row = result.rows[0];
-    if (row === undefined)
-      throw new Error("verification attempt was not persisted");
+    if (row === undefined) {
+      throw new AttemptClaimConflict(record.invocationId);
+    }
 
     // The convergence path returns the STORED row, so what comes back may
     // disagree with what was asked for. `ON CONFLICT (invocation_id)` matches

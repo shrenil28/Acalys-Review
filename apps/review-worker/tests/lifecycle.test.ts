@@ -23,6 +23,7 @@ import {
   advance,
   advanceToSettled,
   analyze,
+  deterministicVerifier,
   logicalKey,
   verifyCandidate,
   type RunContext,
@@ -116,6 +117,8 @@ describeWithPostgres(
       verifications: new VerificationStore(database.pool),
       decisions: new PolicyDecisionStore(database.pool),
       premerge: new PreMergeStore(database.pool),
+      analyzer: analyze,
+      verifier: deterministicVerifier,
     });
 
     /**
