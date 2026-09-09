@@ -37,7 +37,8 @@ export type WorkerOutcomeKind =
 export type ReviewExecutionOutcome =
   | {
       readonly kind: "settled";
-      readonly state: "publishing" | "completed" | "failed" | "cancelled" | "superseded";
+      readonly state:
+        "publishing" | "completed" | "failed" | "cancelled" | "superseded";
     }
   | { readonly kind: "deferred"; readonly state: string }
   | { readonly kind: "retryable_failure"; readonly errorCode: string }
@@ -210,6 +211,7 @@ export function createWorker(options: WorkerOptions): RunningWorker {
             return;
           }
         }
+        return execution;
       }
 
       case "ignored":

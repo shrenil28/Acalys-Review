@@ -43,7 +43,9 @@ function assertRequestedScope(
         "GitHub omitted repository scope from a repository-restricted token response",
       );
     }
-    const expectedSorted = [...new Set(request.repositoryIds)].sort((a, b) => a - b);
+    const expectedSorted = [...new Set(request.repositoryIds)].sort(
+      (a, b) => a - b,
+    );
     const actualSorted = [...new Set(actual)].sort((a, b) => a - b);
     if (
       expectedSorted.length !== actualSorted.length ||
@@ -79,15 +81,22 @@ export function createGithubInstallationTokenExchange(
   options: GithubInstallationTokenExchangeOptions,
 ): InstallationTokenExchange {
   const requestFetch = options.fetch ?? fetch;
-  const baseUrl = (options.apiBaseUrl ?? "https://api.github.com").replace(/\/$/, "");
+  const baseUrl = (options.apiBaseUrl ?? "https://api.github.com").replace(
+    /\/$/,
+    "",
+  );
   const timeoutMs = options.timeoutMs ?? 15_000;
   const maxResponseBytes = options.maxResponseBytes ?? 1024 * 1024;
 
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1_000) {
-    throw new TypeError("GitHub token exchange timeout must be at least 1000ms");
+    throw new TypeError(
+      "GitHub token exchange timeout must be at least 1000ms",
+    );
   }
   if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) {
-    throw new TypeError("GitHub token response limit must be a positive safe integer");
+    throw new TypeError(
+      "GitHub token response limit must be a positive safe integer",
+    );
   }
 
   return async (request) => {

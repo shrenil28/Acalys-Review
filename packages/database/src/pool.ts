@@ -23,9 +23,15 @@ export function createPostgresPool(connectionString: string): CloseablePgPool {
     async connect(): Promise<PgClient> {
       return await pool.connect();
     },
-    async query<TRow = Record<string, unknown>>(text: string, values?: readonly unknown[]) {
+    async query<TRow = Record<string, unknown>>(
+      text: string,
+      values?: readonly unknown[],
+    ) {
       const result = await pool.query(text, values as unknown[] | undefined);
-      return result as unknown as import("./webhook/postgres-inbox.js").PgQueryResult<TRow>;
+      return {
+        rows: result.rows as TRow[],
+        rowCount: result.rowCount,
+      };
     },
     async end(): Promise<void> {
       await pool.end();

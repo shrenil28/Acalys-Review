@@ -202,8 +202,10 @@ export function createGithubWebhookRoute(
   // At construction, so a weak secret fails the deploy rather than serving a
   // forgeable endpoint.
   if (options.allowWeakSecretForTesting !== true) {
-    const secrets = typeof options.secret === "string" ? [options.secret] : options.secret;
-    if (secrets.length === 0) throw new Error("At least one GitHub webhook secret is required");
+    const secrets =
+      typeof options.secret === "string" ? [options.secret] : options.secret;
+    if (secrets.length === 0)
+      throw new Error("At least one GitHub webhook secret is required");
     for (const secret of secrets) assertStrongWebhookSecret(secret);
   }
 

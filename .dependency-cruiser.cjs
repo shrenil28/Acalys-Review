@@ -207,7 +207,8 @@ module.exports = {
     {
       name: "api-must-not-import-review-worker",
       severity: "error",
-      comment: "The public API creates durable review obligations; it must not invoke worker internals directly.",
+      comment:
+        "The public API creates durable review obligations; it must not invoke worker internals directly.",
       from: { path: "^apps/api/" },
       to: { path: "^apps/review-worker/" },
     },

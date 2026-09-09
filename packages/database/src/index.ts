@@ -130,11 +130,19 @@ export {
   type IdempotencyAcquire,
 } from "./api-store.js";
 
+export { createPostgresPool, type CloseablePgPool } from "./pool.js";
+
 export {
-  createPostgresPool,
-  type CloseablePgPool,
-} from "./pool.js";
+  ReviewDispatchStore,
+  StaleReviewDispatchClaim,
+  type ReviewDispatchClaim,
+  type ReviewDispatchExecutionGuard,
+  type ReviewDispatchGuardAcquisition,
+  type ReviewDispatchReplay,
+} from "./review/api-dispatch-store.js";
 
-export { ReviewDispatchStore, StaleReviewDispatchClaim, type ReviewDispatchClaim } from "./review/api-dispatch-store.js";
-
-export { ApiMutationStore, type IdempotencyIdentity, type IdempotentMutationOutcome } from "./api-mutation-store.js";
+export {
+  ApiMutationStore,
+  type IdempotencyIdentity,
+  type IdempotentMutationOutcome,
+} from "./api-mutation-store.js";

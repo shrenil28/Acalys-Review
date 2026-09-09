@@ -336,7 +336,10 @@ export class PostgresWebhookInbox implements WebhookInbox {
    * partial index that makes the claim query fast stays proportional to the
    * backlog rather than to history.
    */
-  public async completeJob(jobId: string, claimGeneration: number): Promise<void> {
+  public async completeJob(
+    jobId: string,
+    claimGeneration: number,
+  ): Promise<void> {
     const client = await this.#pool.connect();
     try {
       const result = await client.query(

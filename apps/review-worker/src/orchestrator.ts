@@ -30,6 +30,7 @@
  */
 
 import type {
+  CandidateFindingRow,
   PgClient,
   PolicyDecisionStore,
   PreMergeStore,
@@ -109,9 +110,7 @@ export interface OrchestratorOptions {
   readonly analyzer: (
     input: AnalysisInput,
     context: RunContext,
-  ) =>
-    | readonly import("@acalys/database").CandidateFindingRow[]
-    | Promise<readonly import("@acalys/database").CandidateFindingRow[]>;
+  ) => readonly CandidateFindingRow[] | Promise<readonly CandidateFindingRow[]>;
   /** Required independent verification boundary; there is no silent stub fallback. */
   readonly verifier: CandidateVerifier;
   readonly config?: FunnelConfig | undefined;

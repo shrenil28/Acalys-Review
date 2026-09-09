@@ -695,7 +695,9 @@ describeWithPostgres(
       );
       const second = (await inbox.claimJobs(1, 60_000))[0];
       expect(second).toBeDefined();
-      expect(second?.claimGeneration).toBeGreaterThan(first?.claimGeneration ?? 0);
+      expect(second?.claimGeneration).toBeGreaterThan(
+        first?.claimGeneration ?? 0,
+      );
 
       await expect(
         inbox.completeJob(first?.id ?? "", first?.claimGeneration ?? 0),
@@ -722,14 +724,12 @@ describeWithPostgres(
 
       const first = (await inbox.claimJobs(1, 60_000))[0];
       expect(first?.attempts).toBe(1);
-      await inbox.deferJob(
-        first?.id ?? "",
-        first?.claimGeneration ?? 0,
-        0,
-      );
+      await inbox.deferJob(first?.id ?? "", first?.claimGeneration ?? 0, 0);
       const second = (await inbox.claimJobs(1, 60_000))[0];
       expect(second?.attempts).toBe(1);
-      expect(second?.claimGeneration).toBeGreaterThan(first?.claimGeneration ?? 0);
+      expect(second?.claimGeneration).toBeGreaterThan(
+        first?.claimGeneration ?? 0,
+      );
       await inbox.completeJob(second?.id ?? "", second?.claimGeneration ?? 0);
     });
 

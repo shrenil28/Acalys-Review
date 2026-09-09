@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -23,21 +23,38 @@ import { AreaTrend, series } from "@/components/charts/Charts";
 import { GitHubIcon } from "@/components/icons";
 import { Page, PageHeader } from "@/components/layout/PageHeader";
 import { TopBarActions } from "@/components/layout/TopBar";
+import {
+  LiveFailureState,
+  LiveMisconfiguredState,
+  LiveTableLoading,
+} from "@/components/live/LiveDataState";
 import { NotFoundPage } from "@/pages/NotFound";
-import { repositories } from "@/data/repos";
-import { learnings } from "@/data/review";
-import { weeklyReviews } from "@/data/analytics";
+import {
+  useKnowledgeDirectory,
+  useRepositoryByName,
+} from "@/lib/api/liveDashboard";
 import { formatNumber, relativeTime } from "@/lib/utils";
 
 type Tab = "overview" | "settings" | "learnings" | "activity";
 
+const RepositoryWeeklyReviewsFixture = lazy(async () => {
+  const module = await import("./RepositoryWeeklyReviewsFixture.js");
+  return { default: module.RepositoryWeeklyReviewsFixture };
+});
+
+function providerUrl(provider: string, name: string): string | undefined {
+  if (provider !== "github") return undefined;
+  return `https://github.com/${name.includes("/") ? name : `shrenil28/${name}`}`;
+}
+
 export function RepositoryDetailPage() {
   const { name } = useParams();
   const toast = useToast();
-  const repo = repositories.find((entry) => entry.name === name);
+  const { directory, repository: repo } = useRepositoryByName(name);
+  const knowledge = useKnowledgeDirectory();
 
   const [tab, setTab] = useState<Tab>("overview");
-  const [enabled, setEnabled] = useState(repo?.reviewsEnabled ?? false);
+  const [enabledOverride, setEnabledOverride] = useState<boolean | null>(null);
   const {
     draft: settings,
     patch: patchSettings,
@@ -52,24 +69,56 @@ export function RepositoryDetailPage() {
   const { inherit, instructions, ignorePaths } = settings;
   const [removing, setRemoving] = useState(false);
 
+  const repoLearnings = useMemo(() => {
+    if (repo === undefined || knowledge.status !== "ready") return [];
+    return knowledge.value.filter(
+      (entry) => entry.repositoryId === repo.id || entry.repo === repo.name,
+    );
+  }, [knowledge, repo]);
+
+  if (directory.status === "loading") {
+    return (
+      <Page>
+        <LiveTableLoading columns={4} />
+      </Page>
+    );
+  }
+  if (directory.status === "misconfigured") {
+    return (
+      <Page>
+        <LiveMisconfiguredState detail={directory.detail} />
+      </Page>
+    );
+  }
+  if (directory.status === "failed") {
+    return (
+      <Page>
+        <LiveFailureState failure={directory.failure} />
+      </Page>
+    );
+  }
   if (!repo) return <NotFoundPage />;
 
-  const repoLearnings = learnings.filter((entry) => entry.repo === repo.name);
+  const live = directory.source === "api";
+  const enabled = enabledOverride ?? repo.reviewsEnabled;
+  const externalUrl = providerUrl(repo.provider, repo.name);
 
   return (
     <Page>
-      <TopBarActions>
-        <a
-          href={`https://github.com/shrenil28/${repo.name}`}
-          target="_blank"
-          rel="noreferrer"
-          className={buttonClass("outline", "sm")}
-        >
-          <GitHubIcon className="mr-1.5 h-3.5 w-3.5" />
-          Open on GitHub
-          <ExternalLink className="ml-1.5 h-3 w-3" />
-        </a>
-      </TopBarActions>
+      {externalUrl ? (
+        <TopBarActions>
+          <a
+            href={externalUrl}
+            target="_blank"
+            rel="noreferrer"
+            className={buttonClass("outline", "sm")}
+          >
+            <GitHubIcon className="mr-1.5 h-3.5 w-3.5" />
+            Open on GitHub
+            <ExternalLink className="ml-1.5 h-3 w-3" />
+          </a>
+        </TopBarActions>
+      ) : null}
 
       <Link
         to="/review/repositories"
@@ -86,9 +135,9 @@ export function RepositoryDetailPage() {
             {repo.name}
             {repo.visibility === "Private" ? (
               <Lock className="h-3.5 w-3.5 text-fg-faint" />
-            ) : (
+            ) : repo.visibility === "Public" ? (
               <Unlock className="h-3.5 w-3.5 text-fg-faint" />
-            )}
+            ) : null}
           </span>
         }
         description={
@@ -97,11 +146,13 @@ export function RepositoryDetailPage() {
               <GitBranch className="h-3 w-3" />
               {repo.defaultBranch}
             </Badge>
-            <Badge tone="outline">{repo.language}</Badge>
+            <Badge tone="outline">{repo.language ?? "Language unavailable"}</Badge>
             <span className="text-xs text-fg-subtle">
               {repo.lastReviewAt
                 ? `Last review ${relativeTime(repo.lastReviewAt)}`
-                : "Never reviewed"}
+                : live
+                  ? "Review analytics unavailable"
+                  : "Never reviewed"}
             </span>
           </span>
         }
@@ -110,8 +161,9 @@ export function RepositoryDetailPage() {
             <span className="text-xs text-fg-subtle">Reviews</span>
             <Switch
               checked={enabled}
+              disabled={live}
               onChange={(value) => {
-                setEnabled(value);
+                setEnabledOverride(value);
                 toast({
                   title: value ? "Reviews enabled" : "Reviews paused",
                   description: `${repo.name} ${value ? "will be" : "will not be"} reviewed on new pull requests.`,
@@ -140,32 +192,48 @@ export function RepositoryDetailPage() {
         {tab === "overview" && (
           <>
             <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <StatPanel title="Open pull requests" value={repo.openPrs} tone="info" />
-              <StatPanel title="Reviews (30d)" value={repo.reviewsLast30d} />
+              <StatPanel title="Open pull requests" value={repo.openPrs ?? "—"} tone="info" />
+              <StatPanel title="Reviews (30d)" value={repo.reviewsLast30d ?? "—"} />
               <StatPanel
                 title="Comments (30d)"
-                value={formatNumber(repo.commentsLast30d)}
+                value={repo.commentsLast30d === null ? "—" : formatNumber(repo.commentsLast30d)}
                 tone="purple"
               />
               <StatPanel
                 title="Security findings"
                 value={repo.security.deepScan ?? "—"}
                 tone={repo.security.deepScan ? "danger" : "neutral"}
-                footer={repo.security.lastScanAt ? "Last scan complete" : "Never scanned"}
+                footer={
+                  repo.security.lastScanAt
+                    ? "Last scan complete"
+                    : live
+                      ? "Security metrics are not exposed by the live API yet"
+                      : "Never scanned"
+                }
               />
             </div>
 
-            <Card>
-              <CardHeader title="Weekly reviews" />
-              <CardBody>
-                <AreaTrend
-                  data={weeklyReviews}
-                  seriesDefs={[
-                    { key: "value", label: "Reviews", color: series.brand },
-                  ]}
-                />
-              </CardBody>
-            </Card>
+            {live ? (
+              <Card>
+                <CardHeader title="Weekly reviews" />
+                <CardBody>
+                  <AreaTrend
+                    data={[]}
+                    seriesDefs={[
+                      {
+                        key: "value",
+                        label: "Reviews",
+                        color: series.brand,
+                      },
+                    ]}
+                  />
+                </CardBody>
+              </Card>
+            ) : (
+              <Suspense fallback={<div className="h-[260px] rounded-lg border border-line bg-surface" />}>
+                <RepositoryWeeklyReviewsFixture />
+              </Suspense>
+            )}
           </>
         )}
 
@@ -184,6 +252,7 @@ export function RepositoryDetailPage() {
                 </p>
                 <Switch
                   checked={inherit}
+                  disabled={live}
                   onChange={(value) => patchSettings({ inherit: value })}
                   label="Inherit organization settings"
                 />
@@ -201,7 +270,7 @@ export function RepositoryDetailPage() {
                   value={instructions}
                   onChange={(event) => patchSettings({ instructions: event.target.value })}
                   placeholder="Workflow nodes must declare an explicit schema; do not infer parameter shapes at runtime."
-                  disabled={inherit}
+                  disabled={inherit || live}
                 />
               </CardBody>
             </Card>
@@ -217,7 +286,7 @@ export function RepositoryDetailPage() {
                   className="font-mono text-xs"
                   value={ignorePaths}
                   onChange={(event) => patchSettings({ ignorePaths: event.target.value })}
-                  disabled={inherit}
+                  disabled={inherit || live}
                 />
               </CardBody>
             </Card>
@@ -232,6 +301,7 @@ export function RepositoryDetailPage() {
                   variant="danger"
                   icon={<Trash2 className="h-3.5 w-3.5" />}
                   onClick={() => setRemoving(true)}
+                  disabled={live}
                 >
                   Remove {repo.name}
                 </Button>
@@ -241,28 +311,28 @@ export function RepositoryDetailPage() {
         )}
 
         {tab === "learnings" &&
-          (repoLearnings.length === 0 ? (
+          (knowledge.status === "loading" ? (
+            <LiveTableLoading columns={2} />
+          ) : knowledge.status === "misconfigured" ? (
+            <LiveMisconfiguredState detail={knowledge.detail} />
+          ) : knowledge.status === "failed" ? (
+            <LiveFailureState failure={knowledge.failure} />
+          ) : repoLearnings.length === 0 ? (
             <Card>
               <CardBody>
                 <p className="py-8 text-center text-sm text-fg-subtle">
-                  No learnings recorded for this repository yet. Reply to a review
-                  comment with a correction and it will appear here.
+                  No learnings recorded for this repository yet. Reply to a review comment with a correction and it will appear here.
                 </p>
               </CardBody>
             </Card>
           ) : (
             <ul className="space-y-2">
               {repoLearnings.map((learning) => (
-                <li
-                  key={learning.id}
-                  className="rounded-lg border border-line bg-surface p-3.5"
-                >
-                  <p className="text-sm leading-relaxed text-fg-muted">
-                    {learning.content}
-                  </p>
+                <li key={learning.id} className="rounded-lg border border-line bg-surface p-3.5">
+                  <p className="text-sm leading-relaxed text-fg-muted">{learning.content}</p>
                   <p className="mt-1.5 text-2xs text-fg-faint">
-                    From {learning.source.toLowerCase()} · applied{" "}
-                    {learning.appliedCount}×
+                    From {learning.source.toLowerCase()}
+                    {learning.appliedCount === null ? " · usage not available" : ` · applied ${learning.appliedCount}×`}
                   </p>
                 </li>
               ))}
@@ -281,13 +351,41 @@ export function RepositoryDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {[
-                  { when: "2h ago", event: "Review completed", pr: "#412", comments: 14 },
-                  { when: "1d ago", event: "Review completed", pr: "#411", comments: 9 },
-                  { when: "2d ago", event: "Incremental review", pr: "#411", comments: 3 },
-                  { when: "4d ago", event: "Review completed", pr: "#408", comments: 6 },
-                  { when: "6d ago", event: "Cache rebuilt", pr: "—", comments: 0 },
-                ].map((row, index) => (
+                {(live
+                  ? []
+                  : [
+                      {
+                        when: "2h ago",
+                        event: "Review completed",
+                        pr: "#412",
+                        comments: 14,
+                      },
+                      {
+                        when: "1d ago",
+                        event: "Review completed",
+                        pr: "#411",
+                        comments: 9,
+                      },
+                      {
+                        when: "2d ago",
+                        event: "Incremental review",
+                        pr: "#411",
+                        comments: 3,
+                      },
+                      {
+                        when: "4d ago",
+                        event: "Review completed",
+                        pr: "#408",
+                        comments: 6,
+                      },
+                      {
+                        when: "6d ago",
+                        event: "Cache rebuilt",
+                        pr: "—",
+                        comments: 0,
+                      },
+                    ]
+                ).map((row, index) => (
                   <Tr key={index}>
                     <Td className="whitespace-nowrap">{row.when}</Td>
                     <Td className="font-medium text-fg">{row.event}</Td>
@@ -304,16 +402,14 @@ export function RepositoryDetailPage() {
       </div>
 
       <Modal
-        open={removing}
+        open={removing && !live}
         onClose={() => setRemoving(false)}
         title={`Remove ${repo.name}?`}
         description="Reviews stop immediately and the analysis cache is deleted. You can add the repository back at any time."
         size="sm"
         footer={
           <>
-            <Button variant="ghost" onClick={() => setRemoving(false)}>
-              Cancel
-            </Button>
+            <Button variant="ghost" onClick={() => setRemoving(false)}>Cancel</Button>
             <Button
               variant="danger"
               onClick={() => {
@@ -333,7 +429,7 @@ export function RepositoryDetailPage() {
         <Input placeholder={repo.name} aria-label="Type the repository name to confirm" />
       </Modal>
       <UnsavedBar
-        open={dirty}
+        open={dirty && !live}
         onReset={reset}
         onSave={() => {
           commit();

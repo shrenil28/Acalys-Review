@@ -57,6 +57,7 @@ function modelWith(value: unknown): ModelCompleter {
           inputTokens: 10,
           outputTokens: 10,
           cachedInputTokens: 0,
+          cacheCreationInputTokens: 0,
           cacheHit: false,
           costMicroUsd: 10,
         },
@@ -71,7 +72,12 @@ describe("LLM correctness candidate boundary", () => {
   it("projects the planner's real anchor instead of trusting a model line number", async () => {
     const source = [
       "export const unrelated = 1;", // line 1 is deliberately another symbol
-      "", "", "", "", "", "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
       "export function changed() {",
       "  return dangerous();",
       "}",
@@ -85,7 +91,9 @@ describe("LLM correctness candidate boundary", () => {
             anchorOrdinal: 4,
             family: "control_flow",
             claim: "The changed branch can return the wrong result.",
-            causalSteps: ["The changed function calls dangerous() without the required guard"],
+            causalSteps: [
+              "The changed function calls dangerous() without the required guard",
+            ],
             trigger: "dangerous() returns the sentinel value",
             consequence: "the caller receives an invalid result",
             proposedSeverity: "medium",
@@ -148,7 +156,7 @@ describe("independent LLM verification", () => {
     let captured: ModelRequest<unknown> | undefined;
     const model: ModelCompleter = {
       async complete<T>(request: ModelRequest<T>) {
-        captured = request as ModelRequest<unknown>;
+        captured = request;
         return {
           kind: "ok" as const,
           value: {
@@ -161,6 +169,7 @@ describe("independent LLM verification", () => {
             inputTokens: 5,
             outputTokens: 5,
             cachedInputTokens: 0,
+            cacheCreationInputTokens: 0,
             cacheHit: false,
             costMicroUsd: 5,
           },

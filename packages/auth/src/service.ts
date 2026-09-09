@@ -5,7 +5,7 @@ import {
   UnauthorizedError,
   ValidationError,
 } from "@acalys/contracts/domain";
-import { type AuthRole, AuthStore } from "@acalys/database";
+import { type AuthStore } from "@acalys/database";
 
 export const AUTH_ROLES = ["owner", "admin", "member", "read_only"] as const;
 export type Role = (typeof AUTH_ROLES)[number];
@@ -90,7 +90,9 @@ function validRole(value: string): value is Role {
 
 export function requireScope(principal: Principal, scope: ApiScope): void {
   if (!principal.scopes.has(scope)) {
-    throw new ForbiddenError(`Credential is not authorized for scope '${scope}'`);
+    throw new ForbiddenError(
+      `Credential is not authorized for scope '${scope}'`,
+    );
   }
 }
 
@@ -124,7 +126,10 @@ export class AuthService {
   public constructor(options: AuthServiceOptions) {
     this.#store = options.store;
     this.#sessionTtlMillis = options.sessionTtlMillis ?? 8 * 60 * 60 * 1_000;
-    if (!Number.isSafeInteger(this.#sessionTtlMillis) || this.#sessionTtlMillis <= 0) {
+    if (
+      !Number.isSafeInteger(this.#sessionTtlMillis) ||
+      this.#sessionTtlMillis <= 0
+    ) {
       throw new ValidationError("Session TTL must be a positive safe integer");
     }
   }
@@ -157,20 +162,27 @@ export class AuthService {
       organizationId: input.organizationId,
       provider: "github",
       providerUserId: input.identity.providerUserId,
-      ...(input.identity.email === undefined ? {} : { primaryEmail: input.identity.email }),
-      ...(input.identity.displayName === undefined ? {} : { displayName: input.identity.displayName }),
+      ...(input.identity.email === undefined
+        ? {}
+        : { primaryEmail: input.identity.email }),
+      ...(input.identity.displayName === undefined
+        ? {}
+        : { displayName: input.identity.displayName }),
       role: requestedRole,
       tokenHash: hashToken(token),
       ttlMillis: this.#sessionTtlMillis,
     });
     return {
       userId: established.userId,
-      role: established.role as Role,
+      role: established.role,
       credential: { id: sessionId, token, expiresAt: established.expiresAt },
     };
   }
 
-  public async issueSession(userId: string, organizationId: string): Promise<IssuedCredential> {
+  public async issueSession(
+    userId: string,
+    organizationId: string,
+  ): Promise<IssuedCredential> {
     const id = uuidv7();
     const token = secureToken("acalys_session");
     const created = await this.#store.createSession({
@@ -181,18 +193,23 @@ export class AuthService {
       ttlMillis: this.#sessionTtlMillis,
     });
     if (created === undefined) {
-      throw new UnauthorizedError("A session can only be issued for a live organization membership");
+      throw new UnauthorizedError(
+        "A session can only be issued for a live organization membership",
+      );
     }
     return { id, token, expiresAt: created.expiresAt };
   }
 
   public async authenticateSession(token: string): Promise<Principal> {
-    if (!token.startsWith("acalys_session_")) throw new UnauthorizedError("Invalid session credential");
+    if (!token.startsWith("acalys_session_"))
+      throw new UnauthorizedError("Invalid session credential");
     const row = await this.#store.authenticateSessionByHash(hashToken(token));
     if (row === undefined) {
-      throw new UnauthorizedError("Session is invalid, expired, rotated, revoked, or no longer authorized");
+      throw new UnauthorizedError(
+        "Session is invalid, expired, rotated, revoked, or no longer authorized",
+      );
     }
-    const role = row.role as Role;
+    const role = row.role;
     return {
       kind: "session",
       id: row.sessionId,
@@ -204,7 +221,8 @@ export class AuthService {
   }
 
   public async rotateSession(token: string): Promise<IssuedCredential> {
-    if (!token.startsWith("acalys_session_")) throw new UnauthorizedError("Invalid session credential");
+    if (!token.startsWith("acalys_session_"))
+      throw new UnauthorizedError("Invalid session credential");
     const replacementId = uuidv7();
     const replacement = secureToken("acalys_session");
     const rotated = await this.#store.rotateSessionByHash({
@@ -213,11 +231,19 @@ export class AuthService {
       replacementHash: hashToken(replacement),
       ttlMillis: this.#sessionTtlMillis,
     });
-    if (rotated === undefined) throw new UnauthorizedError("Session could not be rotated");
-    return { id: replacementId, token: replacement, expiresAt: rotated.expiresAt };
+    if (rotated === undefined)
+      throw new UnauthorizedError("Session could not be rotated");
+    return {
+      id: replacementId,
+      token: replacement,
+      expiresAt: rotated.expiresAt,
+    };
   }
 
-  public revokeSession(sessionId: string, organizationId: string): Promise<boolean> {
+  public revokeSession(
+    sessionId: string,
+    organizationId: string,
+  ): Promise<boolean> {
     return this.#store.revokeSession(sessionId, organizationId);
   }
 
@@ -229,13 +255,20 @@ export class AuthService {
     readonly scopes: readonly ApiScope[];
     readonly expiresAt?: Date | undefined;
   }): Promise<IssuedCredential> {
-    if (input.name.trim().length === 0) throw new ValidationError("API key name is required");
-    if (input.scopes.length === 0) throw new ValidationError("API key needs at least one scope");
-    if (new Set(input.scopes).size !== input.scopes.length) throw new ValidationError("API key scopes must be unique");
-    if (!input.scopes.every((scope) => validScope(scope))) throw new ValidationError("API key contains an unknown scope");
+    if (input.name.trim().length === 0)
+      throw new ValidationError("API key name is required");
+    if (input.scopes.length === 0)
+      throw new ValidationError("API key needs at least one scope");
+    if (new Set(input.scopes).size !== input.scopes.length)
+      throw new ValidationError("API key scopes must be unique");
+    if (!input.scopes.every((scope) => validScope(scope)))
+      throw new ValidationError("API key contains an unknown scope");
     const role = input.role ?? "read_only";
     if (!validRole(role)) throw new ValidationError("API key role is invalid");
-    if (input.expiresAt !== undefined && !Number.isFinite(input.expiresAt.getTime())) {
+    if (
+      input.expiresAt !== undefined &&
+      !Number.isFinite(input.expiresAt.getTime())
+    ) {
       throw new ValidationError("API key expiry must be a valid timestamp");
     }
     const id = uuidv7();
@@ -256,18 +289,27 @@ export class AuthService {
       throw new ValidationError("API key expiry must be in the future");
     }
     if (created === "membership_missing") {
-      throw new ValidationError("A user-bound API key requires a live organization membership");
+      throw new ValidationError(
+        "A user-bound API key requires a live organization membership",
+      );
     }
-    return { id, token, ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }) };
+    return {
+      id,
+      token,
+      ...(input.expiresAt === undefined ? {} : { expiresAt: input.expiresAt }),
+    };
   }
 
   public async authenticateApiKey(token: string): Promise<Principal> {
-    if (!token.startsWith("acalys_key_")) throw new UnauthorizedError("Invalid API key credential");
+    if (!token.startsWith("acalys_key_"))
+      throw new UnauthorizedError("Invalid API key credential");
     const row = await this.#store.authenticateApiKeyByHash(hashToken(token));
     if (row === undefined) {
-      throw new UnauthorizedError("API key is invalid, expired, revoked, or no longer authorized");
+      throw new UnauthorizedError(
+        "API key is invalid, expired, revoked, or no longer authorized",
+      );
     }
-    const roleScopes = ROLE_SCOPES[row.role as Role];
+    const roleScopes = ROLE_SCOPES[row.role];
     const scopes = new Set<ApiScope>();
     for (const scope of row.scopes) {
       if (validScope(scope) && roleScopes.has(scope)) scopes.add(scope);
@@ -277,17 +319,23 @@ export class AuthService {
       id: row.apiKeyId,
       ...(row.userId === null ? {} : { userId: row.userId }),
       organizationId: row.organizationId,
-      role: row.role as Role,
+      role: row.role,
       scopes,
     };
   }
 
-  public revokeApiKey(apiKeyId: string, organizationId: string): Promise<boolean> {
+  public revokeApiKey(
+    apiKeyId: string,
+    organizationId: string,
+  ): Promise<boolean> {
     return this.#store.revokeApiKey(apiKeyId, organizationId);
   }
 
-  public async authenticateBearer(value: string | undefined): Promise<Principal> {
-    if (value === undefined || !value.startsWith("Bearer ")) throw new UnauthorizedError("Bearer authentication is required");
+  public async authenticateBearer(
+    value: string | undefined,
+  ): Promise<Principal> {
+    if (value === undefined || !value.startsWith("Bearer "))
+      throw new UnauthorizedError("Bearer authentication is required");
     const token = value.slice("Bearer ".length);
     return token.startsWith("acalys_session_")
       ? this.authenticateSession(token)

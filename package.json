@@ -35,7 +35,17 @@
     "probe:phase3-error-boundary": "node scripts/probe-phase3-error-boundary.mjs",
     "probe:phase3-auth-clock": "node scripts/probe-phase3-auth-clock.mjs",
     "probe:phase3-mutation-clock": "node scripts/probe-phase3-mutation-clock.mjs",
-    "probe:phase3-oauth-commit": "node scripts/probe-phase3-oauth-commit.mjs"
+    "probe:phase3-oauth-commit": "node scripts/probe-phase3-oauth-commit.mjs",
+    "probe:phase3-dispatch-coordination": "node scripts/probe-phase3-dispatch-coordination.mjs",
+    "probe:phase3-sse-liveness": "node scripts/probe-phase3-sse-liveness.mjs",
+    "probe:phase3-pagination-cursor": "node scripts/probe-phase3-pagination-cursor.mjs",
+    "probe:phase3-handler-status": "node scripts/probe-phase3-handler-status.mjs",
+    "probe:phase3-check-page-bound": "node scripts/probe-phase3-check-page-bound.mjs",
+    "probe:phase3-query-boundary": "node scripts/probe-phase3-query-boundary.mjs",
+    "phase3:source-invariants": "node scripts/assert-phase3-source-invariants.mjs",
+    "accept:phase3:preflight": "node scripts/accept-phase3.mjs --preflight-only",
+    "accept:phase3": "node scripts/accept-phase3.mjs",
+    "probe:phase4-live-foundation": "node scripts/probe-phase4-live-foundation.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

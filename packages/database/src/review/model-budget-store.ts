@@ -18,7 +18,10 @@ export interface ModelBudgetScope {
 export type ModelBudgetReserveOutcome =
   | {
       readonly kind: "reserved";
-      readonly reservation: { markDispatched(): Promise<void>; release(): Promise<void> };
+      readonly reservation: {
+        markDispatched(): Promise<void>;
+        release(): Promise<void>;
+      };
     }
   | { readonly kind: "budget_exceeded" };
 
@@ -51,7 +54,10 @@ export class ModelBudgetReservationStore {
   }): Promise<ModelBudgetReserveOutcome> {
     const { scope, limits } = input;
     assertSafeNonNegative(input.requestedCostMicroUsd, "requested model cost");
-    assertSafeNonNegative(limits.maxCostMicroUsdPerCall, "per-call model budget");
+    assertSafeNonNegative(
+      limits.maxCostMicroUsdPerCall,
+      "per-call model budget",
+    );
     assertSafeNonNegative(limits.maxCostMicroUsdPerRun, "per-run model budget");
     assertSafeNonNegative(
       limits.maxCostMicroUsdPerOrganization,
@@ -132,16 +138,20 @@ export class ModelBudgetReservationStore {
 
       const runRow = run.rows[0];
       const orgRow = org.rows[0];
-      const calls = Number(runRow?.calls ?? 0) + Number(runRow?.reserved_calls ?? 0);
+      const calls =
+        Number(runRow?.calls ?? 0) + Number(runRow?.reserved_calls ?? 0);
       const runCost =
-        Number(runRow?.cost_microusd ?? 0) + Number(runRow?.reserved_cost_microusd ?? 0);
+        Number(runRow?.cost_microusd ?? 0) +
+        Number(runRow?.reserved_cost_microusd ?? 0);
       const orgCost =
-        Number(orgRow?.cost_microusd ?? 0) + Number(orgRow?.reserved_cost_microusd ?? 0);
+        Number(orgRow?.cost_microusd ?? 0) +
+        Number(orgRow?.reserved_cost_microusd ?? 0);
 
       if (
         calls >= limits.maxCallsPerRun ||
         runCost + input.requestedCostMicroUsd > limits.maxCostMicroUsdPerRun ||
-        orgCost + input.requestedCostMicroUsd > limits.maxCostMicroUsdPerOrganization
+        orgCost + input.requestedCostMicroUsd >
+          limits.maxCostMicroUsdPerOrganization
       ) {
         return false;
       }
@@ -183,7 +193,9 @@ export class ModelBudgetReservationStore {
             ),
           );
           if (result.rowCount !== 1) {
-            throw new Error("model budget reservation was lost before provider dispatch");
+            throw new Error(
+              "model budget reservation was lost before provider dispatch",
+            );
           }
           dispatchMarked = true;
         },

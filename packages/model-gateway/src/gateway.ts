@@ -44,7 +44,9 @@ function conservativeWorstCaseCost(
   // Both supported providers tokenize UTF-8 text. Counting one token per byte is
   // deliberately pessimistic but gives a provider-independent upper bound
   // without importing a provider tokenizer into the canonical gateway.
-  const inputUpperBound = Buffer.byteLength(system, "utf8") + Buffer.byteLength(providerInput, "utf8");
+  const inputUpperBound =
+    Buffer.byteLength(system, "utf8") +
+    Buffer.byteLength(providerInput, "utf8");
   const highestInputRate = Math.max(
     route.inputMicroUsdPerMillion,
     route.cachedInputMicroUsdPerMillion ?? route.inputMicroUsdPerMillion,
@@ -92,7 +94,9 @@ const NOOP_LOGGER: GatewayLogger = {
   warn: () => undefined,
 };
 
-function sanitized(fields: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+function sanitized(
+  fields: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> {
   const safe: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
     const lowered = key.toLowerCase();
@@ -159,11 +163,17 @@ export class ModelGateway implements ModelPort {
     this.#cassette = options.cassette;
     this.#replayMode = options.replayMode ?? "off";
     this.#logger = options.logger ?? NOOP_LOGGER;
-    this.#sleep = options.sleep ?? ((millis) => new Promise((resolve) => setTimeout(resolve, millis)));
+    this.#sleep =
+      options.sleep ??
+      ((millis) => new Promise((resolve) => setTimeout(resolve, millis)));
     this.#now = options.now ?? (() => new Date());
-    this.#jitter = options.jitter ?? ((maxInclusive) => randomInt(0, maxInclusive + 1));
+    this.#jitter =
+      options.jitter ?? ((maxInclusive) => randomInt(0, maxInclusive + 1));
 
-    if (this.#retries.maxAttempts < 1 || !Number.isInteger(this.#retries.maxAttempts)) {
+    if (
+      this.#retries.maxAttempts < 1 ||
+      !Number.isInteger(this.#retries.maxAttempts)
+    ) {
       throw new Error("retry maxAttempts must be a positive integer");
     }
     if (this.#budget.organizationWindowMs < 1_000) {
@@ -173,7 +183,9 @@ export class ModelGateway implements ModelPort {
       !Number.isSafeInteger(this.#budget.maxCostMicroUsdPerCall) ||
       this.#budget.maxCostMicroUsdPerCall < 0
     ) {
-      throw new Error("per-call model budget must be a non-negative safe integer");
+      throw new Error(
+        "per-call model budget must be a non-negative safe integer",
+      );
     }
     if (this.#replayMode !== "off" && this.#cassette === undefined) {
       throw new Error("replay/record mode requires a cassette store");
@@ -208,10 +220,16 @@ export class ModelGateway implements ModelPort {
     };
     const startedAt = this.#now();
 
-    const logInfo = (event: string, fields: Readonly<Record<string, unknown>>): void => {
+    const logInfo = (
+      event: string,
+      fields: Readonly<Record<string, unknown>>,
+    ): void => {
       this.#logger.info(event, sanitized(fields));
     };
-    const logWarn = (event: string, fields: Readonly<Record<string, unknown>>): void => {
+    const logWarn = (
+      event: string,
+      fields: Readonly<Record<string, unknown>>,
+    ): void => {
       this.#logger.warn(event, sanitized(fields));
     };
 
@@ -342,7 +360,10 @@ export class ModelGateway implements ModelPort {
           true,
         );
       }
-      if (entry.provider !== route.provider || entry.modelId !== route.modelId) {
+      if (
+        entry.provider !== route.provider ||
+        entry.modelId !== route.modelId
+      ) {
         await record("failed", true, undefined, false, 0);
         return failedResult(
           "configuration",
@@ -365,7 +386,11 @@ export class ModelGateway implements ModelPort {
       );
     }
 
-    const worstCaseCost = conservativeWorstCaseCost(route, request.system, providerInput);
+    const worstCaseCost = conservativeWorstCaseCost(
+      route,
+      request.system,
+      providerInput,
+    );
     if (worstCaseCost > this.#budget.maxCostMicroUsdPerCall) {
       await record("failed", false, undefined, false, 0);
       return failedResult(
@@ -516,7 +541,9 @@ export class ModelGateway implements ModelPort {
           } catch {
             // Pre-dispatch reservations expire by database time.
           }
-          throw new Error("model dispatch preparation failed before provider execution");
+          throw new Error(
+            "model dispatch preparation failed before provider execution",
+          );
         } finally {
           try {
             await admission.release();
@@ -533,7 +560,12 @@ export class ModelGateway implements ModelPort {
         }
 
         if (budgetDenied) {
-          const committed = await commitObservation("failed", undefined, false, 0);
+          const committed = await commitObservation(
+            "failed",
+            undefined,
+            false,
+            0,
+          );
           if (!committed) {
             throw new Error("model budget denial could not be recorded");
           }
@@ -552,7 +584,12 @@ export class ModelGateway implements ModelPort {
         // A known retryable provider response is itself a provider interaction.
         // Persist and settle this attempt before another one can be authorized.
         if (raw?.kind === "failed" && raw.retryable && dispatchMarked) {
-          const committed = await commitObservation("failed", undefined, true, 0);
+          const committed = await commitObservation(
+            "failed",
+            undefined,
+            true,
+            0,
+          );
           if (!committed) {
             return {
               kind: "unknown",
@@ -571,7 +608,12 @@ export class ModelGateway implements ModelPort {
 
       // Unknown execution is never retried. A successful or non-retryable
       // response is also final. Only a known retryable failure loops.
-      if (raw === undefined || raw.kind === "unknown" || raw.kind === "ok" || !raw.retryable) {
+      if (
+        raw === undefined ||
+        raw.kind === "unknown" ||
+        raw.kind === "ok" ||
+        !raw.retryable
+      ) {
         break;
       }
       if (attempt < this.#retries.maxAttempts) {
@@ -586,7 +628,8 @@ export class ModelGateway implements ModelPort {
 
     if (raw === undefined) {
       const committed = await commitObservation("failed", undefined, false, 0);
-      if (!committed) throw new Error("model gateway configuration failure was not recorded");
+      if (!committed)
+        throw new Error("model gateway configuration failure was not recorded");
       return failedResult(
         "configuration",
         "retry policy allowed zero provider attempts",

@@ -655,12 +655,23 @@ describeWithPostgres(
           requestKey: `test:constraint:${runId}:${String(pass)}`,
           reason: "initial",
         });
+        const ownership = await scheduler.claim(
+          invocation.invocationId,
+          "publication-test",
+          60_000,
+        );
+        if (ownership.kind !== "claimed") {
+          throw new Error(
+            "verification fixture could not claim its invocation",
+          );
+        }
         return database.pool.query(
           `INSERT INTO verification_attempts (id, organization_id, review_run_id,
            candidate_finding_id, verifier_id, verifier_version, context_digest,
-           cache_key, invocation_id, attempt, created_at, ${columns})
-         VALUES (gen_random_uuid(),$1,$2,$3,'v','1',$4,$5,$6,$7,$8,${values
-           .map((_unused, index) => `$${String(index + 9)}`)
+           cache_key, invocation_id, claim_token, claim_generation, attempt,
+           created_at, ${columns})
+         VALUES (gen_random_uuid(),$1,$2,$3,'v','1',$4,$5,$6,$7,$8,$9,$10,${values
+           .map((_unused, index) => `$${String(index + 11)}`)
            .join(",")})`,
           [
             ORG,
@@ -669,6 +680,8 @@ describeWithPostgres(
             "c".repeat(64),
             "k".repeat(64),
             invocation.invocationId,
+            ownership.claim.claimToken,
+            ownership.claim.claimGeneration,
             invocation.attempt,
             now,
             ...values,

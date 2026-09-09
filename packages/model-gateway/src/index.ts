@@ -1,4 +1,8 @@
-export { MODEL_GATEWAY_ENVELOPE_VERSION, ModelGateway, type ModelGatewayOptions } from "./gateway.js";
+export {
+  MODEL_GATEWAY_ENVELOPE_VERSION,
+  ModelGateway,
+  type ModelGatewayOptions,
+} from "./gateway.js";
 export { CredentialLimiter } from "./limits.js";
 export {
   JsonCassetteStore,

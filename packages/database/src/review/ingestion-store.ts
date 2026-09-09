@@ -729,9 +729,7 @@ export class ReviewIngestionStore {
     });
   }
 
-  public getRun(
-    runId: string,
-  ): Promise<
+  public getRun(runId: string): Promise<
     | {
         readonly id: string;
         readonly state: string;

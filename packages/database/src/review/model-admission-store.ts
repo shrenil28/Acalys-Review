@@ -28,7 +28,9 @@ export class ModelCredentialAdmissionStore {
     this.#pool = pool;
   }
 
-  public async enter(policy: ModelCredentialPolicy): Promise<ModelAdmissionOutcome> {
+  public async enter(
+    policy: ModelCredentialPolicy,
+  ): Promise<ModelAdmissionOutcome> {
     if (
       policy.credentialId.trim() === "" ||
       !Number.isInteger(policy.maxConcurrency) ||
@@ -79,7 +81,10 @@ export class ModelCredentialAdmissionStore {
       const row = counts.rows[0];
       const active = Number(row?.active ?? 0);
       const recent = Number(row?.recent ?? 0);
-      if (active >= policy.maxConcurrency || recent >= policy.requestsPerMinute) {
+      if (
+        active >= policy.maxConcurrency ||
+        recent >= policy.requestsPerMinute
+      ) {
         return false;
       }
 

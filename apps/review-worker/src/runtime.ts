@@ -28,7 +28,10 @@ import type { GithubRepositoryReader } from "@acalys/provider-github";
 
 import { runRealAnalysis } from "./analysis.js";
 import { createReviewExecutionPort } from "./execution.js";
-import { createApiDispatchWorker, type RunningApiDispatchWorker } from "./api-dispatch-worker.js";
+import {
+  createApiDispatchWorker,
+  type RunningApiDispatchWorker,
+} from "./api-dispatch-worker.js";
 import {
   createGithubAnalysisSource,
   createGithubIndependentSource,
@@ -195,11 +198,21 @@ export function createProductionReviewRuntime(
   const apiDispatchWorker = createApiDispatchWorker({
     store: new ReviewDispatchStore(options.pool),
     reviewExecution,
-    ...(options.worker?.batchSize === undefined ? {} : { batchSize: options.worker.batchSize }),
-    ...(options.worker?.leaseMillis === undefined ? {} : { leaseMillis: options.worker.leaseMillis }),
-    ...(options.worker?.pollIntervalMillis === undefined ? {} : { pollIntervalMillis: options.worker.pollIntervalMillis }),
-    ...(options.worker?.retryBackoffMillis === undefined ? {} : { retryBackoffMillis: options.worker.retryBackoffMillis }),
-    ...(options.worker?.observer === undefined ? {} : { observer: { onError: options.worker.observer.onError } }),
+    ...(options.worker?.batchSize === undefined
+      ? {}
+      : { batchSize: options.worker.batchSize }),
+    ...(options.worker?.leaseMillis === undefined
+      ? {}
+      : { leaseMillis: options.worker.leaseMillis }),
+    ...(options.worker?.pollIntervalMillis === undefined
+      ? {}
+      : { pollIntervalMillis: options.worker.pollIntervalMillis }),
+    ...(options.worker?.retryBackoffMillis === undefined
+      ? {}
+      : { retryBackoffMillis: options.worker.retryBackoffMillis }),
+    ...(options.worker?.observer === undefined
+      ? {}
+      : { observer: { onError: options.worker.observer.onError } }),
   });
 
   const worker = createWorker({

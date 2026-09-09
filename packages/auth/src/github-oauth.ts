@@ -1,6 +1,10 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { ValidationError, ProviderError, UnauthorizedError } from "@acalys/contracts/domain";
-import { CredentialRing } from "./credential-ring.js";
+import {
+  ValidationError,
+  ProviderError,
+  UnauthorizedError,
+} from "@acalys/contracts/domain";
+import { type CredentialRing } from "./credential-ring.js";
 
 interface OAuthStatePayload {
   readonly nonce: string;
@@ -32,12 +36,20 @@ function base64urlJson(value: unknown): string {
 }
 
 function sign(encoded: string, secret: string): string {
-  return createHmac("sha256", secret).update(encoded, "utf8").digest("base64url");
+  return createHmac("sha256", secret)
+    .update(encoded, "utf8")
+    .digest("base64url");
 }
 
 function isApplicationRelativePath(value: string): boolean {
-  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return false;
-  if (/[\u0000-\u001f\u007f]/u.test(value)) return false;
+  if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\"))
+    return false;
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint !== undefined && (codePoint <= 0x1f || codePoint === 0x7f)) {
+      return false;
+    }
+  }
   try {
     const origin = new URL("https://acalys.invalid/");
     return new URL(value, origin).origin === origin.origin;
@@ -57,16 +69,22 @@ export class GithubOAuthService {
     this.#now = options.now ?? (() => new Date());
     this.#stateTtlMillis = options.stateTtlMillis ?? 10 * 60 * 1_000;
     this.#appSlug = options.appSlug ?? "acalys";
-    if (options.clientId.trim().length === 0 || options.clientSecrets.active.length === 0) {
+    if (
+      options.clientId.trim().length === 0 ||
+      options.clientSecrets.hasEmptyString()
+    ) {
       throw new ValidationError("GitHub OAuth client credentials are required");
     }
-    if (options.stateSecrets.verificationCandidates().some((secret) => secret.length === 0)) {
+    if (options.stateSecrets.hasEmptyString()) {
       throw new ValidationError("OAuth state secrets must not be empty");
     }
     if (!/^[A-Za-z0-9-]{1,100}$/u.test(this.#appSlug)) {
       throw new ValidationError("GitHub App slug is invalid");
     }
-    if (!Number.isSafeInteger(this.#stateTtlMillis) || this.#stateTtlMillis <= 0) {
+    if (
+      !Number.isSafeInteger(this.#stateTtlMillis) ||
+      this.#stateTtlMillis <= 0
+    ) {
       throw new ValidationError("OAuth state TTL must be a positive integer");
     }
   }
@@ -77,10 +95,14 @@ export class GithubOAuthService {
     readonly returnTo: string;
   }): { readonly url: string; readonly state: string } {
     if (input.nonce.length < 8 || input.nonce.length > 256) {
-      throw new ValidationError("OAuth nonce must be between 8 and 256 characters");
+      throw new ValidationError(
+        "OAuth nonce must be between 8 and 256 characters",
+      );
     }
     if (!isApplicationRelativePath(input.returnTo)) {
-      throw new ValidationError("OAuth returnTo must be an application-relative path");
+      throw new ValidationError(
+        "OAuth returnTo must be an application-relative path",
+      );
     }
     const payload: OAuthStatePayload = {
       nonce: input.nonce,
@@ -100,7 +122,11 @@ export class GithubOAuthService {
 
   public verifyState(state: string, expectedNonce: string): OAuthStatePayload {
     const [encoded, supplied, extra] = state.split(".");
-    if (encoded === undefined || supplied === undefined || extra !== undefined) {
+    if (
+      encoded === undefined ||
+      supplied === undefined ||
+      extra !== undefined
+    ) {
       throw new UnauthorizedError("OAuth state is malformed");
     }
     const suppliedBytes = Buffer.from(supplied, "utf8");
@@ -109,7 +135,8 @@ export class GithubOAuthService {
       const expected = sign(encoded, secret);
       const expectedBytes = Buffer.from(expected, "utf8");
       const sameLength = expectedBytes.length === suppliedBytes.length;
-      const matches = sameLength && timingSafeEqual(expectedBytes, suppliedBytes);
+      const matches =
+        sameLength && timingSafeEqual(expectedBytes, suppliedBytes);
       valid = matches || valid;
     }
     if (!valid) throw new UnauthorizedError("OAuth state signature is invalid");
@@ -120,9 +147,11 @@ export class GithubOAuthService {
       throw new UnauthorizedError("OAuth state payload is invalid");
     }
     if (
-      typeof parsed !== "object" || parsed === null ||
+      typeof parsed !== "object" ||
+      parsed === null ||
       typeof (parsed as Record<string, unknown>)["nonce"] !== "string" ||
-      typeof (parsed as Record<string, unknown>)["organizationId"] !== "string" ||
+      typeof (parsed as Record<string, unknown>)["organizationId"] !==
+        "string" ||
       typeof (parsed as Record<string, unknown>)["returnTo"] !== "string" ||
       typeof (parsed as Record<string, unknown>)["issuedAt"] !== "number" ||
       !Number.isSafeInteger((parsed as Record<string, unknown>)["issuedAt"])
@@ -134,56 +163,92 @@ export class GithubOAuthService {
       throw new UnauthorizedError("OAuth state return path is invalid");
     }
     if (payload.nonce !== expectedNonce) {
-      throw new UnauthorizedError("OAuth state nonce does not match the initiating browser");
+      throw new UnauthorizedError(
+        "OAuth state nonce does not match the initiating browser",
+      );
     }
     const now = this.#now().getTime();
-    if (now - payload.issuedAt > this.#stateTtlMillis || payload.issuedAt > now + 30_000) {
-      throw new UnauthorizedError("OAuth state expired or was issued in the future");
+    if (
+      now - payload.issuedAt > this.#stateTtlMillis ||
+      payload.issuedAt > now + 30_000
+    ) {
+      throw new UnauthorizedError(
+        "OAuth state expired or was issued in the future",
+      );
     }
     return payload;
   }
 
-  public async exchangeCode(code: string): Promise<{ readonly accessToken: string; readonly identity: GithubOAuthIdentity }> {
+  public async exchangeCode(code: string): Promise<{
+    readonly accessToken: string;
+    readonly identity: GithubOAuthIdentity;
+  }> {
     if (code.length === 0) throw new ValidationError("OAuth code is required");
-    const response = await this.#fetch("https://github.com/login/oauth/access_token", {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify({
-        client_id: this.options.clientId,
-        client_secret: this.options.clientSecrets.active,
-        code,
-        redirect_uri: this.options.callbackUrl,
-      }),
-    });
+    const response = await this.#fetch(
+      "https://github.com/login/oauth/access_token",
+      {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          client_id: this.options.clientId,
+          client_secret: this.options.clientSecrets.active,
+          code,
+          redirect_uri: this.options.callbackUrl,
+        }),
+      },
+    );
     if (!response.ok) {
-      throw new ProviderError("GitHub OAuth code exchange failed", { retryable: response.status >= 500 });
+      throw new ProviderError("GitHub OAuth code exchange failed", {
+        retryable: response.status >= 500,
+      });
     }
-    const tokenBody = await response.json() as Record<string, unknown>;
+    const tokenBody = (await response.json()) as Record<string, unknown>;
     const accessToken = tokenBody["access_token"];
     if (typeof accessToken !== "string" || accessToken.length === 0) {
-      throw new ProviderError("GitHub OAuth response did not contain an access token", { retryable: false });
+      throw new ProviderError(
+        "GitHub OAuth response did not contain an access token",
+        { retryable: false },
+      );
     }
     const user = await this.#fetch("https://api.github.com/user", {
-      headers: { authorization: `Bearer ${accessToken}`, accept: "application/vnd.github+json" },
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        accept: "application/vnd.github+json",
+      },
     });
-    if (!user.ok) throw new ProviderError("GitHub user lookup failed", { retryable: user.status >= 500 });
-    const body = await user.json() as Record<string, unknown>;
-    if ((typeof body["id"] !== "number" && typeof body["id"] !== "string") || typeof body["login"] !== "string") {
-      throw new ProviderError("GitHub user response had an invalid identity", { retryable: false });
+    if (!user.ok)
+      throw new ProviderError("GitHub user lookup failed", {
+        retryable: user.status >= 500,
+      });
+    const body = (await user.json()) as Record<string, unknown>;
+    if (
+      (typeof body["id"] !== "number" && typeof body["id"] !== "string") ||
+      typeof body["login"] !== "string"
+    ) {
+      throw new ProviderError("GitHub user response had an invalid identity", {
+        retryable: false,
+      });
     }
     return {
       accessToken,
       identity: {
         providerUserId: String(body["id"]),
-        login: body["login"] as string,
-        ...(typeof body["name"] === "string" ? { displayName: body["name"] as string } : {}),
-        ...(typeof body["email"] === "string" ? { email: body["email"] as string } : {}),
+        login: body["login"],
+        ...(typeof body["name"] === "string"
+          ? { displayName: body["name"] }
+          : {}),
+        ...(typeof body["email"] === "string" ? { email: body["email"] } : {}),
       },
     };
   }
 
   public installationUrl(state: string): string {
-    const url = new URL(`https://github.com/apps/${this.#appSlug}/installations/new`);
+    const url = new URL(
+      `https://github.com/apps/${this.#appSlug}/installations/new`,
+    );
     url.searchParams.set("state", state);
     return url.toString();
   }

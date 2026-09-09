@@ -14,7 +14,7 @@ const invocation = {
 };
 
 function fakeFetch(response: Response): typeof fetch {
-  return (async () => response) as typeof fetch;
+  return async () => response;
 }
 
 describe("provider adapters", () => {
@@ -25,7 +25,10 @@ describe("provider adapters", () => {
           JSON.stringify({
             id: "resp_1",
             output: [
-              { type: "message", content: [{ type: "output_text", text: '{"answer":"yes"}' }] },
+              {
+                type: "message",
+                content: [{ type: "output_text", text: '{"answer":"yes"}' }],
+              },
             ],
             usage: {
               input_tokens: 100,

@@ -4,8 +4,7 @@ import { FilterChip } from "@/components/ui/FilterChip";
 import { ViewRail } from "@/components/ui/Tabs";
 import { TopBarActions } from "@/components/layout/TopBar";
 import { ideCliViews, prReviewViews } from "@/lib/nav";
-import { repoNames } from "@/data/repos";
-import { teamOptions, usernameOptions } from "@/data/analytics";
+import { useDashboardFilterDimensions } from "@/lib/api/liveDashboard";
 import { makeRange, TimeRangePicker, type TimeRange } from "./TimeRangePicker";
 
 /**
@@ -23,6 +22,8 @@ export function DashboardLayout() {
   const [range, setRange] = useState<TimeRange>(() => makeRange());
   const [timezone, setTimezone] = useState<"UTC" | "Browser">("UTC");
   const [refresh, setRefresh] = useState("Off");
+  const { repositoryOptions, usernameOptions, teamOptions } =
+    useDashboardFilterDimensions();
 
   return (
     <div className="flex min-h-full">
@@ -46,19 +47,19 @@ export function DashboardLayout() {
         >
           <FilterChip
             label="Repository Name"
-            options={repoNames}
+            options={[...repositoryOptions]}
             selected={repo}
             onChange={setRepo}
           />
           <FilterChip
             label="Username"
-            options={usernameOptions.filter((entry) => entry !== "All")}
+            options={[...usernameOptions]}
             selected={username}
             onChange={setUsername}
           />
           <FilterChip
             label={isIdeCli ? "Team" : "Teams"}
-            options={teamOptions.filter((entry) => entry !== "All")}
+            options={[...teamOptions]}
             selected={team}
             onChange={setTeam}
           />

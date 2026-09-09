@@ -52,7 +52,11 @@ import {
   type BaseRevisionResolution,
   type PlannerBaseRevision,
 } from "@acalys/code-intelligence";
-import { canonicalJson, gitObjectId, isRepositoryPath } from "@acalys/contracts/domain";
+import {
+  canonicalJson,
+  gitObjectId,
+  isRepositoryPath,
+} from "@acalys/contracts/domain";
 import type { CandidateFindingRow } from "@acalys/database";
 import {
   ALL_ANALYZER_IDS,
@@ -73,6 +77,7 @@ import {
   LLM_CORRECTNESS_PROMPT_VERSION,
   type ModelCompleter,
   type LlmCorrectnessOutcome,
+  type AnalyzerFinding,
 } from "@acalys/review-engine";
 
 type ConfigGovernanceResult = ReturnType<typeof governanceFor>;
@@ -319,7 +324,7 @@ export function modelAnalyzerInputDigest(input: {
 
 function llmCandidateFingerprint(
   repositoryId: string,
-  finding: import("@acalys/review-engine").AnalyzerFinding,
+  finding: AnalyzerFinding,
 ): string {
   return sha256(
     canonicalJson({
@@ -545,13 +550,8 @@ function resolveBaseRevisions(
 export async function runRealAnalysis(
   options: RealAnalysisOptions,
 ): Promise<RealAnalysisOutcome> {
-  const {
-    changed,
-    repository,
-    instructionObservation,
-    baseSha,
-    mergeBaseSha,
-  } = await options.source.read({
+  const { changed, repository, instructionObservation, baseSha, mergeBaseSha } =
+    await options.source.read({
       repositoryId: options.repositoryId,
       headSha: options.headSha,
       ...(options.revisionId === undefined
@@ -773,9 +773,7 @@ export async function runRealAnalysis(
       } satisfies CandidateFindingRow;
     });
 
-  const conflictsWithDeterministic = (
-    proposed: import("@acalys/review-engine").AnalyzerFinding,
-  ): boolean =>
+  const conflictsWithDeterministic = (proposed: AnalyzerFinding): boolean =>
     report.findings.some(
       (deterministic) =>
         deterministic.location.path === proposed.location.path &&
@@ -1050,9 +1048,7 @@ function buildBoundaryFacts(
     base: baseSurfaces,
     head: headSurfaces,
     abstentions,
-    identity: sha256(
-      canonicalJson({ base: baseSurfaces, head: headSurfaces }),
-    ),
+    identity: sha256(canonicalJson({ base: baseSurfaces, head: headSurfaces })),
   };
 }
 

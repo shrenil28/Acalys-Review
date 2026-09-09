@@ -35,3 +35,6 @@ probe-transcript-*.json
 # Agent worktrees and local session state. Never committed: these are
 # unmerged working copies, not project history.
 .claude/
+
+# Local Phase 3 acceptance evidence
+.phase3-acceptance-report.json

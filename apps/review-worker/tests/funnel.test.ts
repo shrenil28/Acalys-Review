@@ -235,7 +235,12 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     };
 
     // queued → preparing → analyzing, driven by the real orchestrator.
-    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
+    const options = {
+      ...stores(),
+      analyzer: analyze,
+      verifier: verifier(),
+      config,
+    };
     await advance(context, options); // queued  → preparing
     await advance(context, options); // preparing → analyzing
     await database.pool.query(
@@ -471,7 +476,12 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
   // ── 6 ──────────────────────────────────────────────────────────────────
   it("crashing after the attempts, before promotion, converges", async () => {
     const context = await seedRun();
-    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
+    const options = {
+      ...stores(),
+      analyzer: analyze,
+      verifier: verifier(),
+      config,
+    };
 
     // Drive only as far as `reconciling`: attempts are durable, nothing is
     // promoted, and the worker dies.
@@ -504,7 +514,12 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     // transition itself. A crash inside it must leave none of them, or
     // `state = publishing` could exist with findings nobody decided about.
     const context = await seedRun();
-    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
+    const options = {
+      ...stores(),
+      analyzer: analyze,
+      verifier: verifier(),
+      config,
+    };
 
     for (let step = 0; step < 6; step += 1) {
       const run = await stores().ingestion.getRun(context.runId);
@@ -779,19 +794,29 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     // And an `unavailable` attempt does not satisfy it either. It has examined
     // nothing, so counting it here would let a verifier outage advance the run
     // and publish whatever else happened to verify.
-    const invocation = await stores().scheduler.schedule({
+    const scheduler = stores().scheduler;
+    const invocation = await scheduler.schedule({
       organizationId: ORG,
       reviewRunId: context.runId,
       candidateFindingId: victim ?? "",
       requestKey: `outage:${context.runId}:${victim ?? ""}`,
       reason: "retry_unavailable",
     });
+    const ownership = await scheduler.claim(
+      invocation.invocationId,
+      "funnel-test",
+      60_000,
+    );
+    if (ownership.kind !== "claimed") {
+      throw new Error("verification fixture could not claim its invocation");
+    }
     await database.pool.query(
       `INSERT INTO verification_attempts (id, organization_id, review_run_id,
          candidate_finding_id, status, failure, verifier_id, verifier_version,
-         context_digest, cache_key, invocation_id, attempt, created_at)
+         context_digest, cache_key, invocation_id, claim_token, claim_generation,
+         attempt, created_at)
        VALUES (gen_random_uuid(),$1,$2,$3,'unavailable','model_timeout','v','1',
-         $4,$5,$6,$7,$8)`,
+         $4,$5,$6,$7,$8,$9,$10)`,
       [
         ORG,
         context.runId,
@@ -799,6 +824,8 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
         "c".repeat(64),
         "k".repeat(64),
         invocation.invocationId,
+        ownership.claim.claimToken,
+        ownership.claim.claimGeneration,
         invocation.attempt,
         at,
       ],
@@ -833,7 +860,8 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
       60_000,
     );
     expect(recoveryClaim.kind).toBe("claimed");
-    if (recoveryClaim.kind !== "claimed") throw new Error("expected recovery claim");
+    if (recoveryClaim.kind !== "claimed")
+      throw new Error("expected recovery claim");
     await stores().verifications.recordAttempt({
       invocationId: recoveryClaim.claim.invocationId,
       claimToken: recoveryClaim.claim.claimToken,

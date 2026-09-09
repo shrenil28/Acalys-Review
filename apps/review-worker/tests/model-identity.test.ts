@@ -41,16 +41,25 @@ describe("model analyzer input identity", () => {
   it("changes when resolved instructions or merge base changes", () => {
     const first = modelAnalyzerInputDigest(base);
     expect(
-      modelAnalyzerInputDigest({ ...base, instructionFactsDigest: "j".repeat(64) }),
+      modelAnalyzerInputDigest({
+        ...base,
+        instructionFactsDigest: "j".repeat(64),
+      }),
     ).not.toBe(first);
-    expect(modelAnalyzerInputDigest({ ...base, mergeBaseSha: "other" })).not.toBe(first);
+    expect(
+      modelAnalyzerInputDigest({ ...base, mergeBaseSha: "other" }),
+    ).not.toBe(first);
   });
   it("changes when base-side content changes while the SHAs stay the same", () => {
+    const [firstChanged] = base.changed;
+    if (firstChanged === undefined) {
+      throw new Error("fixture must supply at least one changed file");
+    }
     const withBase = {
       ...base,
       changed: [
         {
-          ...base.changed[0],
+          ...firstChanged,
           base: { kind: "present" as const, content: "export const a = 0;" },
         },
       ],
@@ -59,7 +68,7 @@ describe("model analyzer input identity", () => {
       ...withBase,
       changed: [
         {
-          ...withBase.changed[0],
+          ...firstChanged,
           base: { kind: "present" as const, content: "export const a = -1;" },
         },
       ],
@@ -69,5 +78,4 @@ describe("model analyzer input identity", () => {
       modelAnalyzerInputDigest(withBase),
     );
   });
-
 });
