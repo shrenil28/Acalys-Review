@@ -273,3 +273,55 @@ describe("Rejections carry a remedy, not just a number", () => {
     expect(JSON.stringify(result)).not.toContain("sk-live");
   });
 });
+
+describe("Mutation and event-stream transport stay at the API boundary", () => {
+  it("sends JSON mutations with authorization and the caller's idempotency key", async () => {
+    const fetchImpl = respondWith({ items: [] });
+    const api = createApiClient({
+      baseUrl: "https://api.test",
+      fetch: fetchImpl,
+      authorization: () => "Bearer live-session",
+    });
+
+    await api.post("/reviews", { safeParse: (value: unknown) => ({ success: true, data: value }) } as never, {
+      body: { repositoryId: "repo-1", pullRequestId: "pr-1" },
+      headers: { "Idempotency-Key": "review:stable-key" },
+    });
+
+    const [url, init] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://api.test/reviews");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe(JSON.stringify({ repositoryId: "repo-1", pullRequestId: "pr-1" }));
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer live-session");
+    expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("review:stable-key");
+  });
+
+  it("opens SSE with bearer auth and Last-Event-ID instead of relying on EventSource", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response("", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+      }),
+    ) as unknown as typeof globalThis.fetch;
+    const api = createApiClient({
+      baseUrl: "https://api.test",
+      fetch: fetchImpl,
+      authorization: () => "Bearer live-session",
+    });
+
+    const result = await api.eventStream("/reviews/run-1/events", { lastEventId: "42" });
+    expect(result.kind).toBe("ok");
+    const [, init] = (fetchImpl as unknown as { mock: { calls: unknown[][] } }).mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["Accept"]).toBe("text/event-stream");
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe("Bearer live-session");
+    expect((init.headers as Record<string, string>)["Last-Event-ID"]).toBe("42");
+  });
+
+  it("fails closed when an SSE endpoint responds with the wrong content type", async () => {
+    const api = createApiClient({
+      baseUrl: "https://api.test",
+      fetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })) as never,
+    });
+    await expect(api.eventStream("/reviews/run-1/events")).resolves.toMatchObject({ kind: "contract" });
+  });
+});

@@ -50,11 +50,7 @@ export class SharedRequestPool {
 
     if (entry === undefined) {
       const controller = new AbortController();
-      // The promise's settlement callback needs the completed entry, while the
-      // entry itself stores that promise. This intentional two-step
-      // initialization breaks the cycle without weakening the entry type.
-      // eslint-disable-next-line prefer-const
-      let created: Entry<T>;
+      let created!: Entry<T>;
       let retain = false;
       const promise = Promise.resolve()
         .then(() => load(controller.signal))
@@ -74,7 +70,7 @@ export class SharedRequestPool {
         expiresAt: Number.POSITIVE_INFINITY,
       };
       entry = created;
-      this.#entries.set(key, created);
+      this.#entries.set(key, created as Entry<unknown>);
     }
 
     entry.refs += 1;
@@ -84,9 +80,9 @@ export class SharedRequestPool {
       release: () => {
         if (released) return;
         released = true;
-        entry.refs -= 1;
-        if (entry.refs === 0 && !entry.settled) {
-          entry.controller.abort();
+        entry!.refs -= 1;
+        if (entry!.refs === 0 && !entry!.settled) {
+          entry!.controller.abort();
           if (this.#entries.get(key) === entry) this.#entries.delete(key);
         }
       },

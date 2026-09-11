@@ -38,3 +38,4 @@ probe-transcript-*.json
 
 # Local Phase 3 acceptance evidence
 .phase3-acceptance-report.json
+.phase4-acceptance-report.json

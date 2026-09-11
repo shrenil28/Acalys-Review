@@ -19,6 +19,11 @@ import {
 } from "@/components/live/LiveDataState";
 import { useRepositoryDirectory, type RepositoryView } from "@/lib/api/liveDashboard";
 import { formatNumber, relativeTime } from "@/lib/utils";
+import {
+  loadRepositoryReviewSettings,
+  updateRepositoryReviewLifecycle,
+  type RepositoryReviewSettingsView,
+} from "@/lib/api/dashboardAdmin";
 import { AddRepositoriesModal } from "./AddRepositoriesModal";
 
 type SortKey = "name" | "openPrs" | "reviewsLast30d" | "commentsLast30d";
@@ -40,6 +45,8 @@ export function RepositoriesPage() {
     direction: "desc",
   });
   const [enabled, setEnabled] = useState<Record<string, boolean>>({});
+  const [settingsByRepository, setSettingsByRepository] = useState<Record<string, RepositoryReviewSettingsView>>({});
+  const [pendingReviewToggle, setPendingReviewToggle] = useState<Record<string, boolean>>({});
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [adding, setAdding] = useState(false);
@@ -48,6 +55,49 @@ export function RepositoriesPage() {
   const toast = useToast();
 
   const repositories = directory.status === "ready" ? directory.value : [];
+  const live = directory.status === "ready" && directory.source === "api";
+
+  const toggleRepositoryReviews = async (repo: RepositoryView, value: boolean) => {
+    if (!live) {
+      setEnabled((current) => ({ ...current, [repo.id]: value }));
+      toast({ title: value ? `Reviews enabled for ${repo.name}` : `Reviews paused for ${repo.name}`, tone: value ? "success" : "info" });
+      return;
+    }
+    if (pendingReviewToggle[repo.id]) return;
+    const previous = enabled[repo.id] ?? repo.reviewsEnabled;
+    setEnabled((current) => ({ ...current, [repo.id]: value }));
+    setPendingReviewToggle((current) => ({ ...current, [repo.id]: true }));
+    try {
+      let currentSettings = settingsByRepository[repo.id];
+      if (currentSettings === undefined) {
+        const loaded = await loadRepositoryReviewSettings(repo.id);
+        if (loaded.kind !== "ok") {
+          setEnabled((current) => ({ ...current, [repo.id]: previous }));
+          toast({ title: "Couldn’t change review status", description: loaded.detail, tone: "error" });
+          return;
+        }
+        currentSettings = loaded.value;
+        setSettingsByRepository((current) => ({ ...current, [repo.id]: loaded.value }));
+      }
+      const result = await updateRepositoryReviewLifecycle(repo.id, currentSettings.revision, value ? "enabled" : "paused");
+      if (result.kind === "ok") {
+        setSettingsByRepository((current) => ({ ...current, [repo.id]: result.value }));
+        setEnabled((current) => ({ ...current, [repo.id]: result.value.lifecycle === "enabled" }));
+        toast({ title: value ? `Reviews enabled for ${repo.name}` : `Reviews paused for ${repo.name}`, tone: value ? "success" : "info" });
+        return;
+      }
+      const authoritative = await loadRepositoryReviewSettings(repo.id);
+      if (authoritative.kind === "ok") {
+        setSettingsByRepository((current) => ({ ...current, [repo.id]: authoritative.value }));
+        setEnabled((current) => ({ ...current, [repo.id]: authoritative.value.lifecycle === "enabled" }));
+      } else {
+        setEnabled((current) => ({ ...current, [repo.id]: previous }));
+      }
+      toast({ title: "Couldn’t change review status", description: `${result.detail} The authoritative repository state was restored.`, tone: "error" });
+    } finally {
+      setPendingReviewToggle((current) => ({ ...current, [repo.id]: false }));
+    }
+  };
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -222,14 +272,8 @@ export function RepositoriesPage() {
                           <span className="flex justify-end">
                             <Switch
                               checked={enabled[repo.id] ?? repo.reviewsEnabled}
-                              disabled={directory.source === "api"}
-                              onChange={(value) => {
-                                setEnabled((current) => ({ ...current, [repo.id]: value }));
-                                toast({
-                                  title: value ? `Reviews enabled for ${repo.name}` : `Reviews paused for ${repo.name}`,
-                                  tone: value ? "success" : "info",
-                                });
-                              }}
+                              disabled={Boolean(pendingReviewToggle[repo.id])}
+                              onChange={(value) => { void toggleRepositoryReviews(repo, value); }}
                               label={`Reviews for ${repo.name}`}
                             />
                           </span>
@@ -255,14 +299,9 @@ export function RepositoriesPage() {
         </>
       )}
 
-      <AddRepositoriesModal
-        open={
-          adding &&
-          directory.status === "ready" &&
-          directory.source === "fixtures"
-        }
-        onClose={() => setAdding(false)}
-      />
+      {directory.status === "ready" && directory.source === "fixtures" ? (
+        <AddRepositoriesModal open={adding} onClose={() => setAdding(false)} />
+      ) : null}
     </Page>
   );
 }

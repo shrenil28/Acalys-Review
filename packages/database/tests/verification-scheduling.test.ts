@@ -296,14 +296,9 @@ describeWithPostgres("Verification attempt allocation is durable", () => {
     // nothing would reschedule it.
     expect(await scheduler().scheduledFor(runId)).toHaveLength(1);
 
-    const ownership = await scheduler().claim(
-      invocation.invocationId,
-      "test-worker",
-      60_000,
-    );
+    const ownership = await scheduler().claim(invocation.invocationId, "test-worker", 60_000);
     expect(ownership.kind).toBe("claimed");
-    if (ownership.kind !== "claimed")
-      throw new Error("expected verification claim");
+    if (ownership.kind !== "claimed") throw new Error("expected verification claim");
 
     await new VerificationStore(database.pool, () => now).recordAttempt({
       invocationId: ownership.claim.invocationId,
@@ -434,17 +429,9 @@ describeWithPostgres("Verification attempt allocation is durable", () => {
       reason: "initial",
     });
 
-    const first = await scheduler().claim(
-      invocation.invocationId,
-      "worker-a",
-      60_000,
-    );
+    const first = await scheduler().claim(invocation.invocationId, "worker-a", 60_000);
     expect(first.kind).toBe("claimed");
-    const second = await scheduler().claim(
-      invocation.invocationId,
-      "worker-b",
-      60_000,
-    );
+    const second = await scheduler().claim(invocation.invocationId, "worker-b", 60_000);
     expect(second.kind).toBe("busy");
   }, 60_000);
 
@@ -459,11 +446,7 @@ describeWithPostgres("Verification attempt allocation is durable", () => {
       requestKey: "lease:fence",
       reason: "initial",
     });
-    const first = await scheduler().claim(
-      invocation.invocationId,
-      "worker-a",
-      60_000,
-    );
+    const first = await scheduler().claim(invocation.invocationId, "worker-a", 60_000);
     if (first.kind !== "claimed") throw new Error("expected first claim");
 
     // Simulate a worker that disappeared without a heartbeat. Database time is
@@ -472,13 +455,8 @@ describeWithPostgres("Verification attempt allocation is durable", () => {
       "UPDATE verification_invocations SET claim_expires_at = clock_timestamp() - interval '1 second' WHERE id = $1",
       [invocation.invocationId],
     );
-    const second = await scheduler().claim(
-      invocation.invocationId,
-      "worker-b",
-      60_000,
-    );
-    if (second.kind !== "claimed")
-      throw new Error("expected replacement claim");
+    const second = await scheduler().claim(invocation.invocationId, "worker-b", 60_000);
+    if (second.kind !== "claimed") throw new Error("expected replacement claim");
     expect(second.claim.claimGeneration).toBe(first.claim.claimGeneration + 1);
     expect(second.claim.claimToken).not.toBe(first.claim.claimToken);
 
@@ -529,4 +507,5 @@ describeWithPostgres("Verification attempt allocation is durable", () => {
       }),
     ).resolves.toMatchObject({ inserted: true });
   }, 60_000);
+
 });

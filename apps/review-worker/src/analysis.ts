@@ -52,11 +52,7 @@ import {
   type BaseRevisionResolution,
   type PlannerBaseRevision,
 } from "@acalys/code-intelligence";
-import {
-  canonicalJson,
-  gitObjectId,
-  isRepositoryPath,
-} from "@acalys/contracts/domain";
+import { canonicalJson, gitObjectId, isRepositoryPath, matchesGlob } from "@acalys/contracts/domain";
 import type { CandidateFindingRow } from "@acalys/database";
 import {
   ALL_ANALYZER_IDS,
@@ -64,6 +60,7 @@ import {
   buildClusters,
   runAnalysis,
   toFindingView,
+  type AnalysisCache,
   type AnalysisResult,
   type CandidateFinding,
   type ExecutionLimits,
@@ -75,9 +72,9 @@ import {
   LLM_CORRECTNESS_ANALYZER_ID,
   LLM_CORRECTNESS_ANALYZER_VERSION,
   LLM_CORRECTNESS_PROMPT_VERSION,
+  type ExternalReviewDataBlock,
   type ModelCompleter,
   type LlmCorrectnessOutcome,
-  type AnalyzerFinding,
 } from "@acalys/review-engine";
 
 type ConfigGovernanceResult = ReturnType<typeof governanceFor>;
@@ -280,6 +277,10 @@ export function modelAnalyzerInputDigest(input: {
   readonly configFactsDigest: string;
   readonly instructionFactsDigest: string;
   readonly contextDigest: string;
+  /** Untrusted provider context identity; excluded from deterministic analyzer cache keys. */
+  readonly externalContextDigest?: string | undefined;
+  /** Immutable admitted review-policy identity; model input only, never the deterministic cache key. */
+  readonly reviewPolicyFingerprint?: string | undefined;
   readonly analyzerId: string;
   readonly analyzerVersion: string;
   readonly model: {
@@ -316,6 +317,8 @@ export function modelAnalyzerInputDigest(input: {
       resolvedConfiguration: input.configFactsDigest,
       resolvedInstructions: input.instructionFactsDigest,
       contextSnapshot: input.contextDigest,
+      externalContext: input.externalContextDigest ?? null,
+      reviewPolicy: input.reviewPolicyFingerprint ?? null,
       analyzer: { id: input.analyzerId, version: input.analyzerVersion },
       model: input.model,
     }),
@@ -324,7 +327,7 @@ export function modelAnalyzerInputDigest(input: {
 
 function llmCandidateFingerprint(
   repositoryId: string,
-  finding: AnalyzerFinding,
+  finding: import("@acalys/review-engine").AnalyzerFinding,
 ): string {
   return sha256(
     canonicalJson({
@@ -391,8 +394,20 @@ export interface RealAnalysisOptions {
    */
   readonly previousIndex?: RepositoryIndex | undefined;
   readonly source: AnalysisSource;
+  /** Immutable execution policy captured when the ReviewRequest was admitted. */
+  readonly reviewPolicy?:
+    | {
+        readonly fingerprint: string;
+        readonly ignorePaths: readonly string[];
+        readonly toneProfile: string;
+        readonly toneInstructions: string;
+        readonly repositoryInstructions: string;
+      }
+    | undefined;
   readonly contextTokenBudget?: number | undefined;
   readonly limits?: Partial<ExecutionLimits> | undefined;
+  /** Optional deterministic cluster-result cache. Persisted adapters are assembled by the runtime. */
+  readonly cache?: AnalysisCache | undefined;
   /**
    * Measurement-only planner seam. Omission uses the production planner
    * unchanged; L.5 supplies a traced planner with an explicit fact-family
@@ -410,6 +425,8 @@ export interface RealAnalysisOptions {
         };
         readonly model: ModelCompleter;
         readonly timeoutMs?: number | undefined;
+        readonly externalData?: readonly ExternalReviewDataBlock[] | undefined;
+        readonly externalContextDigest?: string | undefined;
       }
     | undefined;
 }
@@ -547,11 +564,42 @@ function resolveBaseRevisions(
   };
 }
 
+function isIgnoredByReviewPolicy(path: string, patterns: readonly string[]): boolean {
+  return patterns.some((pattern) => matchesGlob(pattern, path));
+}
+
+function filterInstructionObservation(
+  observation: AnalysisInstructionObservation,
+  ignorePaths: readonly string[],
+): AnalysisInstructionObservation {
+  if (ignorePaths.length === 0) return observation;
+  return {
+    listPaths: () => {
+      const traversal = observation.listPaths();
+      return { ...traversal, paths: traversal.paths.filter((path) => !isIgnoredByReviewPolicy(path, ignorePaths)) };
+    },
+    readArtifact: (path) =>
+      isIgnoredByReviewPolicy(path, ignorePaths)
+        ? { status: "unsupported", detail: "artifact is excluded by the admitted repository review policy" }
+        : observation.readArtifact(path),
+  };
+}
+
+function trustedReviewPolicyText(policy: NonNullable<RealAnalysisOptions["reviewPolicy"]>): string {
+  const lines = [
+    `Tone profile: ${policy.toneProfile}`,
+    ...(policy.toneInstructions.trim() === "" ? [] : [`Tone instructions:\n${policy.toneInstructions.trim()}`]),
+    ...(policy.repositoryInstructions.trim() === ""
+      ? []
+      : [`Repository instructions:\n${policy.repositoryInstructions.trim()}`]),
+  ];
+  return lines.join("\n\n");
+}
+
 export async function runRealAnalysis(
   options: RealAnalysisOptions,
 ): Promise<RealAnalysisOutcome> {
-  const { changed, repository, instructionObservation, baseSha, mergeBaseSha } =
-    await options.source.read({
+  const snapshot = await options.source.read({
       repositoryId: options.repositoryId,
       headSha: options.headSha,
       ...(options.revisionId === undefined
@@ -559,11 +607,21 @@ export async function runRealAnalysis(
         : { revisionId: options.revisionId }),
     });
 
-  assertCanonicalChangedPaths(changed);
+  assertCanonicalChangedPaths(snapshot.changed);
+  const ignorePaths = options.reviewPolicy?.ignorePaths ?? [];
+  const changed = snapshot.changed.filter((file) => !isIgnoredByReviewPolicy(file.path, ignorePaths));
+  const repository = new Map(
+    [...snapshot.repository].filter(([path]) => !isIgnoredByReviewPolicy(path, ignorePaths)),
+  );
+  const instructionObservation = filterInstructionObservation(
+    snapshot.instructionObservation ?? repositoryInstructionObservation(snapshot.repository),
+    ignorePaths,
+  );
+  const { baseSha, mergeBaseSha } = snapshot;
 
   const instructionFacts = discoverInstructionArtifacts({
     revision: options.headSha,
-    ...(instructionObservation ?? repositoryInstructionObservation(repository)),
+    ...instructionObservation,
   });
   const instructionIdentity = instructionFactsDigest(instructionFacts);
   const instructionTargets = changed.map((file) => {
@@ -645,6 +703,7 @@ export async function runRealAnalysis(
 
   const report = await runAnalysis(clusters, allocations, {
     ...(options.limits === undefined ? {} : { limits: options.limits }),
+    ...(options.cache === undefined ? {} : { cache: options.cache }),
     analyzer: ({ cluster }) => {
       const input = {
         context: { ...context, items: cluster.context },
@@ -710,6 +769,8 @@ export async function runRealAnalysis(
           options.llm.scope,
           options.llm.model,
           options.llm.timeoutMs,
+          options.llm.externalData,
+          options.reviewPolicy === undefined ? undefined : trustedReviewPolicyText(options.reviewPolicy),
         );
   if (llm?.kind === "unavailable") {
     // A requested model path that could not run is not equivalent to the model
@@ -729,6 +790,12 @@ export async function runRealAnalysis(
           configFactsDigest: config.digest,
           instructionFactsDigest: instructionIdentity,
           contextDigest,
+          ...(options.llm.externalContextDigest === undefined
+            ? {}
+            : { externalContextDigest: options.llm.externalContextDigest }),
+          ...(options.reviewPolicy === undefined
+            ? {}
+            : { reviewPolicyFingerprint: options.reviewPolicy.fingerprint }),
           analyzerId: LLM_CORRECTNESS_ANALYZER_ID,
           analyzerVersion: LLM_CORRECTNESS_ANALYZER_VERSION,
           model: {
@@ -773,7 +840,9 @@ export async function runRealAnalysis(
       } satisfies CandidateFindingRow;
     });
 
-  const conflictsWithDeterministic = (proposed: AnalyzerFinding): boolean =>
+  const conflictsWithDeterministic = (
+    proposed: import("@acalys/review-engine").AnalyzerFinding,
+  ): boolean =>
     report.findings.some(
       (deterministic) =>
         deterministic.location.path === proposed.location.path &&
@@ -1048,7 +1117,9 @@ function buildBoundaryFacts(
     base: baseSurfaces,
     head: headSurfaces,
     abstentions,
-    identity: sha256(canonicalJson({ base: baseSurfaces, head: headSurfaces })),
+    identity: sha256(
+      canonicalJson({ base: baseSurfaces, head: headSurfaces }),
+    ),
   };
 }
 

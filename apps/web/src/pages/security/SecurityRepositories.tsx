@@ -83,11 +83,11 @@ export function SecurityRepositoriesPage() {
 
   return (
     <Page>
-      <TopBarActions>
-        <ScanRepositoryButton
-          disabled={directory.status === "ready" && directory.source === "api"}
-        />
-      </TopBarActions>
+      {directory.status === "ready" && directory.source === "fixtures" ? (
+        <TopBarActions>
+          <ScanRepositoryButton />
+        </TopBarActions>
+      ) : null}
 
       <PageHeader
         title="Repositories"

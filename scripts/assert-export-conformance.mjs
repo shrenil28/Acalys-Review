@@ -40,6 +40,11 @@ const SUBPATHS = [
     dist: "dist/api/v1/index.js",
   },
   {
+    specifier: "./dashboard/v1",
+    source: "src/dashboard/v1/index.ts",
+    dist: "dist/dashboard/v1/index.js",
+  },
+  {
     specifier: "./internal",
     source: "src/internal/index.ts",
     dist: "dist/internal/index.js",

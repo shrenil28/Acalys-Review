@@ -3,8 +3,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const ROOT = process.cwd();
-const migration =
-  "packages/database/migrations/0018_phase3_premerge_check_bound.sql";
+const migration = "packages/database/migrations/0018_phase3_premerge_check_bound.sql";
 const storePath = "packages/database/src/api-store.ts";
 const appPath = "apps/api/src/app.ts";
 const dbSuite = "packages/database/tests/phase3-premerge-check-bound.test.ts";
@@ -31,27 +30,16 @@ function preflight() {
     "BEFORE INSERT ON premerge_check_results",
   ];
   for (const anchor of migrationAnchors) {
-    if (!sql.includes(anchor))
-      problems.push(`migration missing anchor: ${anchor}`);
+    if (!sql.includes(anchor)) problems.push(`migration missing anchor: ${anchor}`);
   }
-  if (
-    !store.includes('throw new Error("PREMERGE_CHECK_RESULT_LIMIT_VIOLATION")')
-  ) {
-    problems.push(
-      "ApiStore does not fail closed when the database invariant drifts",
-    );
+  if (!store.includes('throw new Error("PREMERGE_CHECK_RESULT_LIMIT_VIOLATION")')) {
+    problems.push("ApiStore does not fail closed when the database invariant drifts");
   }
   if (/nextCursor:\s*result\.rows\[99\]/u.test(store)) {
-    problems.push(
-      "ApiStore still emits the old raw pre-merge-check continuation id",
-    );
+    problems.push("ApiStore still emits the old raw pre-merge-check continuation id");
   }
-  // Whitespace-tolerant: the formatter spaces this comparison out, and an
-  // unspaced literal would report a missing guard on a cosmetic change.
-  if (!/found\.nextCursor\s*!==\s*undefined/u.test(app)) {
-    problems.push(
-      "API boundary does not reject a continuation from the non-pageable route",
-    );
+  if (!app.includes('found.nextCursor!==undefined')) {
+    problems.push("API boundary does not reject a continuation from the non-pageable route");
   }
 
   const dbWitnesses = [
@@ -59,14 +47,9 @@ function preflight() {
     "serializes concurrent boundary inserts so exactly one 100th row can commit",
   ];
   for (const witness of dbWitnesses) {
-    if (!dbTests.includes(witness))
-      problems.push(`missing Postgres witness: ${witness}`);
+    if (!dbTests.includes(witness)) problems.push(`missing Postgres witness: ${witness}`);
   }
-  if (
-    !apiTests.includes(
-      "refuses an unusable continuation cursor from the non-pageable pre-merge-check route",
-    )
-  ) {
+  if (!apiTests.includes("refuses an unusable continuation cursor from the non-pageable pre-merge-check route")) {
     problems.push("missing API leak/fail-closed witness");
   }
   return problems;

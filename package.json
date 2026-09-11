@@ -45,7 +45,19 @@
     "phase3:source-invariants": "node scripts/assert-phase3-source-invariants.mjs",
     "accept:phase3:preflight": "node scripts/accept-phase3.mjs --preflight-only",
     "accept:phase3": "node scripts/accept-phase3.mjs",
-    "probe:phase4-live-foundation": "node scripts/probe-phase4-live-foundation.mjs"
+    "probe:phase4-live-foundation": "node scripts/probe-phase4-live-foundation.mjs",
+    "probe:phase4-review-workflow": "node scripts/probe-phase4-review-workflow.mjs",
+    "probe:phase4-dashboard-admin": "node scripts/probe-phase4-dashboard-admin.mjs",
+    "probe:phase4-fixture-firewall": "node scripts/probe-phase4-fixture-firewall.mjs",
+    "probe:phase4-provider-context": "node scripts/probe-phase4-provider-context.mjs",
+    "probe:phase4-review-policy": "node scripts/probe-phase4-review-policy.mjs",
+    "probe:phase4-auth-membership": "node scripts/probe-phase4-auth-membership.mjs",
+    "probe:phase4-analytics-reports": "node scripts/probe-phase4-analytics-reports.mjs",
+    "probe:phase4-cache": "node scripts/probe-phase4-cache.mjs",
+    "probe:phase4-notifications-repositories": "node scripts/probe-phase4-notifications-repositories.mjs",
+    "probe:phase4-security": "node scripts/probe-phase4-security.mjs",
+    "accept:phase4:preflight": "node scripts/accept-phase4.mjs --preflight-only",
+    "accept:phase4": "node scripts/accept-phase4.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

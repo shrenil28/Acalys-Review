@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { SegmentedControl, Switch } from "@/components/ui/Misc";
-import { languages, type OrgConfig } from "@/data/orgSettings";
+import { languages, type OrgConfig } from "./settings-model";
 import { InstructionsBlock, Panel, Row, Select, severityOptions } from "./parts";
 
 /** Section slugs match the app's URLs, e.g. /organization/settings/review/summary */

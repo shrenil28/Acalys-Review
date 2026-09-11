@@ -23,10 +23,7 @@ function outputText(body: OpenAIResponseBody): string | undefined {
     if (!Array.isArray(content)) continue;
     for (const block of content) {
       if (typeof block !== "object" || block === null) continue;
-      const typed = block as {
-        readonly type?: unknown;
-        readonly text?: unknown;
-      };
+      const typed = block as { readonly type?: unknown; readonly text?: unknown };
       if (typed.type === "output_text" && typeof typed.text === "string") {
         pieces.push(typed.text);
       }
@@ -36,9 +33,7 @@ function outputText(body: OpenAIResponseBody): string | undefined {
 }
 
 function nonNegativeInteger(value: unknown): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 export class OpenAIAdapter implements ModelProviderAdapter {
@@ -54,10 +49,7 @@ export class OpenAIAdapter implements ModelProviderAdapter {
     if (apiKey.trim() === "") throw new Error("OpenAI API key is required");
     this.#apiKey = apiKey;
     this.#fetch = options.fetch ?? fetch;
-    this.#baseUrl = (options.baseUrl ?? "https://api.openai.com/v1").replace(
-      /\/$/,
-      "",
-    );
+    this.#baseUrl = (options.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
   }
 
   public async invoke(request: ProviderInvocation): Promise<ProviderOutcome> {
@@ -85,22 +77,17 @@ export class OpenAIAdapter implements ModelProviderAdapter {
           signal: controller.signal,
         });
       } catch (error) {
-        if (
-          controller.signal.aborted ||
-          (error instanceof Error && error.name === "AbortError")
-        ) {
+        if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
           return {
             kind: "unknown",
             reason: "timeout_after_dispatch",
-            detail:
-              "OpenAI request timed out after dispatch; provider execution is unknown",
+            detail: "OpenAI request timed out after dispatch; provider execution is unknown",
           };
         }
         return {
           kind: "unknown",
           reason: "connection_lost_after_dispatch",
-          detail:
-            "OpenAI connection failed after dispatch; provider execution is unknown",
+          detail: "OpenAI connection failed after dispatch; provider execution is unknown",
         };
       }
 
@@ -109,8 +96,7 @@ export class OpenAIAdapter implements ModelProviderAdapter {
           kind: "failed",
           retryable: true,
           reason: "rate_limited",
-          detail:
-            "OpenAI rejected the request because the credential is rate limited",
+          detail: "OpenAI rejected the request because the credential is rate limited",
         };
       }
       if (response.status >= 400 && response.status < 500) {
@@ -136,8 +122,7 @@ export class OpenAIAdapter implements ModelProviderAdapter {
         return {
           kind: "unknown",
           reason: "provider_ambiguous",
-          detail:
-            "OpenAI returned a successful status with an unreadable response body",
+          detail: "OpenAI returned a successful status with an unreadable response body",
         };
       }
       const text = outputText(body);
@@ -158,8 +143,7 @@ export class OpenAIAdapter implements ModelProviderAdapter {
             })
           : {};
       const details =
-        typeof usage.input_tokens_details === "object" &&
-        usage.input_tokens_details !== null
+        typeof usage.input_tokens_details === "object" && usage.input_tokens_details !== null
           ? (usage.input_tokens_details as { readonly cached_tokens?: unknown })
           : {};
       return {

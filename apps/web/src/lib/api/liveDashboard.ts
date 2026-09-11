@@ -10,6 +10,8 @@ import { createApiClient } from "./client.js";
 import { resolveDataMode } from "./config.js";
 import type { ApiResult } from "./result.js";
 import { SharedRequestPool } from "./sharedRequest.js";
+import { browserAuthorization } from "./browserSession.js";
+import { loadRepositoryMetrics } from "./dashboardAdmin.js";
 
 export type LiveFailure = Exclude<ApiResult<never>, { readonly kind: "ok"; readonly value: never }>;
 
@@ -59,15 +61,11 @@ export interface KnowledgeView {
 const repositoryPageSchema = pageDtoSchema(repositoryDtoSchema);
 const knowledgePageSchema = pageDtoSchema(knowledgeItemDtoSchema);
 
-function browserAuthorization(): string | undefined {
-  if (typeof window === "undefined") return undefined;
-  try {
-    const token = window.sessionStorage.getItem("acalys.session.token")?.trim();
-    return token ? `Bearer ${token}` : undefined;
-  } catch {
-    return undefined;
-  }
+function failureFrom<T>(result: ApiResult<T>): LiveFailure | undefined {
+  if (result.kind === "ok") return undefined;
+  return result as LiveFailure;
 }
+
 
 function apiClient(baseUrl: string, authorization = browserAuthorization()) {
   return createApiClient({
@@ -118,30 +116,8 @@ export function repositoryFromApi(repo: RepositoryDto): RepositoryView {
   };
 }
 
-interface RepositoryFixture {
-  readonly name: string;
-  readonly provider: string;
-  readonly visibility: "Private" | "Public";
-  readonly language: string;
-  readonly reviewsEnabled: boolean;
-  readonly openPrs: number;
-  readonly reviewsLast30d: number;
-  readonly commentsLast30d: number;
-  readonly defaultBranch: string;
-  readonly lastReviewAt: string | null;
-  readonly security: RepositoryView["security"];
-}
-
-interface LearningFixture {
-  readonly id: string;
-  readonly scope: "Organization" | "Repository";
-  readonly repo?: string | undefined;
-  readonly content: string;
-  readonly source: "Chat" | "Review reply" | "Manual";
-  readonly appliedCount: number;
-  readonly createdAt: string;
-  readonly author: string;
-}
+type RepositoryFixture = (typeof import("@/data/repos"))["repositories"][number];
+type LearningFixture = (typeof import("@/data/review"))["learnings"][number];
 
 function repositoryFromFixture(
   repo: RepositoryFixture,
@@ -224,22 +200,32 @@ async function collectRepositories(
   const items: RepositoryView[] = [];
   let cursor: string | undefined;
 
+  let finished = false;
   for (let page = 0; page < 100; page += 1) {
     const query = new URLSearchParams({ limit: "100" });
     if (cursor !== undefined) query.set("cursor", cursor);
-    const result = await client.get(`/repositories?${query.toString()}`, repositoryPageSchema, {
-      signal,
-    });
+    const result = await client.get(`/repositories?${query.toString()}`, repositoryPageSchema, { signal });
     if (result.kind !== "ok") return result;
     items.push(...result.value.items.map(repositoryFromApi));
     cursor = result.value.nextCursor;
-    if (cursor === undefined) return { kind: "ok", value: items };
+    if (cursor === undefined) { finished = true; break; }
   }
+  if (!finished) return { kind: "contract", detail: "repository pagination exceeded the dashboard safety bound" };
 
-  return {
-    kind: "contract",
-    detail: "repository pagination exceeded the dashboard safety bound",
-  };
+  const metrics = await loadRepositoryMetrics(signal);
+  if (metrics.kind === "misconfigured") return { kind: "contract", detail: metrics.detail };
+  if (metrics.kind !== "ok") return metrics;
+  const byRepository = new Map(metrics.value.items.map((item) => [item.repositoryId, item]));
+  return { kind: "ok", value: items.map((repository) => {
+    const metric = byRepository.get(repository.id);
+    return metric === undefined ? repository : {
+      ...repository,
+      openPrs: metric.openPullRequests,
+      reviewsLast30d: metric.reviewsLast30Days,
+      commentsLast30d: metric.publishedCommentsLast30Days,
+      lastReviewAt: metric.lastReviewAt,
+    };
+  }) };
 }
 
 async function collectKnowledge(
@@ -336,13 +322,11 @@ export function useRepositoryDirectory(refreshToken = 0): LiveState<readonly Rep
     void request.promise
       .then((result) => {
         if (!active) return;
+        const failure = failureFrom(result);
         setState(
-          // Narrow on the result itself. Deriving the failure into a separate
-          // variable leaves `result` unnarrowed, so the success branch could
-          // only reach `value` through an unchecked cast.
-          result.kind === "ok"
+          failure === undefined
             ? { status: "ready", source: "api", value: result.value }
-            : { status: "failed", failure: result },
+            : { status: "failed", failure },
         );
       })
       .catch((error: unknown) => {
@@ -419,13 +403,11 @@ export function useKnowledgeDirectory(): LiveState<readonly KnowledgeView[]> {
     void request.promise
       .then((result) => {
         if (!active) return;
+        const failure = failureFrom(result);
         setState(
-          // Narrow on the result itself. Deriving the failure into a separate
-          // variable leaves `result` unnarrowed, so the success branch could
-          // only reach `value` through an unchecked cast.
-          result.kind === "ok"
+          failure === undefined
             ? { status: "ready", source: "api", value: result.value }
-            : { status: "failed", failure: result },
+            : { status: "failed", failure },
         );
       })
       .catch((error: unknown) => {
@@ -501,3 +483,4 @@ export function useDashboardFilterDimensions(): {
     teamOptions: demoDimensions.teamOptions,
   };
 }
+

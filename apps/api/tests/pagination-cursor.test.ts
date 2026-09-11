@@ -60,9 +60,7 @@ describe("Phase 3 opaque pagination cursor", () => {
       resource: "repository-a",
     };
     const cursor = codec.encode(binding, ROW_ID);
-    expectInvalid(() =>
-      codec.decode({ ...binding, resource: "repository-b" }, cursor),
-    );
+    expectInvalid(() => codec.decode({ ...binding, resource: "repository-b" }, cursor));
   });
 
   it("binds filtered collection cursors to the canonical filter set", () => {
@@ -75,10 +73,7 @@ describe("Phase 3 opaque pagination cursor", () => {
     };
     const cursor = codec.encode(binding, ROW_ID);
     expectInvalid(() =>
-      codec.decode(
-        { ...binding, query: "severity=low&category=&state=published" },
-        cursor,
-      ),
+      codec.decode({ ...binding, query: "severity=low&category=&state=published" }, cursor),
     );
   });
 

@@ -7,9 +7,7 @@ import type {
 type FetchLike = typeof fetch;
 
 function nonNegativeInteger(value: unknown): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : 0;
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
 }
 
 export class AnthropicAdapter implements ModelProviderAdapter {
@@ -25,10 +23,7 @@ export class AnthropicAdapter implements ModelProviderAdapter {
     if (apiKey.trim() === "") throw new Error("Anthropic API key is required");
     this.#apiKey = apiKey;
     this.#fetch = options.fetch ?? fetch;
-    this.#baseUrl = (options.baseUrl ?? "https://api.anthropic.com/v1").replace(
-      /\/$/,
-      "",
-    );
+    this.#baseUrl = (options.baseUrl ?? "https://api.anthropic.com/v1").replace(/\/$/, "");
   }
 
   public async invoke(request: ProviderInvocation): Promise<ProviderOutcome> {
@@ -67,22 +62,17 @@ export class AnthropicAdapter implements ModelProviderAdapter {
           signal: controller.signal,
         });
       } catch (error) {
-        if (
-          controller.signal.aborted ||
-          (error instanceof Error && error.name === "AbortError")
-        ) {
+        if (controller.signal.aborted || (error instanceof Error && error.name === "AbortError")) {
           return {
             kind: "unknown",
             reason: "timeout_after_dispatch",
-            detail:
-              "Anthropic request timed out after dispatch; provider execution is unknown",
+            detail: "Anthropic request timed out after dispatch; provider execution is unknown",
           };
         }
         return {
           kind: "unknown",
           reason: "connection_lost_after_dispatch",
-          detail:
-            "Anthropic connection failed after dispatch; provider execution is unknown",
+          detail: "Anthropic connection failed after dispatch; provider execution is unknown",
         };
       }
 
@@ -91,8 +81,7 @@ export class AnthropicAdapter implements ModelProviderAdapter {
           kind: "failed",
           retryable: true,
           reason: "rate_limited",
-          detail:
-            "Anthropic rejected the request because the credential is rate limited",
+          detail: "Anthropic rejected the request because the credential is rate limited",
         };
       }
       if (response.status >= 400 && response.status < 500) {
@@ -122,16 +111,14 @@ export class AnthropicAdapter implements ModelProviderAdapter {
         return {
           kind: "unknown",
           reason: "provider_ambiguous",
-          detail:
-            "Anthropic returned a successful status with an unreadable response body",
+          detail: "Anthropic returned a successful status with an unreadable response body",
         };
       }
       if (!Array.isArray(body.content)) {
         return {
           kind: "unknown",
           reason: "provider_ambiguous",
-          detail:
-            "Anthropic returned a successful status without content blocks",
+          detail: "Anthropic returned a successful status without content blocks",
         };
       }
       const text = body.content
@@ -163,9 +150,7 @@ export class AnthropicAdapter implements ModelProviderAdapter {
           : {};
       const uncached = nonNegativeInteger(usage.input_tokens);
       const cached = nonNegativeInteger(usage.cache_read_input_tokens);
-      const cacheCreation = nonNegativeInteger(
-        usage.cache_creation_input_tokens,
-      );
+      const cacheCreation = nonNegativeInteger(usage.cache_creation_input_tokens);
       return {
         kind: "ok",
         text,

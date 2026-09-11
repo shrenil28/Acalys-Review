@@ -30,6 +30,10 @@ export default defineConfig({
         replacement: contracts("api/v1/index.ts"),
       },
       {
+        find: "@acalys/contracts/dashboard/v1",
+        replacement: contracts("dashboard/v1/index.ts"),
+      },
+      {
         find: "@acalys/contracts/internal",
         replacement: contracts("internal/index.ts"),
       },

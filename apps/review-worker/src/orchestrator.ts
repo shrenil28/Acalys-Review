@@ -30,7 +30,6 @@
  */
 
 import type {
-  CandidateFindingRow,
   PgClient,
   PolicyDecisionStore,
   PreMergeStore,
@@ -42,6 +41,7 @@ import type {
   VerificationStore,
 } from "@acalys/database";
 import type { FindingSeverity } from "@acalys/contracts/domain";
+import type { DashboardEffectiveReviewPolicy } from "@acalys/contracts/dashboard/v1";
 
 import { inputDigest, type AnalysisInput } from "./stages.js";
 import {
@@ -110,7 +110,9 @@ export interface OrchestratorOptions {
   readonly analyzer: (
     input: AnalysisInput,
     context: RunContext,
-  ) => readonly CandidateFindingRow[] | Promise<readonly CandidateFindingRow[]>;
+  ) =>
+    | readonly import("@acalys/database").CandidateFindingRow[]
+    | Promise<readonly import("@acalys/database").CandidateFindingRow[]>;
   /** Required independent verification boundary; there is no silent stub fallback. */
   readonly verifier: CandidateVerifier;
   readonly config?: FunnelConfig | undefined;
@@ -133,6 +135,16 @@ export interface RunContext {
    */
   readonly provider: "github" | "gitlab";
   readonly pullRequestId: string;
+  readonly reviewPolicy?: { readonly policy: DashboardEffectiveReviewPolicy; readonly fingerprint: string } | undefined;
+  /** Immutable PR subject from ReviewRequest; absent for non-PR/generic orchestration. */
+  readonly reviewSubject?: {
+    readonly number?: number | undefined;
+    readonly title: string;
+    readonly description?: string | undefined;
+    readonly headRef: string;
+    readonly repositoryOwner: string;
+    readonly repositoryName: string;
+  } | undefined;
 }
 
 /**

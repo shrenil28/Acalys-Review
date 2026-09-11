@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
+import {
+  mkdir,
+  open,
+  readFile,
+  rename,
+  unlink,
+} from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { canonicalJson } from "@acalys/contracts/domain";
@@ -26,23 +32,18 @@ export class MemoryCassetteStore implements CassetteStore {
     for (const entry of entries) this.#entries.set(entry.requestDigest, entry);
   }
 
-  public read(requestDigest: string): Promise<CassetteEntry | undefined> {
-    return Promise.resolve(this.#entries.get(requestDigest));
+  public async read(requestDigest: string): Promise<CassetteEntry | undefined> {
+    return this.#entries.get(requestDigest);
   }
 
-  public write(entry: CassetteEntry): Promise<void> {
-    return Promise.resolve().then(() => {
-      const previous = this.#entries.get(entry.requestDigest);
-      if (
-        previous !== undefined &&
-        canonicalJson(previous) !== canonicalJson(entry)
-      ) {
-        throw new Error(
-          `cassette digest ${entry.requestDigest} already identifies different provider output`,
-        );
-      }
-      this.#entries.set(entry.requestDigest, entry);
-    });
+  public async write(entry: CassetteEntry): Promise<void> {
+    const previous = this.#entries.get(entry.requestDigest);
+    if (previous !== undefined && canonicalJson(previous) !== canonicalJson(entry)) {
+      throw new Error(
+        `cassette digest ${entry.requestDigest} already identifies different provider output`,
+      );
+    }
+    this.#entries.set(entry.requestDigest, entry);
   }
 
   public entries(): readonly CassetteEntry[] {
@@ -65,10 +66,7 @@ export class JsonCassetteStore implements CassetteStore {
   readonly #path: string;
   readonly #lockTimeoutMs: number;
 
-  public constructor(
-    path: string,
-    options: { readonly lockTimeoutMs?: number } = {},
-  ) {
+  public constructor(path: string, options: { readonly lockTimeoutMs?: number } = {}) {
     this.#path = path;
     this.#lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
   }
@@ -82,12 +80,7 @@ export class JsonCassetteStore implements CassetteStore {
       if (parsed.version !== 1 || !Array.isArray(parsed.entries)) {
         throw new Error("cassette document has an unsupported shape");
       }
-      return new Map(
-        parsed.entries.map((entry: CassetteEntry) => [
-          entry.requestDigest,
-          entry,
-        ]),
-      );
+      return new Map(parsed.entries.map((entry) => [entry.requestDigest, entry]));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
       throw error;
@@ -126,10 +119,7 @@ export class JsonCassetteStore implements CassetteStore {
       // cassette entry another evaluator committed after this process started.
       const entries = await this.#load();
       const previous = entries.get(entry.requestDigest);
-      if (
-        previous !== undefined &&
-        canonicalJson(previous) !== canonicalJson(entry)
-      ) {
+      if (previous !== undefined && canonicalJson(previous) !== canonicalJson(entry)) {
         throw new Error(
           `cassette digest ${entry.requestDigest} already identifies different provider output`,
         );

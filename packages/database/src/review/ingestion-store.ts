@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { canonicalJson } from "@acalys/contracts/domain";
+import { dashboardEffectiveReviewPolicySchema, type DashboardEffectiveReviewPolicy } from "@acalys/contracts/dashboard/v1";
 /**
  * Turning a stored delivery into review history, convergently.
  *
@@ -42,6 +45,7 @@ import { randomUUID } from "node:crypto";
 import {
   canTransition,
   isTerminalReviewRunState,
+  pullRequestReviewTargetSchema,
   type ReviewRunState,
 } from "@acalys/contracts/domain";
 
@@ -84,6 +88,8 @@ export interface ReviewRequestInput {
   readonly idempotencyKey: string;
   readonly requestedAt: Date;
   readonly correlationId?: string | undefined;
+  readonly policySnapshot?: DashboardEffectiveReviewPolicy | undefined;
+  readonly policyFingerprint?: string | undefined;
 }
 
 export interface StoredReviewRequest {
@@ -108,6 +114,16 @@ export interface ReviewRunExecutionContext {
   readonly headSha: string;
   readonly provider: "github" | "gitlab";
   readonly pullRequestId: string;
+  /** Immutable provider subject captured on ReviewRequest at admission time. */
+  readonly reviewPolicy?: { readonly policy: DashboardEffectiveReviewPolicy; readonly fingerprint: string } | undefined;
+  readonly reviewSubject?: {
+    readonly number?: number | undefined;
+    readonly title: string;
+    readonly description?: string | undefined;
+    readonly headRef: string;
+    readonly repositoryOwner: string;
+    readonly repositoryName: string;
+  } | undefined;
 }
 
 export type TransitionOutcome =
@@ -468,8 +484,8 @@ export class ReviewIngestionStore {
         `INSERT INTO review_requests (
            id, organization_id, repository_id, pull_request_id, revision_id,
            target, trigger, requested_by, execution_mode, execution_strategy,
-           idempotency_scope, idempotency_key, requested_at, correlation_id
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+           idempotency_scope, idempotency_key, requested_at, correlation_id, policy_snapshot, policy_fingerprint
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16)
          ON CONFLICT (idempotency_scope, idempotency_key)
            DO UPDATE SET requested_at = review_requests.requested_at
          RETURNING id, (xmax = 0) AS inserted`,
@@ -488,6 +504,8 @@ export class ReviewIngestionStore {
           input.idempotencyKey,
           input.requestedAt,
           input.correlationId ?? null,
+          input.policySnapshot === undefined ? null : JSON.stringify(input.policySnapshot),
+          input.policyFingerprint ?? null,
         ],
       );
 
@@ -696,13 +714,22 @@ export class ReviewIngestionStore {
         repository_id: string;
         revision_id: string | null;
         head_sha: string | null;
+        head_ref: string | null;
         provider: string;
         pull_request_id: string | null;
+        target: unknown;
+        repository_owner: string;
+        repository_name: string;
+        policy_snapshot: unknown;
+        policy_fingerprint: string | null;
       }>(
         `SELECT r.organization_id, r.repository_id, r.revision_id,
-                rev.head_sha, repo.provider, rev.pull_request_id
+                rev.head_sha, rev.head_ref, repo.provider, rev.pull_request_id,
+                req.target, repo.owner AS repository_owner, repo.name AS repository_name,
+                req.policy_snapshot, req.policy_fingerprint
            FROM review_runs r
            JOIN repositories repo ON repo.id = r.repository_id
+           JOIN review_requests req ON req.id = r.request_id
            LEFT JOIN pull_request_revisions rev ON rev.id = r.revision_id
           WHERE r.id = $1`,
         [runId],
@@ -717,6 +744,38 @@ export class ReviewIngestionStore {
       ) {
         return undefined;
       }
+      const target = pullRequestReviewTargetSchema.safeParse(row.target);
+      const reviewSubject =
+        target.success && row.head_ref !== null
+          ? {
+              ...(target.data.changeRequest.number === undefined
+                ? {}
+                : { number: target.data.changeRequest.number }),
+              title: target.data.title,
+              ...(target.data.description === undefined
+                ? {}
+                : { description: target.data.description }),
+              headRef: row.head_ref,
+              repositoryOwner: row.repository_owner,
+              repositoryName: row.repository_name,
+            }
+          : undefined;
+      const policy = row.policy_snapshot === null || row.policy_snapshot === undefined
+        ? undefined
+        : dashboardEffectiveReviewPolicySchema.safeParse(row.policy_snapshot);
+      const reviewPolicy = policy?.success === true && row.policy_fingerprint !== null
+        ? (() => {
+            const expected = createHash("sha256").update(canonicalJson(policy.data), "utf8").digest("hex");
+            return expected === row.policy_fingerprint
+              ? { policy: policy.data, fingerprint: row.policy_fingerprint }
+              : undefined;
+          })()
+        : undefined;
+      if ((row.policy_snapshot !== null && row.policy_snapshot !== undefined) && reviewPolicy === undefined) {
+        // A snapshotted request whose payload/fingerprint no longer agree is
+        // corrupt. Fail closed instead of executing against mutable settings.
+        return undefined;
+      }
       return {
         organizationId: row.organization_id,
         repositoryId: row.repository_id,
@@ -725,11 +784,38 @@ export class ReviewIngestionStore {
         headSha: row.head_sha,
         provider: row.provider,
         pullRequestId: row.pull_request_id,
+        ...(reviewPolicy === undefined ? {} : { reviewPolicy }),
+        ...(reviewSubject === undefined ? {} : { reviewSubject }),
       };
     });
   }
 
-  public getRun(runId: string): Promise<
+  /**
+   * Cancels work for a closed pull request only before publication begins.
+   * `publishing` is the external side-effect commit point: once a run reaches
+   * it, cancellation may not pretend remote publication can be rolled back.
+   */
+  public cancelPrePublicationRuns(pullRequestId: string): Promise<readonly string[]> {
+    return this.#withClient(async (client) => {
+      const result = await client.query<{ id: string }>(
+        `UPDATE review_runs r
+            SET state = 'cancelled', completed_at = clock_timestamp(),
+                failure_code = COALESCE(failure_code, 'acalys.review.pull-request-closed'),
+                failure_retryability = COALESCE(failure_retryability, 'non_retryable')
+           FROM review_requests req
+          WHERE r.request_id = req.id
+            AND req.pull_request_id = $1
+            AND r.state IN ('queued','preparing','analyzing','reviewing','verifying','reconciling')
+         RETURNING r.id`,
+        [pullRequestId],
+      );
+      return result.rows.map((row) => row.id);
+    });
+  }
+
+  public getRun(
+    runId: string,
+  ): Promise<
     | {
         readonly id: string;
         readonly state: string;

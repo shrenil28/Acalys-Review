@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -13,7 +13,7 @@ import { Button, buttonClass } from "@/components/ui/Button";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { Input, Textarea } from "@/components/ui/Input";
 import { Modal } from "@/components/ui/Modal";
-import { Switch } from "@/components/ui/Misc";
+import { EmptyState, Switch } from "@/components/ui/Misc";
 import { Tabs } from "@/components/ui/Tabs";
 import { Table, TableShell, Td, Th, Tr } from "@/components/ui/Table";
 import { UnsavedBar, useUnsaved } from "@/components/ui/UnsavedBar";
@@ -34,8 +34,21 @@ import {
   useRepositoryByName,
 } from "@/lib/api/liveDashboard";
 import { formatNumber, relativeTime } from "@/lib/utils";
+import {
+  archiveRepositoryReviewSettings,
+  loadRepositoryOverview,
+  type DashboardRepositoryOverview,
+  loadRepositoryReviewSettings,
+  updateRepositoryReviewLifecycle,
+  updateRepositoryReviewSettings,
+  type RepositoryReviewSettingsView,
+} from "@/lib/api/dashboardAdmin";
 
 type Tab = "overview" | "settings" | "learnings" | "activity";
+type LiveSettingsState =
+  | { readonly kind: "idle" | "loading" }
+  | { readonly kind: "ready"; readonly value: RepositoryReviewSettingsView }
+  | { readonly kind: "failed"; readonly detail: string };
 
 const RepositoryWeeklyReviewsFixture = lazy(async () => {
   const module = await import("./RepositoryWeeklyReviewsFixture.js");
@@ -61,6 +74,7 @@ export function RepositoryDetailPage() {
     dirty,
     reset,
     commit,
+    replace,
   } = useUnsaved({
     inherit: true,
     instructions: "",
@@ -68,6 +82,46 @@ export function RepositoryDetailPage() {
   });
   const { inherit, instructions, ignorePaths } = settings;
   const [removing, setRemoving] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [liveSettings, setLiveSettings] = useState<LiveSettingsState>({ kind: "idle" });
+  const [overview, setOverview] = useState<{ kind: "idle" | "loading" } | { kind: "ready"; value: DashboardRepositoryOverview } | { kind: "failed"; detail: string }>({ kind: "idle" });
+  const live = directory.status === "ready" && directory.source === "api";
+  const repositoryId = repo?.id ?? null;
+
+  useEffect(() => {
+    if (!live || repositoryId === null) {
+      setLiveSettings({ kind: "idle" });
+      return;
+    }
+    const controller = new AbortController();
+    setLiveSettings({ kind: "loading" });
+    void (async () => {
+      const result = await loadRepositoryReviewSettings(repositoryId, controller.signal);
+      if (controller.signal.aborted) return;
+      if (result.kind === "ok") {
+        setLiveSettings({ kind: "ready", value: result.value });
+        replace({
+          inherit: result.value.inherit,
+          instructions: result.value.instructions,
+          ignorePaths: result.value.ignorePaths.join("\n"),
+        });
+      } else {
+        setLiveSettings({ kind: "failed", detail: result.detail });
+      }
+    })();
+    return () => controller.abort();
+  }, [live, repositoryId, replace]);
+
+  useEffect(() => {
+    if (!live || repositoryId === null) { setOverview({ kind: "idle" }); return; }
+    const controller = new AbortController(); setOverview({ kind: "loading" });
+    void loadRepositoryOverview(repositoryId, controller.signal).then((result) => {
+      if (controller.signal.aborted) return;
+      if (result.kind === "ok") setOverview({ kind: "ready", value: result.value });
+      else setOverview({ kind: "failed", detail: result.detail });
+    });
+    return () => controller.abort();
+  }, [live, repositoryId]);
 
   const repoLearnings = useMemo(() => {
     if (repo === undefined || knowledge.status !== "ready") return [];
@@ -99,9 +153,111 @@ export function RepositoryDetailPage() {
   }
   if (!repo) return <NotFoundPage />;
 
-  const live = directory.source === "api";
-  const enabled = enabledOverride ?? repo.reviewsEnabled;
+  const enabled = enabledOverride ?? (liveSettings.kind === "ready" ? liveSettings.value.lifecycle === "enabled" : repo.reviewsEnabled);
   const externalUrl = providerUrl(repo.provider, repo.name);
+
+  const installAuthoritativeSettings = (value: RepositoryReviewSettingsView, replaceDraft: boolean) => {
+    setLiveSettings({ kind: "ready", value });
+    setEnabledOverride(null);
+    if (replaceDraft) {
+      replace({
+        inherit: value.inherit,
+        instructions: value.instructions,
+        ignorePaths: value.ignorePaths.join("\n"),
+      });
+    }
+  };
+
+  const refetchAuthoritativeSettings = async (detail: string) => {
+    const refreshed = await loadRepositoryReviewSettings(repo.id);
+    if (refreshed.kind === "ok") {
+      installAuthoritativeSettings(refreshed.value, true);
+      toast({ title: "Repository settings changed", description: `${detail} The latest server configuration was restored.`, tone: "error" });
+      return;
+    }
+    setEnabledOverride(null);
+    toast({ title: "Repository update failed", description: `${detail} The last confirmed server state is still shown.`, tone: "error" });
+  };
+
+  const changeReviews = async (value: boolean) => {
+    if (!live) {
+      setEnabledOverride(value);
+      toast({
+        title: value ? "Reviews enabled" : "Reviews paused",
+        description: `${repo.name} ${value ? "will be" : "will not be"} reviewed on new pull requests.`,
+        tone: value ? "success" : "info",
+      });
+      return;
+    }
+    if (liveSettings.kind !== "ready" || settingsSaving) return;
+    setEnabledOverride(value);
+    setSettingsSaving(true);
+    try {
+      const result = await updateRepositoryReviewLifecycle(repo.id, liveSettings.value.revision, value ? "enabled" : "paused");
+      if (result.kind === "ok") {
+        installAuthoritativeSettings(result.value, false);
+        toast({
+          title: value ? "Reviews enabled" : "Reviews paused",
+          description: `${repo.name} ${value ? "will be" : "will not be"} reviewed on new pull requests.`,
+          tone: value ? "success" : "info",
+        });
+      } else {
+        await refetchAuthoritativeSettings(result.detail);
+      }
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const saveRepositorySettings = async () => {
+    if (!live) {
+      commit();
+      toast({ title: "Repository settings saved", description: `${repo.name} will use these settings on its next review.` });
+      return;
+    }
+    if (liveSettings.kind !== "ready" || settingsSaving) return;
+    setSettingsSaving(true);
+    try {
+      const ignore = [...new Set(ignorePaths.split(/\r?\n/u).map((entry) => entry.trim()).filter(Boolean))];
+      const result = await updateRepositoryReviewSettings(repo.id, {
+        expectedRevision: liveSettings.value.revision,
+        inherit,
+        instructions,
+        ignorePaths: ignore,
+      });
+      if (result.kind === "ok") {
+        installAuthoritativeSettings(result.value, true);
+        toast({ title: "Repository settings saved", description: `${repo.name} will use these settings on its next review.` });
+      } else {
+        await refetchAuthoritativeSettings(result.detail);
+      }
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
+  const removeRepository = async () => {
+    if (!live) {
+      setRemoving(false);
+      toast({ title: "Repository removed", description: `${repo.name} is no longer reviewed.`, tone: "info" });
+      return;
+    }
+    if (liveSettings.kind !== "ready" || settingsSaving) return;
+    setSettingsSaving(true);
+    try {
+      const result = await archiveRepositoryReviewSettings(repo.id, liveSettings.value.revision);
+      if (result.kind === "ok") {
+        installAuthoritativeSettings(result.value, true);
+        setRemoving(false);
+        toast({ title: "Repository removed", description: `${repo.name} is archived and no longer reviewed.`, tone: "info" });
+      } else {
+        setRemoving(false);
+        await refetchAuthoritativeSettings(result.detail);
+      }
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
 
   return (
     <Page>
@@ -161,15 +317,8 @@ export function RepositoryDetailPage() {
             <span className="text-xs text-fg-subtle">Reviews</span>
             <Switch
               checked={enabled}
-              disabled={live}
-              onChange={(value) => {
-                setEnabledOverride(value);
-                toast({
-                  title: value ? "Reviews enabled" : "Reviews paused",
-                  description: `${repo.name} ${value ? "will be" : "will not be"} reviewed on new pull requests.`,
-                  tone: value ? "success" : "info",
-                });
-              }}
+              disabled={live && (liveSettings.kind !== "ready" || settingsSaving)}
+              onChange={(value) => { void changeReviews(value); }}
               label={`Reviews for ${repo.name}`}
             />
           </div>
@@ -214,21 +363,11 @@ export function RepositoryDetailPage() {
             </div>
 
             {live ? (
-              <Card>
-                <CardHeader title="Weekly reviews" />
-                <CardBody>
-                  <AreaTrend
-                    data={[]}
-                    seriesDefs={[
-                      {
-                        key: "value",
-                        label: "Reviews",
-                        color: series.brand,
-                      },
-                    ]}
-                  />
-                </CardBody>
-              </Card>
+              overview.kind === "ready" ? (
+                <Card><CardHeader title="Daily reviews · last 30 days" description="Review runs grouped by database-clock day." /><CardBody><AreaTrend data={overview.value.trend.map((point) => ({ label: point.day.slice(5), value: point.reviews }))} seriesDefs={[{ key: "value", label: "Reviews", color: series.brand }]} /></CardBody></Card>
+              ) : overview.kind === "failed" ? (
+                <EmptyState title="Couldn’t load repository trend" description={overview.detail} />
+              ) : <div className="h-[220px] rounded-lg border border-line bg-surface" />
             ) : (
               <Suspense fallback={<div className="h-[260px] rounded-lg border border-line bg-surface" />}>
                 <RepositoryWeeklyReviewsFixture />
@@ -237,78 +376,85 @@ export function RepositoryDetailPage() {
           </>
         )}
 
-        {tab === "settings" && (
-          <>
-            <Card>
-              <CardHeader
-                title="Configuration source"
-                description="Inherit the organization defaults, or configure this repository on its own."
-              />
-              <CardBody className="flex items-center justify-between gap-4">
-                <p className="text-sm text-fg-muted">
-                  {inherit
-                    ? "Using organization settings from shrenil28."
-                    : "Using this repository's own settings and committed .acalys.yaml."}
-                </p>
-                <Switch
-                  checked={inherit}
-                  disabled={live}
-                  onChange={(value) => patchSettings({ inherit: value })}
-                  label="Inherit organization settings"
+        {tab === "settings" &&
+          (live && (liveSettings.kind === "loading" || liveSettings.kind === "idle") ? (
+            <LiveTableLoading columns={2} />
+          ) : live && liveSettings.kind === "failed" ? (
+            <EmptyState title="Couldn’t load repository settings" description={liveSettings.detail} />
+          ) : (
+            <>
+              <Card>
+                <CardHeader
+                  title="Configuration source"
+                  description="Inherit the organization defaults, or configure this repository on its own."
                 />
-              </CardBody>
-            </Card>
+                <CardBody className="flex items-center justify-between gap-4">
+                  <p className="text-sm text-fg-muted">
+                    {inherit
+                      ? "Using organization review settings."
+                      : "Using this repository's own instructions and ignore rules."}
+                  </p>
+                  <Switch
+                    checked={inherit}
+                    disabled={settingsSaving}
+                    onChange={(value) => patchSettings({ inherit: value })}
+                    label="Inherit organization settings"
+                  />
+                </CardBody>
+              </Card>
 
-            <Card>
-              <CardHeader
-                title="Review instructions"
-                description="Applied on top of the organization instructions for this repository only."
-              />
-              <CardBody>
-                <Textarea
-                  rows={4}
-                  value={instructions}
-                  onChange={(event) => patchSettings({ instructions: event.target.value })}
-                  placeholder="Workflow nodes must declare an explicit schema; do not infer parameter shapes at runtime."
-                  disabled={inherit || live}
+              <Card>
+                <CardHeader
+                  title="Review instructions"
+                  description="Trusted repository instructions applied on top of the organization review policy."
                 />
-              </CardBody>
-            </Card>
+                <CardBody>
+                  <Textarea
+                    rows={4}
+                    value={instructions}
+                    onChange={(event) => patchSettings({ instructions: event.target.value })}
+                    placeholder="Workflow nodes must declare an explicit schema; do not infer parameter shapes at runtime."
+                    disabled={inherit || settingsSaving}
+                  />
+                  {live ? <p className="mt-2 text-2xs text-ok">Runtime enforced for newly admitted reviews.</p> : null}
+                </CardBody>
+              </Card>
 
-            <Card>
-              <CardHeader
-                title="Ignore paths"
-                description="One glob per line. Matching files are excluded from reviews in this repository."
-              />
-              <CardBody>
-                <Textarea
-                  rows={4}
-                  className="font-mono text-xs"
-                  value={ignorePaths}
-                  onChange={(event) => patchSettings({ ignorePaths: event.target.value })}
-                  disabled={inherit || live}
+              <Card>
+                <CardHeader
+                  title="Ignore paths"
+                  description="One glob per line. Matching files are excluded from changed-file analysis and repository context."
                 />
-              </CardBody>
-            </Card>
+                <CardBody>
+                  <Textarea
+                    rows={4}
+                    className="font-mono text-xs"
+                    value={ignorePaths}
+                    onChange={(event) => patchSettings({ ignorePaths: event.target.value })}
+                    disabled={inherit || settingsSaving}
+                  />
+                  {live ? <p className="mt-2 text-2xs text-ok">Runtime enforced before review evidence is assembled.</p> : null}
+                </CardBody>
+              </Card>
 
-            <Card>
-              <CardHeader
-                title="Remove repository"
-                description="Acalys stops reviewing this repository and deletes its cache. Learnings are kept."
-              />
-              <CardBody>
-                <Button
-                  variant="danger"
-                  icon={<Trash2 className="h-3.5 w-3.5" />}
-                  onClick={() => setRemoving(true)}
-                  disabled={live}
-                >
-                  Remove {repo.name}
-                </Button>
-              </CardBody>
-            </Card>
-          </>
-        )}
+              <Card>
+                <CardHeader
+                  title="Remove repository"
+                  description="Archive this repository for review admission. Existing learnings are retained."
+                />
+                <CardBody>
+                  <Button
+                    variant="danger"
+                    icon={<Trash2 className="h-3.5 w-3.5" />}
+                    onClick={() => setRemoving(true)}
+                    disabled={live && (liveSettings.kind !== "ready" || settingsSaving)}
+                  >
+                    Remove {repo.name}
+                  </Button>
+                </CardBody>
+              </Card>
+            </>
+          ))}
 
         {tab === "learnings" &&
           (knowledge.status === "loading" ? (
@@ -339,87 +485,56 @@ export function RepositoryDetailPage() {
             </ul>
           ))}
 
-        {tab === "activity" && (
-          <TableShell>
-            <Table>
-              <thead>
-                <tr>
-                  <Th>When</Th>
-                  <Th>Event</Th>
-                  <Th>Pull request</Th>
-                  <Th align="right">Comments</Th>
-                </tr>
-              </thead>
-              <tbody>
-                {(live
-                  ? []
-                  : [
-                      {
-                        when: "2h ago",
-                        event: "Review completed",
-                        pr: "#412",
-                        comments: 14,
-                      },
-                      {
-                        when: "1d ago",
-                        event: "Review completed",
-                        pr: "#411",
-                        comments: 9,
-                      },
-                      {
-                        when: "2d ago",
-                        event: "Incremental review",
-                        pr: "#411",
-                        comments: 3,
-                      },
-                      {
-                        when: "4d ago",
-                        event: "Review completed",
-                        pr: "#408",
-                        comments: 6,
-                      },
-                      {
-                        when: "6d ago",
-                        event: "Cache rebuilt",
-                        pr: "—",
-                        comments: 0,
-                      },
-                    ]
-                ).map((row, index) => (
-                  <Tr key={index}>
-                    <Td className="whitespace-nowrap">{row.when}</Td>
-                    <Td className="font-medium text-fg">{row.event}</Td>
-                    <Td className="font-mono text-xs">{row.pr}</Td>
-                    <Td align="right" className="tabular-nums">
-                      {row.comments}
-                    </Td>
-                  </Tr>
-                ))}
-              </tbody>
-            </Table>
-          </TableShell>
-        )}
+        {tab === "activity" &&
+          (live ? (
+            overview.kind === "ready" ? (
+              <TableShell><Table><thead><tr><Th>When</Th><Th>State / trigger</Th><Th>Pull request</Th><Th align="right">Published comments</Th></tr></thead><tbody>{overview.value.recentActivity.length === 0 ? <tr><td colSpan={4} className="py-8 text-center text-sm text-fg-subtle">No review activity recorded for this repository yet.</td></tr> : overview.value.recentActivity.map((row) => <Tr key={row.reviewRunId}><Td className="whitespace-nowrap">{relativeTime(row.createdAt)}</Td><Td><span className="flex items-center gap-2"><Badge tone="outline">{row.state}</Badge><span className="text-xs text-fg-subtle">{row.trigger}</span></span></Td><Td className="font-mono text-xs">{row.pullRequestNumber === null ? "—" : `#${row.pullRequestNumber}`} {row.pullRequestTitle ?? ""}</Td><Td align="right" className="tabular-nums">{row.publishedComments}</Td></Tr>)}</tbody></Table></TableShell>
+            ) : overview.kind === "failed" ? <EmptyState title="Couldn’t load repository activity" description={overview.detail} /> : <LiveTableLoading columns={4} />
+          ) : (
+            <TableShell>
+              <Table>
+                <thead>
+                  <tr>
+                    <Th>When</Th>
+                    <Th>Event</Th>
+                    <Th>Pull request</Th>
+                    <Th align="right">Comments</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { when: "2h ago", event: "Review completed", pr: "#412", comments: 14 },
+                    { when: "1d ago", event: "Review completed", pr: "#411", comments: 9 },
+                    { when: "2d ago", event: "Incremental review", pr: "#411", comments: 3 },
+                    { when: "4d ago", event: "Review completed", pr: "#408", comments: 6 },
+                    { when: "6d ago", event: "Cache rebuilt", pr: "—", comments: 0 },
+                  ].map((row, index) => (
+                    <Tr key={index}>
+                      <Td className="whitespace-nowrap">{row.when}</Td>
+                      <Td className="font-medium text-fg">{row.event}</Td>
+                      <Td className="font-mono text-xs">{row.pr}</Td>
+                      <Td align="right" className="tabular-nums">{row.comments}</Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </Table>
+            </TableShell>
+          ))}
       </div>
 
       <Modal
-        open={removing && !live}
+        open={removing}
         onClose={() => setRemoving(false)}
         title={`Remove ${repo.name}?`}
-        description="Reviews stop immediately and the analysis cache is deleted. You can add the repository back at any time."
+        description="New review admission stops immediately. Existing learnings and historical review data are retained."
         size="sm"
         footer={
           <>
             <Button variant="ghost" onClick={() => setRemoving(false)}>Cancel</Button>
             <Button
               variant="danger"
-              onClick={() => {
-                setRemoving(false);
-                toast({
-                  title: "Repository removed",
-                  description: `${repo.name} is no longer reviewed.`,
-                  tone: "info",
-                });
-              }}
+              onClick={() => { void removeRepository(); }}
+              disabled={settingsSaving}
             >
               Remove repository
             </Button>
@@ -429,15 +544,10 @@ export function RepositoryDetailPage() {
         <Input placeholder={repo.name} aria-label="Type the repository name to confirm" />
       </Modal>
       <UnsavedBar
-        open={dirty && !live}
+        open={dirty}
         onReset={reset}
-        onSave={() => {
-          commit();
-          toast({
-            title: "Repository settings saved",
-            description: `${repo.name} will use these settings on its next review.`,
-          });
-        }}
+        onSave={() => { void saveRepositorySettings(); }}
+        saving={settingsSaving}
       />
     </Page>
   );

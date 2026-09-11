@@ -3,10 +3,7 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const ROOT = process.cwd();
-const migrationPath = join(
-  ROOT,
-  "packages/database/migrations/0015_phase3_tenant_graph_integrity.sql",
-);
+const migrationPath = join(ROOT, "packages/database/migrations/0015_phase3_tenant_graph_integrity.sql");
 const suite = "packages/database/tests/phase3-tenant-integrity.test.ts";
 const suitePath = join(ROOT, suite);
 
@@ -52,10 +49,8 @@ function count(source, needle) {
 
 function preflight() {
   const problems = [];
-  if (!existsSync(migrationPath))
-    problems.push("tenant graph migration is missing");
-  if (!existsSync(suitePath))
-    problems.push("tenant graph Postgres witness suite is missing");
+  if (!existsSync(migrationPath)) problems.push("tenant graph migration is missing");
+  if (!existsSync(suitePath)) problems.push("tenant graph Postgres witness suite is missing");
   if (problems.length > 0) return problems;
 
   const migration = readFileSync(migrationPath, "utf8");
@@ -73,9 +68,7 @@ function preflight() {
     }
   }
   if (!migration.includes("ON DELETE SET NULL (pull_request_id)")) {
-    problems.push(
-      "conversation pull-request FK must null only pull_request_id",
-    );
+    problems.push("conversation pull-request FK must null only pull_request_id");
   }
   if (!migration.includes("ON DELETE SET NULL (finding_id)")) {
     problems.push("conversation finding FK must null only finding_id");
@@ -106,9 +99,13 @@ if (!existsSync(vitest)) {
   process.exit(2);
 }
 
-const result = spawnSync(process.execPath, [vitest, "run", suite], {
-  cwd: ROOT,
-  stdio: "inherit",
-  env: { ...process.env, ACALYS_REQUIRE_POSTGRES: "1" },
-});
+const result = spawnSync(
+  process.execPath,
+  [vitest, "run", suite],
+  {
+    cwd: ROOT,
+    stdio: "inherit",
+    env: { ...process.env, ACALYS_REQUIRE_POSTGRES: "1" },
+  },
+);
 process.exit(result.status ?? 2);

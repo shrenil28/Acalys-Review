@@ -8,13 +8,9 @@ import {
 } from "./postgres.js";
 
 const HAS_DOCKER = dockerAvailable();
-const describeWithPostgres = HAS_DOCKER
-  ? describe
-  : describe.skip.bind(describe);
+const describeWithPostgres = HAS_DOCKER ? describe : describe.skip.bind(describe);
 if (!HAS_DOCKER) {
-  console.warn(
-    "\n  ⚠ Docker unavailable — Phase 3 auth persistence tests SKIPPED.\n",
-  );
+  console.warn("\n  ⚠ Docker unavailable — Phase 3 auth persistence tests SKIPPED.\n");
 }
 
 const ORG = "0192f8a1-1000-7000-8000-000000000101";
@@ -44,9 +40,7 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
   let store: AuthStore;
 
   const dbNow = async (): Promise<Date> => {
-    const result = await database.pool.query<{ now: Date }>(
-      `SELECT clock_timestamp() AS now`,
-    );
+    const result = await database.pool.query<{ now: Date }>(`SELECT clock_timestamp() AS now`);
     const value = result.rows[0]?.now;
     if (value === undefined) throw new Error("database clock returned no row");
     return value;
@@ -54,12 +48,7 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
 
   beforeAll(async () => {
     database = await startPostgres("phase3_auth");
-    await assertSuiteIsActuallyRunning(database, [
-      "users",
-      "memberships",
-      "auth_sessions",
-      "api_keys",
-    ]);
+    await assertSuiteIsActuallyRunning(database, ["users", "memberships", "auth_sessions", "api_keys"]);
     store = new AuthStore(database.pool);
   }, 180_000);
 
@@ -94,10 +83,7 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
     });
 
     expect(returned).toBe(USER);
-    const rows = await database.pool.query<{
-      id: string;
-      display_name: string | null;
-    }>(
+    const rows = await database.pool.query<{ id: string; display_name: string | null }>(
       `SELECT id, display_name FROM users WHERE provider = 'github' AND provider_user_id = '42'`,
     );
     expect(rows.rows).toEqual([{ id: USER, display_name: "Updated Name" }]);
@@ -114,24 +100,16 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       ttlMillis: 60_000,
     });
     expect(created).toBeDefined();
-    expect(
-      (created?.expiresAt.getTime() ?? 0) - (created?.createdAt.getTime() ?? 0),
-    ).toBe(60_000);
+    expect((created?.expiresAt.getTime() ?? 0) - (created?.createdAt.getTime() ?? 0)).toBe(60_000);
 
     const beforeAuth = await dbNow();
     const authenticated = await store.authenticateSessionByHash(sessionHash);
     const afterAuth = await dbNow();
-    expect(authenticated).toMatchObject({
-      sessionId: SESSION,
-      organizationId: ORG,
-      role: "member",
-    });
-    const touched = await database.pool.query<{
-      last_used_at: Date | null;
-      membership_id: string | null;
-    }>(`SELECT last_used_at, membership_id FROM auth_sessions WHERE id = $1`, [
-      SESSION,
-    ]);
+    expect(authenticated).toMatchObject({ sessionId: SESSION, organizationId: ORG, role: "member" });
+    const touched = await database.pool.query<{ last_used_at: Date | null; membership_id: string | null }>(
+      `SELECT last_used_at, membership_id FROM auth_sessions WHERE id = $1`,
+      [SESSION],
+    );
     const lastUsed = touched.rows[0]?.last_used_at;
     expect(lastUsed).not.toBeNull();
     expect(lastUsed?.getTime()).toBeGreaterThanOrEqual(beforeAuth.getTime());
@@ -145,20 +123,12 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       ttlMillis: 60_000,
     });
     expect(rotated).toBeDefined();
-    await expect(
-      store.authenticateSessionByHash(sessionHash),
-    ).resolves.toBeUndefined();
-    await expect(
-      store.authenticateSessionByHash(replacementHash),
-    ).resolves.toMatchObject({ sessionId: REPLACEMENT });
+    await expect(store.authenticateSessionByHash(sessionHash)).resolves.toBeUndefined();
+    await expect(store.authenticateSessionByHash(replacementHash)).resolves.toMatchObject({ sessionId: REPLACEMENT });
 
-    await expect(
-      store.revokeSession(REPLACEMENT, "0192f8a1-1000-7000-8000-000000000999"),
-    ).resolves.toBe(false);
+    await expect(store.revokeSession(REPLACEMENT, "0192f8a1-1000-7000-8000-000000000999")).resolves.toBe(false);
     await expect(store.revokeSession(REPLACEMENT, ORG)).resolves.toBe(true);
-    await expect(
-      store.authenticateSessionByHash(replacementHash),
-    ).resolves.toBeUndefined();
+    await expect(store.authenticateSessionByHash(replacementHash)).resolves.toBeUndefined();
   });
 
   it("invalidates user-bound API keys when membership disappears and does not advance last-used on failure", async () => {
@@ -183,21 +153,14 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       [KEY],
     );
 
-    await database.pool.query(
-      `DELETE FROM memberships WHERE organization_id = $1 AND user_id = $2`,
-      [ORG, USER],
-    );
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toBeUndefined();
+    await database.pool.query(`DELETE FROM memberships WHERE organization_id = $1 AND user_id = $2`, [ORG, USER]);
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toBeUndefined();
 
-    const afterFailure = await database.pool.query<{
-      last_used_at: Date | null;
-      membership_id: string | null;
-    }>(`SELECT last_used_at, membership_id FROM api_keys WHERE id = $1`, [KEY]);
-    expect(afterFailure.rows[0]?.last_used_at?.toISOString()).toBe(
-      firstUse.rows[0]?.last_used_at?.toISOString(),
+    const afterFailure = await database.pool.query<{ last_used_at: Date | null; membership_id: string | null }>(
+      `SELECT last_used_at, membership_id FROM api_keys WHERE id = $1`,
+      [KEY],
     );
+    expect(afterFailure.rows[0]?.last_used_at?.toISOString()).toBe(firstUse.rows[0]?.last_used_at?.toISOString());
     expect(afterFailure.rows[0]?.membership_id).toBeNull();
   });
 
@@ -222,15 +185,9 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       scopes: ["repositories:read"],
     });
 
-    await database.pool.query(`DELETE FROM memberships WHERE id = $1`, [
-      MEMBERSHIP,
-    ]);
-    await expect(
-      store.authenticateSessionByHash(sessionHash),
-    ).resolves.toBeUndefined();
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toBeUndefined();
+    await database.pool.query(`DELETE FROM memberships WHERE id = $1`, [MEMBERSHIP]);
+    await expect(store.authenticateSessionByHash(sessionHash)).resolves.toBeUndefined();
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toBeUndefined();
     await expect(
       store.rotateSessionByHash({
         currentHash: sessionHash,
@@ -245,12 +202,8 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
        VALUES ($1,$2,$3,'member',clock_timestamp(),clock_timestamp())`,
       [REJOINED_MEMBERSHIP, ORG, USER],
     );
-    await expect(
-      store.authenticateSessionByHash(sessionHash),
-    ).resolves.toBeUndefined();
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toBeUndefined();
+    await expect(store.authenticateSessionByHash(sessionHash)).resolves.toBeUndefined();
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toBeUndefined();
     const replacement = await database.pool.query<{ count: number }>(
       `SELECT COUNT(*)::int AS count FROM auth_sessions WHERE id = $1`,
       [REPLACEMENT],
@@ -276,24 +229,13 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       user_id: string | null;
       owner_kind: string;
       membership_id: string | null;
-    }>(
-      `SELECT user_id, owner_kind, membership_id FROM api_keys WHERE id = $1`,
-      [KEY],
-    );
-    expect(tombstone.rows[0]).toEqual({
-      user_id: null,
-      owner_kind: "user",
-      membership_id: null,
-    });
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toBeUndefined();
+    }>(`SELECT user_id, owner_kind, membership_id FROM api_keys WHERE id = $1`, [KEY]);
+    expect(tombstone.rows[0]).toEqual({ user_id: null, owner_kind: "user", membership_id: null });
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toBeUndefined();
   });
 
   it("refuses to pre-provision user credentials without a live membership and uses database time for API-key expiry", async () => {
-    await database.pool.query(`DELETE FROM memberships WHERE id = $1`, [
-      MEMBERSHIP,
-    ]);
+    await database.pool.query(`DELETE FROM memberships WHERE id = $1`, [MEMBERSHIP]);
     await expect(
       store.createSession({
         id: SESSION,
@@ -342,15 +284,11 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       [LEGACY_KEY, ORG, keyHash],
     );
 
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toBeUndefined();
-    const stored = await database.pool.query<{
-      last_used_at: Date | null;
-      revoked_at: Date | null;
-    }>(`SELECT last_used_at, revoked_at FROM api_keys WHERE id = $1`, [
-      LEGACY_KEY,
-    ]);
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toBeUndefined();
+    const stored = await database.pool.query<{ last_used_at: Date | null; revoked_at: Date | null }>(
+      `SELECT last_used_at, revoked_at FROM api_keys WHERE id = $1`,
+      [LEGACY_KEY],
+    );
     expect(stored.rows[0]).toEqual({ last_used_at: null, revoked_at: null });
   });
 
@@ -367,17 +305,13 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       scopes: ["repositories:read", "reviews:write"],
     });
 
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toMatchObject({ role: "member" });
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toMatchObject({ role: "member" });
     await database.pool.query(
       `UPDATE memberships SET role = 'read_only', updated_at = clock_timestamp()
         WHERE organization_id = $1 AND user_id = $2`,
       [ORG, USER],
     );
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toMatchObject({ role: "read_only" });
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toMatchObject({ role: "read_only" });
   });
 
   it("supports organization-owned CI keys with explicit provenance and tenant-scoped revocation", async () => {
@@ -394,30 +328,19 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       }),
     ).resolves.toBe("created");
 
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toMatchObject({
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toMatchObject({
       apiKeyId: ORG_KEY,
       userId: null,
       role: "member",
     });
-    const ownership = await database.pool.query<{
-      owner_kind: string;
-      membership_id: string | null;
-    }>(`SELECT owner_kind, membership_id FROM api_keys WHERE id = $1`, [
-      ORG_KEY,
-    ]);
-    expect(ownership.rows[0]).toEqual({
-      owner_kind: "organization",
-      membership_id: null,
-    });
-    await expect(
-      store.revokeApiKey(ORG_KEY, "0192f8a1-1000-7000-8000-000000000999"),
-    ).resolves.toBe(false);
+    const ownership = await database.pool.query<{ owner_kind: string; membership_id: string | null }>(
+      `SELECT owner_kind, membership_id FROM api_keys WHERE id = $1`,
+      [ORG_KEY],
+    );
+    expect(ownership.rows[0]).toEqual({ owner_kind: "organization", membership_id: null });
+    await expect(store.revokeApiKey(ORG_KEY, "0192f8a1-1000-7000-8000-000000000999")).resolves.toBe(false);
     await expect(store.revokeApiKey(ORG_KEY, ORG)).resolves.toBe(true);
-    await expect(
-      store.authenticateApiKeyByHash(keyHash),
-    ).resolves.toBeUndefined();
+    await expect(store.authenticateApiKeyByHash(keyHash)).resolves.toBeUndefined();
   });
   it("commits OAuth identity, membership role, and first session with one database timestamp", async () => {
     const before = await dbNow();
@@ -438,15 +361,9 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
     expect(established.userId).toBe(USER);
     expect(established.membershipId).toBe(MEMBERSHIP);
     expect(established.role).toBe("admin");
-    expect(established.createdAt.getTime()).toBeGreaterThanOrEqual(
-      before.getTime(),
-    );
-    expect(established.createdAt.getTime()).toBeLessThanOrEqual(
-      after.getTime(),
-    );
-    expect(
-      established.expiresAt.getTime() - established.createdAt.getTime(),
-    ).toBe(90_000);
+    expect(established.createdAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+    expect(established.createdAt.getTime()).toBeLessThanOrEqual(after.getTime());
+    expect(established.expiresAt.getTime() - established.createdAt.getTime()).toBe(90_000);
 
     const persisted = await database.pool.query<{
       user_updated_at: Date;
@@ -463,19 +380,10 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
         WHERE u.id = $3`,
       [ORG, OAUTH_SESSION, USER],
     );
-    expect(persisted.rows[0]).toMatchObject({
-      session_membership_id: MEMBERSHIP,
-      role: "admin",
-    });
-    expect(persisted.rows[0]?.user_updated_at.toISOString()).toBe(
-      established.createdAt.toISOString(),
-    );
-    expect(persisted.rows[0]?.membership_updated_at.toISOString()).toBe(
-      established.createdAt.toISOString(),
-    );
-    expect(persisted.rows[0]?.session_created_at.toISOString()).toBe(
-      established.createdAt.toISOString(),
-    );
+    expect(persisted.rows[0]).toMatchObject({ session_membership_id: MEMBERSHIP, role: "admin" });
+    expect(persisted.rows[0]?.user_updated_at.toISOString()).toBe(established.createdAt.toISOString());
+    expect(persisted.rows[0]?.membership_updated_at.toISOString()).toBe(established.createdAt.toISOString());
+    expect(persisted.rows[0]?.session_created_at.toISOString()).toBe(established.createdAt.toISOString());
   });
 
   it("rolls back identity and membership refresh when first-session insertion fails", async () => {
@@ -502,10 +410,7 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
       }),
     ).rejects.toThrow();
 
-    const state = await database.pool.query<{
-      display_name: string | null;
-      role: string;
-    }>(
+    const state = await database.pool.query<{ display_name: string | null; role: string }>(
       `SELECT u.display_name, m.role
          FROM users AS u
          JOIN memberships AS m ON m.user_id = u.id AND m.organization_id = $1
@@ -551,12 +456,7 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
     expect(second.userId).toBe(USER);
     expect(first.membershipId).toBe(MEMBERSHIP);
     expect(second.membershipId).toBe(MEMBERSHIP);
-    const graph = await database.pool.query<{
-      users: number;
-      memberships: number;
-      sessions: number;
-      distinct_memberships: number;
-    }>(
+    const graph = await database.pool.query<{ users: number; memberships: number; sessions: number; distinct_memberships: number }>(
       `SELECT
          (SELECT COUNT(*)::int FROM users WHERE provider = 'github' AND provider_user_id = '42') AS users,
          (SELECT COUNT(*)::int FROM memberships WHERE organization_id = $1 AND user_id = $2) AS memberships,
@@ -564,11 +464,7 @@ describeWithPostgres("Phase 3 auth persistence boundaries", () => {
          (SELECT COUNT(DISTINCT membership_id)::int FROM auth_sessions WHERE id IN ($3,$4)) AS distinct_memberships`,
       [ORG, USER, OAUTH_SESSION, OAUTH_SESSION_2],
     );
-    expect(graph.rows[0]).toEqual({
-      users: 1,
-      memberships: 1,
-      sessions: 2,
-      distinct_memberships: 1,
-    });
+    expect(graph.rows[0]).toEqual({ users: 1, memberships: 1, sessions: 2, distinct_memberships: 1 });
   });
+
 });

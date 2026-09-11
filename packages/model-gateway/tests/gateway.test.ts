@@ -15,7 +15,7 @@ import type {
 class MemoryUsage implements ModelUsagePort {
   readonly observations: ModelInteractionObservation[] = [];
 
-  public async usageForRun(_reviewRunId: string) {
+  public async usageForRun() {
     const live = this.observations.filter((entry) => entry.providerDispatched);
     return {
       calls: live.length,
@@ -41,9 +41,7 @@ class MemoryReservations implements ModelBudgetReservationPort {
   dispatchMarked = 0;
   deny = false;
 
-  public async reserve(
-    input: Parameters<ModelBudgetReservationPort["reserve"]>[0],
-  ) {
+  public async reserve(input: Parameters<ModelBudgetReservationPort["reserve"]>[0]) {
     this.requested.push(input.requestedCostMicroUsd);
     if (this.deny) return { kind: "budget_exceeded" as const };
     return {
@@ -272,16 +270,10 @@ describe("ModelGateway", () => {
       { cassette, replayMode: "replay" },
     );
     const replayed = await replay.gateway.complete(request);
-    expect(replayed).toMatchObject({
-      kind: "ok",
-      replayed: true,
-      value: { answer: "cassette" },
-    });
+    expect(replayed).toMatchObject({ kind: "ok", replayed: true, value: { answer: "cassette" } });
     expect(replayUsage.observations[0]?.providerDispatched).toBe(false);
     if (recorded.kind === "ok" && replayed.kind === "ok") {
-      expect(replayed.identity.requestDigest).toBe(
-        recorded.identity.requestDigest,
-      );
+      expect(replayed.identity.requestDigest).toBe(recorded.identity.requestDigest);
       expect(replayed.value).toEqual(recorded.value);
     }
   });
@@ -298,9 +290,7 @@ describe("ModelGateway", () => {
       }),
     });
 
-    await expect(built.gateway.complete(request)).resolves.toMatchObject({
-      kind: "ok",
-    });
+    await expect(built.gateway.complete(request)).resolves.toMatchObject({ kind: "ok" });
     expect(built.reservations.requested).toEqual([1_000_000]);
     expect(built.reservations.dispatchMarked).toBe(1);
     expect(built.reservations.released).toBe(1);
@@ -382,9 +372,7 @@ describe("ModelGateway", () => {
       },
     );
 
-    await expect(built.gateway.complete(request)).resolves.toMatchObject({
-      kind: "ok",
-    });
+    await expect(built.gateway.complete(request)).resolves.toMatchObject({ kind: "ok" });
     expect(admissions).toBe(2);
     expect(calls).toBe(1);
     expect(built.reservations.requested).toEqual([1_000_000]);
@@ -495,12 +483,7 @@ describe("ModelGateway", () => {
       new MemoryUsage(),
       { logger },
     );
-    await built.gateway.complete({
-      ...request,
-      input: "SUPER_SECRET_REPOSITORY_BYTES",
-    });
-    expect(JSON.stringify(events)).not.toContain(
-      "SUPER_SECRET_REPOSITORY_BYTES",
-    );
+    await built.gateway.complete({ ...request, input: "SUPER_SECRET_REPOSITORY_BYTES" });
+    expect(JSON.stringify(events)).not.toContain("SUPER_SECRET_REPOSITORY_BYTES");
   });
 });

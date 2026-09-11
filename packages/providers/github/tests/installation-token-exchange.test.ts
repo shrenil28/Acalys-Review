@@ -19,18 +19,13 @@ const signer = {
   }),
 };
 
-function requestUrl(input: Parameters<typeof fetch>[0]): string {
-  if (typeof input === "string") return input;
-  return input instanceof URL ? input.href : input.url;
-}
-
 describe("GitHub installation token exchange", () => {
   it("requests the exact repository and permission scope and normalizes the token", async () => {
-    const calls: Array<{ url: string; init?: RequestInit | undefined }> = [];
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
     const exchange = createGithubInstallationTokenExchange({
       signer,
       fetch: async (input, init) => {
-        calls.push({ url: requestUrl(input), init });
+        calls.push({ url: String(input), init });
         return response({
           token: "installation-secret",
           expires_at: "2026-09-08T15:00:00Z",
@@ -57,18 +52,13 @@ describe("GitHub installation token exchange", () => {
     expect(calls[0]?.url).toBe(
       "https://api.github.com/app/installations/99/access_tokens",
     );
-    const requestBody = calls[0]?.init?.body;
-    expect(typeof requestBody).toBe("string");
-    if (typeof requestBody !== "string") {
-      throw new TypeError("expected the request body to be JSON text");
-    }
-    expect(JSON.parse(requestBody)).toEqual({
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
       repository_ids: [123],
       permissions: { contents: "read" },
     });
-    expect(
-      (calls[0]?.init?.headers as Record<string, string>).authorization,
-    ).toBe("Bearer app-jwt-secret");
+    expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe(
+      "Bearer app-jwt-secret",
+    );
   });
 
   it("fails closed when GitHub returns a different repository scope", async () => {

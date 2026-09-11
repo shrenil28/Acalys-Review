@@ -108,10 +108,7 @@ export function verifyWebhookSignature(
   // An empty candidate would make part of a rotation configuration trivially
   // forgeable. Treat the whole set as misconfigured rather than silently
   // ignoring the broken generation.
-  if (
-    candidates.length === 0 ||
-    candidates.some((candidate) => candidate.length === 0)
-  ) {
+  if (candidates.length === 0 || candidates.some((candidate) => candidate.length === 0)) {
     return { ok: false, reason: "empty_secret" };
   }
 

@@ -36,19 +36,18 @@ const ALL_SCOPES = [
 ] as const;
 
 interface AppFixtureOptions {
-  readonly scopes?: readonly string[] | undefined;
-  readonly organizationId?: string | undefined;
-  readonly cursorSecrets?: readonly string[] | undefined;
-  readonly rateAllowed?: boolean | undefined;
-  readonly api?:
-    Partial<Record<keyof ApiStore, (...args: never[]) => unknown>> | undefined;
-  readonly mutations?:
-    | Partial<Record<keyof ApiMutationStore, (...args: never[]) => unknown>>
-    | undefined;
-  readonly logger?: ApiRequestLogger | undefined;
-  readonly heartbeatMillis?: number | undefined;
-  readonly pollMillis?: number | undefined;
-  readonly monotonicNow?: (() => number) | undefined;
+  readonly scopes?: readonly string[];
+  readonly organizationId?: string;
+  readonly cursorSecrets?: readonly string[];
+  readonly rateAllowed?: boolean;
+  readonly api?: Partial<Record<keyof ApiStore, (...args: never[]) => unknown>>;
+  readonly mutations?: Partial<
+    Record<keyof ApiMutationStore, (...args: never[]) => unknown>
+  >;
+  readonly logger?: ApiRequestLogger;
+  readonly heartbeatMillis?: number;
+  readonly pollMillis?: number;
+  readonly monotonicNow?: () => number;
 }
 
 function appWith(input: AppFixtureOptions = {}) {
@@ -95,17 +94,13 @@ function appWith(input: AppFixtureOptions = {}) {
     api,
     mutations,
     consumeRate: async () => input.rateAllowed ?? true,
-    cursorSecrets: input.cursorSecrets ?? [
-      "phase3-test-pagination-secret-000000000000000000000000",
-    ],
+    cursorSecrets: input.cursorSecrets ?? ["phase3-test-pagination-secret-000000000000000000000000"],
     ...(input.logger === undefined ? {} : { logger: input.logger }),
     ...(input.heartbeatMillis === undefined
       ? {}
       : { heartbeatMillis: input.heartbeatMillis }),
     ...(input.pollMillis === undefined ? {} : { pollMillis: input.pollMillis }),
-    ...(input.monotonicNow === undefined
-      ? {}
-      : { monotonicNow: input.monotonicNow }),
+    ...(input.monotonicNow === undefined ? {} : { monotonicNow: input.monotonicNow }),
   });
 }
 
@@ -113,18 +108,8 @@ const TOO_LONG_ID = "x".repeat(257);
 
 const PAGINATION_CURSOR_UUID = "018f4b20-7c00-7abc-8def-1234567890ab";
 
-/**
- * One shape for every row, so `it.each` can type a single callback.
- * `as const` over rows of mixed arity produces a union vitest cannot unify.
- */
-type RouteCase = readonly [
-  name: string,
-  method: "get" | "post",
-  path: string,
-  body?: string | object,
-];
 
-const malformedRequests: readonly RouteCase[] = [
+const malformedRequests = [
   ["listRepositories", "get", "/api/v1/repositories?limit=0"],
   ["getRepository", "get", `/api/v1/repositories/${TOO_LONG_ID}`],
   [
@@ -137,39 +122,22 @@ const malformedRequests: readonly RouteCase[] = [
   ["cancelReview", "post", "/api/v1/reviews/review-1/cancel", { reason: "" }],
   ["getReviewSummary", "get", `/api/v1/reviews/${TOO_LONG_ID}/summary`],
   ["listReviewFindings", "get", "/api/v1/reviews/review-1/findings?limit=0"],
-  [
-    "listReviewChecks",
-    "get",
-    `/api/v1/reviews/${TOO_LONG_ID}/pre-merge-checks`,
-  ],
+  ["listReviewChecks", "get", `/api/v1/reviews/${TOO_LONG_ID}/pre-merge-checks`],
   ["getFinding", "get", `/api/v1/findings/${TOO_LONG_ID}`],
-  [
-    "dismissFinding",
-    "post",
-    "/api/v1/findings/finding-1/dismiss",
-    { reason: "" },
-  ],
+  ["dismissFinding", "post", "/api/v1/findings/finding-1/dismiss", { reason: "" }],
   [
     "listConversations",
     "get",
     `/api/v1/repositories/${TOO_LONG_ID}/conversations`,
   ],
-  [
-    "resolveConversation",
-    "post",
-    `/api/v1/conversations/${TOO_LONG_ID}/resolve`,
-  ],
+  ["resolveConversation", "post", `/api/v1/conversations/${TOO_LONG_ID}/resolve`],
   ["listKnowledge", "get", "/api/v1/knowledge?limit=0"],
-];
+] as const;
 
-const successRequests: readonly RouteCase[] = [
+const successRequests = [
   ["listRepositories", "get", "/api/v1/repositories"],
   ["getRepository", "get", "/api/v1/repositories/repository-1"],
-  [
-    "listPullRequests",
-    "get",
-    "/api/v1/repositories/repository-1/pull-requests",
-  ],
+  ["listPullRequests", "get", "/api/v1/repositories/repository-1/pull-requests"],
   [
     "createReview",
     "post",
@@ -188,45 +156,22 @@ const successRequests: readonly RouteCase[] = [
     "/api/v1/findings/finding-1/dismiss",
     { reason: "not actionable" },
   ],
-  [
-    "listConversations",
-    "get",
-    "/api/v1/repositories/repository-1/conversations",
-  ],
-  [
-    "resolveConversation",
-    "post",
-    "/api/v1/conversations/conversation-1/resolve",
-  ],
+  ["listConversations", "get", "/api/v1/repositories/repository-1/conversations"],
+  ["resolveConversation", "post", "/api/v1/conversations/conversation-1/resolve"],
   ["listKnowledge", "get", "/api/v1/knowledge"],
-];
+] as const;
 
-/**
- * Accepts the widened row element types and narrows here.
- *
- * `it.each` types each callback parameter as the union of every column, so a
- * row's `path` arrives as `string | object | undefined` however the tuple is
- * declared. Narrowing once, at this boundary, keeps every call site free of
- * per-argument assertions.
- */
 async function send(
   app: ReturnType<typeof appWith>,
-  method: unknown,
-  path: unknown,
+  method: string,
+  path: string,
   body?: unknown,
 ) {
-  if (typeof path !== "string") {
-    throw new TypeError(
-      `route case path must be a string, received ${typeof path}`,
-    );
-  }
   const agent = request(app);
   let call = method === "post" ? agent.post(path) : agent.get(path);
   call = call.set("authorization", "Bearer test");
   if (method === "post") call = call.set("idempotency-key", "phase3-test-key");
-  if (typeof body === "string" || (typeof body === "object" && body !== null)) {
-    call = call.send(body);
-  }
+  if (body !== undefined) call = call.send(body);
   return call;
 }
 
@@ -258,19 +203,11 @@ describe("API v1 boundary", () => {
         ].map((name) => [name, counting]),
       ) as AppFixtureOptions["api"];
       const mutations = Object.fromEntries(
-        [
-          "createReview",
-          "cancelReview",
-          "dismissFinding",
-          "resolveConversation",
-        ].map((name) => [name, counting]),
+        ["createReview", "cancelReview", "dismissFinding", "resolveConversation"].map(
+          (name) => [name, counting],
+        ),
       ) as AppFixtureOptions["mutations"];
-      const response = await send(
-        appWith({ api, mutations }),
-        method,
-        path,
-        body,
-      );
+      const response = await send(appWith({ api, mutations }), method, path, body);
       expect(response.status).toBe(400);
       expect(calls).toBe(0);
     },
@@ -302,7 +239,7 @@ describe("API v1 boundary", () => {
               calls += 1;
               return { items: [] };
             },
-          },
+          } as AppFixtureOptions["api"],
         }),
       )
         .get(path)
@@ -313,8 +250,7 @@ describe("API v1 boundary", () => {
       expect(response.body.fields).toEqual([
         {
           path: "limit",
-          message:
-            "Query parameter must appear exactly once as a scalar string",
+          message: "Query parameter must appear exactly once as a scalar string",
         },
       ]);
       expect(calls).toBe(0);
@@ -331,16 +267,9 @@ describe("API v1 boundary", () => {
   );
 
   it("emits an opaque repository cursor and round-trips it to the persistence cursor", async () => {
-    const first = await request(
-      appWith({
-        api: {
-          listRepositories: async () => ({
-            items: [],
-            nextCursor: PAGINATION_CURSOR_UUID,
-          }),
-        },
-      }),
-    )
+    const first = await request(appWith({
+      api: { listRepositories: async () => ({ items: [], nextCursor: PAGINATION_CURSOR_UUID }) },
+    }))
       .get("/api/v1/repositories")
       .set("authorization", "Bearer test");
     expect(first.status).toBe(200);
@@ -348,23 +277,15 @@ describe("API v1 boundary", () => {
     expect(first.body.nextCursor).not.toContain(PAGINATION_CURSOR_UUID);
 
     let received: unknown;
-    const second = await request(
-      appWith({
-        api: {
-          listRepositories: async (
-            _scope: unknown,
-            _limit: unknown,
-            cursor: unknown,
-          ) => {
-            received = cursor;
-            return { items: [] };
-          },
-        } as unknown as AppFixtureOptions["api"],
-      }),
-    )
-      .get(
-        `/api/v1/repositories?cursor=${encodeURIComponent(first.body.nextCursor as string)}`,
-      )
+    const second = await request(appWith({
+      api: {
+        listRepositories: async (_scope: unknown, _limit: unknown, cursor: unknown) => {
+          received = cursor;
+          return { items: [] };
+        },
+      } as unknown as AppFixtureOptions["api"],
+    }))
+      .get(`/api/v1/repositories?cursor=${encodeURIComponent(first.body.nextCursor as string)}`)
       .set("authorization", "Bearer test");
     expect(second.status).toBe(200);
     expect(received).toBe(PAGINATION_CURSOR_UUID);
@@ -372,12 +293,7 @@ describe("API v1 boundary", () => {
 
   it("rejects raw or tampered cursors before the tenant query", async () => {
     let calls = 0;
-    const api = {
-      listRepositories: async () => {
-        calls += 1;
-        return { items: [] };
-      },
-    };
+    const api = { listRepositories: async () => { calls += 1; return { items: [] }; } };
     const raw = await request(appWith({ api }))
       .get(`/api/v1/repositories?cursor=${PAGINATION_CURSOR_UUID}`)
       .set("authorization", "Bearer test");
@@ -385,16 +301,9 @@ describe("API v1 boundary", () => {
     expect(raw.body.code).toBe("VALIDATION_ERROR");
     expect(calls).toBe(0);
 
-    const issued = await request(
-      appWith({
-        api: {
-          listRepositories: async () => ({
-            items: [],
-            nextCursor: PAGINATION_CURSOR_UUID,
-          }),
-        },
-      }),
-    )
+    const issued = await request(appWith({
+      api: { listRepositories: async () => ({ items: [], nextCursor: PAGINATION_CURSOR_UUID }) },
+    }))
       .get("/api/v1/repositories")
       .set("authorization", "Bearer test");
     const cursor = issued.body.nextCursor as string;
@@ -408,111 +317,58 @@ describe("API v1 boundary", () => {
   });
 
   it("rejects cursor replay across organizations, collections, and parent resources", async () => {
-    const issued = await request(
-      appWith({
-        api: {
-          listRepositories: async () => ({
-            items: [],
-            nextCursor: PAGINATION_CURSOR_UUID,
-          }),
-        },
-      }),
-    )
+    const issued = await request(appWith({
+      api: { listRepositories: async () => ({ items: [], nextCursor: PAGINATION_CURSOR_UUID }) },
+    }))
       .get("/api/v1/repositories")
       .set("authorization", "Bearer test");
     const cursor = issued.body.nextCursor as string;
 
     let foreignCalls = 0;
-    const foreign = await request(
-      appWith({
-        organizationId: "org-2",
-        api: {
-          listRepositories: async () => {
-            foreignCalls += 1;
-            return { items: [] };
-          },
-        },
-      }),
-    )
+    const foreign = await request(appWith({
+      organizationId: "org-2",
+      api: { listRepositories: async () => { foreignCalls += 1; return { items: [] }; } },
+    }))
       .get(`/api/v1/repositories?cursor=${encodeURIComponent(cursor)}`)
       .set("authorization", "Bearer test");
     expect(foreign.status).toBe(400);
     expect(foreignCalls).toBe(0);
 
     let knowledgeCalls = 0;
-    const crossCollection = await request(
-      appWith({
-        api: {
-          listKnowledge: async () => {
-            knowledgeCalls += 1;
-            return { items: [] };
-          },
-        },
-      }),
-    )
+    const crossCollection = await request(appWith({
+      api: { listKnowledge: async () => { knowledgeCalls += 1; return { items: [] }; } },
+    }))
       .get(`/api/v1/knowledge?cursor=${encodeURIComponent(cursor)}`)
       .set("authorization", "Bearer test");
     expect(crossCollection.status).toBe(400);
     expect(knowledgeCalls).toBe(0);
 
-    const pullRequests = await request(
-      appWith({
-        api: {
-          listPullRequests: async () => ({
-            items: [],
-            nextCursor: PAGINATION_CURSOR_UUID,
-          }),
-        },
-      }),
-    )
+    const pullRequests = await request(appWith({
+      api: { listPullRequests: async () => ({ items: [], nextCursor: PAGINATION_CURSOR_UUID }) },
+    }))
       .get("/api/v1/repositories/repository-a/pull-requests")
       .set("authorization", "Bearer test");
     let parentCalls = 0;
-    const wrongParent = await request(
-      appWith({
-        api: {
-          listPullRequests: async () => {
-            parentCalls += 1;
-            return { items: [] };
-          },
-        },
-      }),
-    )
-      .get(
-        `/api/v1/repositories/repository-b/pull-requests?cursor=${encodeURIComponent(pullRequests.body.nextCursor as string)}`,
-      )
+    const wrongParent = await request(appWith({
+      api: { listPullRequests: async () => { parentCalls += 1; return { items: [] }; } },
+    }))
+      .get(`/api/v1/repositories/repository-b/pull-requests?cursor=${encodeURIComponent(pullRequests.body.nextCursor as string)}`)
       .set("authorization", "Bearer test");
     expect(wrongParent.status).toBe(400);
     expect(parentCalls).toBe(0);
   });
 
   it("rejects a findings cursor when the filter set changes", async () => {
-    const issued = await request(
-      appWith({
-        api: {
-          listReviewFindings: async () => ({
-            items: [],
-            nextCursor: PAGINATION_CURSOR_UUID,
-          }),
-        },
-      }),
-    )
+    const issued = await request(appWith({
+      api: { listReviewFindings: async () => ({ items: [], nextCursor: PAGINATION_CURSOR_UUID }) },
+    }))
       .get("/api/v1/reviews/review-a/findings?severity=high&state=published")
       .set("authorization", "Bearer test");
     let calls = 0;
-    const response = await request(
-      appWith({
-        api: {
-          listReviewFindings: async () => {
-            calls += 1;
-            return { items: [] };
-          },
-        },
-      }),
-    )
-      .get(
-        `/api/v1/reviews/review-a/findings?severity=low&state=published&cursor=${encodeURIComponent(issued.body.nextCursor as string)}`,
-      )
+    const response = await request(appWith({
+      api: { listReviewFindings: async () => { calls += 1; return { items: [] }; } },
+    }))
+      .get(`/api/v1/reviews/review-a/findings?severity=low&state=published&cursor=${encodeURIComponent(issued.body.nextCursor as string)}`)
       .set("authorization", "Bearer test");
     expect(response.status).toBe(400);
     expect(calls).toBe(0);
@@ -542,11 +398,7 @@ describe("API v1 boundary", () => {
     const response = await request(
       appWith({
         api: { listRepositories: async () => ({ items: [] }) },
-        logger: {
-          info(_event, fields) {
-            logs.push(fields);
-          },
-        },
+        logger: { info(_event, fields) { logs.push(fields); } },
       }),
     )
       .get("/api/v1/repositories")
@@ -643,11 +495,7 @@ describe("API v1 boundary", () => {
       "/api/v1/findings/finding-1/dismiss",
       { reason: "not actionable" },
     ],
-    [
-      "resolveConversation",
-      "/api/v1/conversations/conversation-1/resolve",
-      undefined,
-    ],
+    ["resolveConversation", "/api/v1/conversations/conversation-1/resolve", undefined],
   ] as const)(
     "rejects an undeclared schema-valid error status from %s",
     async (mutationName, path, body) => {
@@ -662,12 +510,10 @@ describe("API v1 boundary", () => {
           },
         }),
       } as AppFixtureOptions["mutations"];
-      const agent = request(appWith({ mutations }))
-        .post(path)
+      const agent = request(appWith({ mutations })).post(path)
         .set("authorization", "Bearer test")
         .set("idempotency-key", `phase3-undeclared-${mutationName}`);
-      const response =
-        body === undefined ? await agent : await agent.send(body);
+      const response = body === undefined ? await agent : await agent.send(body);
 
       expect(response.status).toBe(500);
       expect(response.body).toEqual({
@@ -691,9 +537,7 @@ describe("API v1 boundary", () => {
       .post("/api/v1/reviews")
       .set("authorization", "Bearer test")
       .set("content-type", "application/json")
-      .send(
-        JSON.stringify({ secret: `do-not-reflect-${"x".repeat(1_100_000)}` }),
-      );
+      .send(JSON.stringify({ secret: `do-not-reflect-${"x".repeat(1_100_000)}` }));
     const unknown = await request(app)
       .get("/api/v1/not-a-route")
       .set("authorization", "Bearer test");
@@ -711,84 +555,23 @@ describe("API v1 boundary", () => {
   });
 
   it.each([
-    [
-      new ValidationError("secret-validation-payload"),
-      400,
-      "VALIDATION_ERROR",
-      "non_retryable",
-    ],
+    [new ValidationError("secret-validation-payload"), 400, "VALIDATION_ERROR", "non_retryable"],
     [new NotFoundError("secret-row-id"), 404, "NOT_FOUND", "non_retryable"],
-    [
-      new ConflictError("secret-conflict-state"),
-      409,
-      "CONFLICT",
-      "non_retryable",
-    ],
-    [
-      new UnauthorizedError("secret-auth-detail"),
-      401,
-      "UNAUTHORIZED",
-      "non_retryable",
-    ],
-    [
-      new ForbiddenError("secret-scope-detail"),
-      403,
-      "FORBIDDEN",
-      "non_retryable",
-    ],
-    [
-      new ProviderError("secret-upstream-body", { retryable: true }),
-      500,
-      "PROVIDER_ERROR",
-      "conditional",
-    ],
-    [
-      new RepositoryError("secret-repository-path", { retryable: true }),
-      500,
-      "REPOSITORY_ERROR",
-      "conditional",
-    ],
-    [
-      new SandboxError("secret-sandbox-output", { retryable: false }),
-      500,
-      "SANDBOX_ERROR",
-      "conditional",
-    ],
-    [
-      new ToolExecutionError("secret-tool-output", { retryable: true }),
-      500,
-      "TOOL_EXECUTION_ERROR",
-      "conditional",
-    ],
-    [
-      new ReviewError("secret-model-output", { retryable: false }),
-      500,
-      "REVIEW_ERROR",
-      "conditional",
-    ],
-    [
-      new ConfigurationError("secret-config-value"),
-      500,
-      "CONFIGURATION_ERROR",
-      "non_retryable",
-    ],
-    [
-      new InternalError("secret-stack-context"),
-      500,
-      "INTERNAL_ERROR",
-      "non_retryable",
-    ],
+    [new ConflictError("secret-conflict-state"), 409, "CONFLICT", "non_retryable"],
+    [new UnauthorizedError("secret-auth-detail"), 401, "UNAUTHORIZED", "non_retryable"],
+    [new ForbiddenError("secret-scope-detail"), 403, "FORBIDDEN", "non_retryable"],
+    [new ProviderError("secret-upstream-body", { retryable: true }), 500, "PROVIDER_ERROR", "conditional"],
+    [new RepositoryError("secret-repository-path", { retryable: true }), 500, "REPOSITORY_ERROR", "conditional"],
+    [new SandboxError("secret-sandbox-output", { retryable: false }), 500, "SANDBOX_ERROR", "conditional"],
+    [new ToolExecutionError("secret-tool-output", { retryable: true }), 500, "TOOL_EXECUTION_ERROR", "conditional"],
+    [new ReviewError("secret-model-output", { retryable: false }), 500, "REVIEW_ERROR", "conditional"],
+    [new ConfigurationError("secret-config-value"), 500, "CONFIGURATION_ERROR", "non_retryable"],
+    [new InternalError("secret-stack-context"), 500, "INTERNAL_ERROR", "non_retryable"],
   ])(
     "projects %s through the leak-free public taxonomy",
     async (error, status, code, retryability) => {
       const response = await request(
-        appWith({
-          api: {
-            getRepository: async () => {
-              throw error;
-            },
-          },
-        }),
+        appWith({ api: { getRepository: async () => { throw error; } } }),
       )
         .get("/api/v1/repositories/repository-1")
         .set("authorization", "Bearer test");
@@ -823,13 +606,7 @@ describe("API v1 boundary", () => {
       },
     );
     const hostileResponse = await request(
-      appWith({
-        api: {
-          getRepository: async () => {
-            throw hostile;
-          },
-        },
-      }),
+      appWith({ api: { getRepository: async () => { throw hostile; } } }),
     )
       .get("/api/v1/repositories/repository-1")
       .set("authorization", "Bearer test");
@@ -848,13 +625,7 @@ describe("API v1 boundary", () => {
 
   it("logs malformed JSON and unknown API routes without reflecting request bodies", async () => {
     const logs: ApiRequestLogFields[] = [];
-    const app = appWith({
-      logger: {
-        info(_event, fields) {
-          logs.push(fields);
-        },
-      },
-    });
+    const app = appWith({ logger: { info(_event, fields) { logs.push(fields); } } });
 
     const malformed = await request(app)
       .post("/api/v1/reviews")
@@ -915,12 +686,7 @@ describe("review progress SSE", () => {
     const response = await request(
       appWith({
         rateAllowed: false,
-        api: {
-          reviewEvents: async () => {
-            called = true;
-            return [];
-          },
-        },
+        api: { reviewEvents: async () => { called = true; return []; } },
       }),
     )
       .get("/api/v1/reviews/review-1/events")
@@ -934,12 +700,7 @@ describe("review progress SSE", () => {
   it("validates stream params and Last-Event-ID before the tenant event query", async () => {
     let called = false;
     const app = appWith({
-      api: {
-        reviewEvents: async () => {
-          called = true;
-          return [];
-        },
-      },
+      api: { reviewEvents: async () => { called = true; return []; } },
     });
 
     const invalidId = await request(app)
@@ -961,7 +722,7 @@ describe("review progress SSE", () => {
       appWith({
         api: {
           reviewEvents: async (_scope, _id, afterSeq) => {
-            after.push(afterSeq);
+            after.push(afterSeq as number);
             return [
               {
                 id: 6,
@@ -1051,17 +812,13 @@ describe("review progress SSE", () => {
     const heartbeatAt = response.text.indexOf(": heartbeat\n\n");
     expect(heartbeatAt).toBeGreaterThanOrEqual(0);
     expect(heartbeatAt).toBeLessThan(doneAt);
-    expect(
-      response.text.match(/: heartbeat\n\n/g)?.length ?? 0,
-    ).toBeGreaterThanOrEqual(2);
+    expect(response.text.match(/: heartbeat\n\n/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
     expect(calls).toBe(2);
   });
 
   it("uses a monotonic idle clock and bounds invalid SSE timing configuration", async () => {
     expect(() => appWith({ heartbeatMillis: 0 })).toThrow(/heartbeatMillis/u);
-    expect(() => appWith({ heartbeatMillis: 60_001 })).toThrow(
-      /heartbeatMillis/u,
-    );
+    expect(() => appWith({ heartbeatMillis: 60_001 })).toThrow(/heartbeatMillis/u);
     expect(() => appWith({ pollMillis: 0 })).toThrow(/pollMillis/u);
 
     let monotonic = 100;

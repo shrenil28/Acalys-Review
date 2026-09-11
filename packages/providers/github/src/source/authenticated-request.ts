@@ -1,5 +1,5 @@
 import {
-  type InstallationTokenProvider,
+  InstallationTokenProvider,
   withInstallationAuth,
 } from "../auth/installation-token.js";
 import type { GithubRepositoryRequest } from "./repository-reader.js";
@@ -31,24 +31,15 @@ export function createAuthenticatedGithubRepositoryRequest(
   options: GithubRepositoryRequestOptions,
 ): GithubRepositoryRequest {
   const requestFetch = options.fetch ?? fetch;
-  const baseUrl = (options.apiBaseUrl ?? "https://api.github.com").replace(
-    /\/$/,
-    "",
-  );
+  const baseUrl = (options.apiBaseUrl ?? "https://api.github.com").replace(/\/$/, "");
   const maxResponseBytes = options.maxResponseBytes ?? 64 * 1024 * 1024;
   if (!Number.isSafeInteger(maxResponseBytes) || maxResponseBytes <= 0) {
     throw new TypeError("maxResponseBytes must be a positive safe integer");
   }
 
   return async (input) => {
-    if (
-      !input.path.startsWith("/") ||
-      input.path.startsWith("//") ||
-      input.path.includes("://")
-    ) {
-      throw new TypeError(
-        "GitHub repository request path must be an origin-relative API path",
-      );
+    if (!input.path.startsWith("/") || input.path.startsWith("//") || input.path.includes("://")) {
+      throw new TypeError("GitHub repository request path must be an origin-relative API path");
     }
 
     const authenticated = await withInstallationAuth(
@@ -75,9 +66,7 @@ export function createAuthenticatedGithubRepositoryRequest(
         if (lengthHeader !== null) {
           const declared = Number(lengthHeader);
           if (Number.isFinite(declared) && declared > maxResponseBytes) {
-            throw new Error(
-              "GitHub repository response exceeds configured byte limit",
-            );
+            throw new Error("GitHub repository response exceeds configured byte limit");
           }
         }
         if (response.status !== 200) {
@@ -85,9 +74,7 @@ export function createAuthenticatedGithubRepositoryRequest(
         }
         const text = await response.text();
         if (Buffer.byteLength(text, "utf8") > maxResponseBytes) {
-          throw new Error(
-            "GitHub repository response exceeds configured byte limit",
-          );
+          throw new Error("GitHub repository response exceeds configured byte limit");
         }
         let body: unknown;
         try {
@@ -98,8 +85,7 @@ export function createAuthenticatedGithubRepositoryRequest(
         return { status: response.status, body };
       },
       (error) =>
-        error instanceof GithubReadAuthenticationFailure &&
-        error.status === 401,
+        error instanceof GithubReadAuthenticationFailure && error.status === 401,
     );
     return authenticated.result;
   };

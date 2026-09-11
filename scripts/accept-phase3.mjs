@@ -54,12 +54,7 @@ const FULL_STEPS = [
 
 function reportPath() {
   const flag = process.argv.find((arg) => arg.startsWith("--report="));
-  return resolve(
-    ROOT,
-    flag === undefined
-      ? ".phase3-acceptance-report.json"
-      : flag.slice("--report=".length),
-  );
+  return resolve(ROOT, flag === undefined ? ".phase3-acceptance-report.json" : flag.slice("--report=".length));
 }
 
 function runStep(name, command, args, env = process.env) {
@@ -102,8 +97,7 @@ const report = {
 
 for (const script of PREFLIGHTS) {
   const args = [script];
-  if (script !== "scripts/assert-phase3-source-invariants.mjs")
-    args.push("--preflight-only");
+  if (script !== "scripts/assert-phase3-source-invariants.mjs") args.push("--preflight-only");
   const outcome = runStep(`preflight ${script}`, "node", args);
   report.sourcePreflights.push(outcome);
   if (outcome.exitCode !== 0) {
@@ -119,33 +113,20 @@ if (process.argv.includes("--preflight-only")) {
   report.preflightPassed = true;
   report.finishedAt = new Date().toISOString();
   writeReport(report);
-  console.log(
-    "Phase 3 acceptance preflight PASSED. Full acceptance was not requested.",
-  );
+  console.log("Phase 3 acceptance preflight PASSED. Full acceptance was not requested.");
   process.exit(0);
 }
 
 const requirements = [
   ["vitest", existsSync(resolve(ROOT, "node_modules/vitest/vitest.mjs"))],
-  [
-    "dependency-cruiser",
-    existsSync(resolve(ROOT, "node_modules/.bin/depcruise")),
-  ],
+  ["dependency-cruiser", existsSync(resolve(ROOT, "node_modules/.bin/depcruise"))],
   ["typescript", existsSync(resolve(ROOT, "node_modules/.bin/tsc"))],
 ];
 for (const [name, present] of requirements) report.environment[name] = present;
 
-const git = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], {
-  cwd: ROOT,
-  encoding: "utf8",
-});
-report.environment.gitWorktree =
-  git.status === 0 && git.stdout.trim() === "true";
-const docker = spawnSync("docker", ["ps", "-q"], {
-  cwd: ROOT,
-  encoding: "utf8",
-  timeout: 20_000,
-});
+const git = spawnSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: ROOT, encoding: "utf8" });
+report.environment.gitWorktree = git.status === 0 && git.stdout.trim() === "true";
+const docker = spawnSync("docker", ["ps", "-q"], { cwd: ROOT, encoding: "utf8", timeout: 20_000 });
 report.environment.dockerPostgresRuntime = docker.status === 0;
 
 const missing = Object.entries(report.environment)
@@ -181,6 +162,4 @@ for (const step of FULL_STEPS) {
 report.accepted = true;
 report.finishedAt = new Date().toISOString();
 writeReport(report);
-console.log(
-  "PHASE 3 ACCEPTED: nine gates green, Postgres required, architecture violations rejected, 4/4 mutants killed.",
-);
+console.log("PHASE 3 ACCEPTED: nine gates green, Postgres required, architecture violations rejected, 4/4 mutants killed.");

@@ -20,6 +20,10 @@
     "./internal": {
       "types": "./dist/internal/index.d.ts",
       "default": "./dist/internal/index.js"
+    },
+    "./dashboard/v1": {
+      "types": "./dist/dashboard/v1/index.d.ts",
+      "default": "./dist/dashboard/v1/index.js"
     }
   },
   "files": [

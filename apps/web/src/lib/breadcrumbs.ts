@@ -1,5 +1,4 @@
 import { ideCliViews, navigation, prReviewViews } from "@/lib/nav";
-import { workspaces } from "@/lib/session";
 
 export interface Crumb {
   label: string;
@@ -38,7 +37,7 @@ const extra: Record<string, string> = {
   "/login": "Sign in",
 };
 
-export function buildCrumbs(pathname: string): Crumb[] {
+export function buildCrumbs(pathname: string, workspaceLabel = "Workspace"): Crumb[] {
   if (pathname === "/") return [{ label: "Explore" }];
 
   const crumbs: Crumb[] = [];
@@ -47,7 +46,7 @@ export function buildCrumbs(pathname: string): Crumb[] {
   // Organization settings is addressed by the org itself: "shrenil28 / Settings".
   if (segments[0] === "organization" && segments[1] === "settings") {
     return [
-      { label: workspaces[0].name, to: "/" },
+      { label: workspaceLabel, to: "/" },
       { label: "Settings" },
     ];
   }
@@ -65,7 +64,7 @@ export function buildCrumbs(pathname: string): Crumb[] {
   if (segments[0] === "settings") {
     const group = groupOf.get(pathname);
     return [
-      { label: workspaces[0].name, to: "/" },
+      { label: workspaceLabel, to: "/" },
       { label: group?.label ?? "Account", to: group?.firstChild },
       { label: labels.get(pathname) ?? titleCase(segments[1] ?? "") },
     ];

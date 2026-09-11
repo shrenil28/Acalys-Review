@@ -5,6 +5,8 @@ import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { buildCrumbs } from "@/lib/breadcrumbs";
+import { useDashboardSession } from "@/components/auth/DashboardSessionGate";
+import { resolveDataMode } from "@/lib/api/config";
 
 const ACTIONS_SLOT = "cr-topbar-actions";
 
@@ -26,7 +28,18 @@ export function TopBarActions({ children }: { children: ReactNode }) {
 
 export function TopBar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const { pathname } = useLocation();
-  const crumbs = buildCrumbs(pathname);
+  const session = useDashboardSession();
+  const mode = resolveDataMode();
+  const [demoWorkspace, setDemoWorkspace] = useState("Workspace");
+  useEffect(() => {
+    if (mode.kind !== "fixtures") return;
+    let active = true;
+    void import("@/lib/session").then(({ workspaces }) => {
+      if (active) setDemoWorkspace(workspaces[0]?.name ?? "Workspace");
+    });
+    return () => { active = false; };
+  }, [mode.kind]);
+  const crumbs = buildCrumbs(pathname, session?.organization.name ?? demoWorkspace);
 
   return (
     <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-3 bg-canvas/95 px-4 backdrop-blur">

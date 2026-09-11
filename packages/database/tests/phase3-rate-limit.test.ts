@@ -9,13 +9,9 @@ import {
 } from "./postgres.js";
 
 const HAS_DOCKER = dockerAvailable();
-const describeWithPostgres = HAS_DOCKER
-  ? describe
-  : describe.skip.bind(describe);
+const describeWithPostgres = HAS_DOCKER ? describe : describe.skip.bind(describe);
 if (!HAS_DOCKER) {
-  console.warn(
-    "\n  ⚠ Docker unavailable — Phase 3 rate-limit persistence tests SKIPPED.\n",
-  );
+  console.warn("\n  ⚠ Docker unavailable — Phase 3 rate-limit persistence tests SKIPPED.\n");
 }
 
 const ORG = "0192f8a1-2000-7000-8000-000000000101";
@@ -25,8 +21,7 @@ async function databaseMinute(database: TestDatabase): Promise<Date> {
     `SELECT date_trunc('minute', clock_timestamp()) AS minute`,
   );
   const minute = result.rows[0]?.minute;
-  if (minute === undefined)
-    throw new Error("Database clock returned no minute");
+  if (minute === undefined) throw new Error("Database clock returned no minute");
   return minute;
 }
 
@@ -36,10 +31,7 @@ describeWithPostgres("Phase 3 shared API rate limiting", () => {
 
   beforeAll(async () => {
     database = await startPostgres("phase3_rate_limit");
-    await assertSuiteIsActuallyRunning(database, [
-      "organizations",
-      "api_rate_windows",
-    ]);
+    await assertSuiteIsActuallyRunning(database, ["organizations", "api_rate_windows"]);
     store = new AuthStore(database.pool);
   }, 180_000);
 
@@ -81,11 +73,7 @@ describeWithPostgres("Phase 3 shared API rate limiting", () => {
   });
 
   it("serializes concurrent replica admissions and saturates the denied principal counter", async () => {
-    const replicas = [
-      new AuthStore(database.pool),
-      new AuthStore(database.pool),
-      store,
-    ];
+    const replicas = [new AuthStore(database.pool), new AuthStore(database.pool), store];
     const results = await Promise.all(
       Array.from({ length: 20 }, (_, index) =>
         replicas[index % replicas.length]!.consumeApiRateLimits({
@@ -99,9 +87,7 @@ describeWithPostgres("Phase 3 shared API rate limiting", () => {
 
     expect(results.filter((result) => result.allowed)).toHaveLength(3);
     expect(
-      results.filter(
-        (result) => !result.allowed && result.reason === "principal",
-      ),
+      results.filter((result) => !result.allowed && result.reason === "principal"),
     ).toHaveLength(17);
 
     const counters = await database.pool.query<{
@@ -119,6 +105,7 @@ describeWithPostgres("Phase 3 shared API rate limiting", () => {
       { principal_id: "principal:credential-hot", request_count: 4 },
     ]);
   });
+
 
   it("never lowers an existing counter during a rolling limit change", async () => {
     for (let index = 0; index < 8; index += 1) {
@@ -191,12 +178,12 @@ describeWithPostgres("Phase 3 shared API rate limiting", () => {
       perOrganizationLimit: 2,
     });
 
-    expect([
-      first.allowed,
-      second.allowed,
-      denied.allowed,
-      deniedAgain.allowed,
-    ]).toEqual([true, true, false, false]);
+    expect([first.allowed, second.allowed, denied.allowed, deniedAgain.allowed]).toEqual([
+      true,
+      true,
+      false,
+      false,
+    ]);
     expect(denied.reason).toBe("organization");
     expect(deniedAgain.reason).toBe("organization");
 

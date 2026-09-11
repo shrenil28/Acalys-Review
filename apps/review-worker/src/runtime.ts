@@ -1,5 +1,6 @@
 import {
   ModelBudgetReservationStore,
+  DashboardSettingsStore,
   ModelCredentialAdmissionStore,
   ModelUsageStore,
   ReviewDispatchStore,
@@ -8,6 +9,7 @@ import {
   PreMergeStore,
   ReviewIngestionStore,
   ReviewStageStore,
+  ReviewAnalysisCacheStore,
   VerificationScheduler,
   VerificationStore,
   type PgPool,
@@ -25,19 +27,17 @@ import {
   type RetryPolicy,
 } from "@acalys/model-gateway";
 import type { GithubRepositoryReader } from "@acalys/provider-github";
-
 import { runRealAnalysis } from "./analysis.js";
+import { createPreloadedAnalysisCache } from "./analysis-cache.js";
 import { createReviewExecutionPort } from "./execution.js";
-import {
-  createApiDispatchWorker,
-  type RunningApiDispatchWorker,
-} from "./api-dispatch-worker.js";
+import { createApiDispatchWorker, type RunningApiDispatchWorker } from "./api-dispatch-worker.js";
 import {
   createGithubAnalysisSource,
   createGithubIndependentSource,
 } from "./github-source.js";
 import { createModelCandidateVerifier } from "./model-verifier.js";
 import type { OrchestratorOptions } from "./orchestrator.js";
+import { ReviewProviderContextResolver } from "./provider-context.js";
 import {
   createWorker,
   type RunningWorker,
@@ -67,6 +67,8 @@ export interface ProductionReviewRuntimeOptions {
   readonly pool: PgPool;
   readonly githubReader: GithubRepositoryReader;
   readonly model: ProductionModelRuntimeConfig;
+  /** Optional provider context resolver; absence keeps reviews network-independent. */
+  readonly providerContext?: ReviewProviderContextResolver | undefined;
   readonly worker?: ProductionWorkerConfig | undefined;
 }
 
@@ -95,6 +97,8 @@ export function createProductionReviewRuntime(
   const decisions = new PolicyDecisionStore(options.pool);
   const premerge = new PreMergeStore(options.pool);
   const inbox = new PostgresWebhookInbox({ pool: options.pool });
+  const settings = new DashboardSettingsStore(options.pool);
+  const analysisCacheStore = new ReviewAnalysisCacheStore(options.pool);
 
   const usage = new ModelUsageStore(options.pool);
   const reservations = new ModelBudgetReservationStore(options.pool);
@@ -148,6 +152,37 @@ export function createProductionReviewRuntime(
           `Phase-2 production analyzer does not support provider ${context.provider}`,
         );
       }
+      const providerContext =
+        options.providerContext === undefined || context.reviewSubject === undefined
+          ? undefined
+          : await options.providerContext.resolve({
+              organizationId: context.scope.organizationId,
+              ...(context.reviewPolicy === undefined ? {} : { policy: context.reviewPolicy.policy }),
+              subject: {
+                repositoryId: context.scope.repositoryId,
+                repositoryOwner: context.reviewSubject.repositoryOwner,
+                repositoryName: context.reviewSubject.repositoryName,
+                headSha: context.headSha,
+                headRef: context.reviewSubject.headRef,
+                ...(context.reviewSubject.number === undefined
+                  ? {}
+                  : { number: context.reviewSubject.number }),
+                title: context.reviewSubject.title,
+                ...(context.reviewSubject.description === undefined
+                  ? {}
+                  : { description: context.reviewSubject.description }),
+              },
+            });
+      let persistedCache: readonly { readonly fingerprint: string; readonly payload: unknown }[] = [];
+      try {
+        persistedCache = await analysisCacheStore.loadReady({
+          organizationId: context.scope.organizationId,
+          repositoryId: input.repositoryId,
+        });
+      } catch (error) {
+        options.worker?.observer?.onError?.(error);
+      }
+      const analysisCache = createPreloadedAnalysisCache(persistedCache);
       const outcome = await runRealAnalysis({
         repositoryId: input.repositoryId,
         headSha: input.headSha,
@@ -155,14 +190,48 @@ export function createProductionReviewRuntime(
         tenantId: context.scope.organizationId,
         provider: "github",
         source: analysisSource,
+        cache: analysisCache.cache,
+        ...(context.reviewPolicy === undefined
+          ? {}
+          : {
+              reviewPolicy: {
+                fingerprint: context.reviewPolicy.fingerprint,
+                ignorePaths: context.reviewPolicy.policy.repository.ignorePaths,
+                toneProfile: context.reviewPolicy.policy.organizationConfig.behavior.profile,
+                toneInstructions: context.reviewPolicy.policy.organizationConfig.general.toneInstructions,
+                repositoryInstructions: context.reviewPolicy.policy.repository.instructions,
+              },
+            }),
         llm: {
           scope: {
             organizationId: context.scope.organizationId,
             reviewRunId: context.runId,
           },
           model: modelGateway,
+          ...(providerContext === undefined
+            ? {}
+            : {
+                externalData: providerContext.blocks,
+                externalContextDigest: providerContext.digest,
+              }),
         },
       });
+      try {
+        await Promise.all([
+          analysisCacheStore.touch({
+            organizationId: context.scope.organizationId,
+            repositoryId: input.repositoryId,
+            fingerprints: [...analysisCache.hits],
+          }),
+          analysisCacheStore.persist({
+            organizationId: context.scope.organizationId,
+            repositoryId: input.repositoryId,
+            entries: [...analysisCache.writes].map(([fingerprint, payload]) => ({ fingerprint, payload })),
+          }),
+        ]);
+      } catch (error) {
+        options.worker?.observer?.onError?.(error);
+      }
       return outcome.candidates;
     },
     verifier,
@@ -189,6 +258,10 @@ export function createProductionReviewRuntime(
           headSha: stored.headSha,
           provider: stored.provider,
           pullRequestId: stored.pullRequestId,
+          ...(stored.reviewPolicy === undefined ? {} : { reviewPolicy: stored.reviewPolicy }),
+          ...(stored.reviewSubject === undefined
+            ? {}
+            : { reviewSubject: stored.reviewSubject }),
         };
       },
     },
@@ -198,26 +271,17 @@ export function createProductionReviewRuntime(
   const apiDispatchWorker = createApiDispatchWorker({
     store: new ReviewDispatchStore(options.pool),
     reviewExecution,
-    ...(options.worker?.batchSize === undefined
-      ? {}
-      : { batchSize: options.worker.batchSize }),
-    ...(options.worker?.leaseMillis === undefined
-      ? {}
-      : { leaseMillis: options.worker.leaseMillis }),
-    ...(options.worker?.pollIntervalMillis === undefined
-      ? {}
-      : { pollIntervalMillis: options.worker.pollIntervalMillis }),
-    ...(options.worker?.retryBackoffMillis === undefined
-      ? {}
-      : { retryBackoffMillis: options.worker.retryBackoffMillis }),
-    ...(options.worker?.observer === undefined
-      ? {}
-      : { observer: { onError: options.worker.observer.onError } }),
+    ...(options.worker?.batchSize === undefined ? {} : { batchSize: options.worker.batchSize }),
+    ...(options.worker?.leaseMillis === undefined ? {} : { leaseMillis: options.worker.leaseMillis }),
+    ...(options.worker?.pollIntervalMillis === undefined ? {} : { pollIntervalMillis: options.worker.pollIntervalMillis }),
+    ...(options.worker?.retryBackoffMillis === undefined ? {} : { retryBackoffMillis: options.worker.retryBackoffMillis }),
+    ...(options.worker?.observer === undefined ? {} : { observer: { onError: options.worker.observer.onError } }),
   });
 
   const worker = createWorker({
     inbox,
     store: ingestion,
+    policy: settings,
     reviewExecution,
     ...(options.worker?.batchSize === undefined
       ? {}

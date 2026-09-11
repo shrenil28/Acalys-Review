@@ -51,9 +51,7 @@ const ZERO_USAGE: ModelUsageSnapshot = {
 function integer(value: string | number): number {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new Error(
-      `model usage value ${String(value)} is outside the safe integer range`,
-    );
+    throw new Error(`model usage value ${String(value)} is outside the safe integer range`);
   }
   return parsed;
 }

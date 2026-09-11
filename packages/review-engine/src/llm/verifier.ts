@@ -23,21 +23,13 @@ const verificationResponseSchema = z.discriminatedUnion("decision", [
   }),
   z.object({
     decision: z.literal("rejected"),
-    reason: z.enum([
-      "claim_contradicted_by_context",
-      "claimed_mechanism_not_present",
-      "guarded_on_all_paths",
-    ]),
+    reason: z.enum(["claim_contradicted_by_context", "claimed_mechanism_not_present", "guarded_on_all_paths"]),
     confidence: z.number().min(0).max(1),
     severity: z.enum(["critical", "high", "medium", "low", "info"]),
   }),
   z.object({
     decision: z.literal("inconclusive"),
-    reason: z.enum([
-      "insufficient_evidence",
-      "context_incomplete",
-      "no_applicable_procedure",
-    ]),
+    reason: z.enum(["insufficient_evidence", "context_incomplete", "no_applicable_procedure"]),
     confidence: z.number().min(0).max(1),
     severity: z.enum(["critical", "high", "medium", "low", "info"]),
   }),
@@ -71,13 +63,9 @@ export const LLM_INDEPENDENT_VERIFIER_SYSTEM = [
   "Return rejected when the supplied code contradicts the claim, otherwise inconclusive.",
 ].join("\n");
 
-function failureFor(
-  outcome: Exclude<ModelOutcome<unknown>, { kind: "ok" }>,
-): ExecutionFailure {
+function failureFor(outcome: Exclude<ModelOutcome<unknown>, { kind: "ok" }>): ExecutionFailure {
   if (outcome.kind === "unknown") {
-    return outcome.reason === "timeout_after_dispatch"
-      ? "model_timeout"
-      : "provider_error";
+    return outcome.reason === "timeout_after_dispatch" ? "model_timeout" : "provider_error";
   }
   switch (outcome.reason) {
     case "budget_exceeded":
@@ -141,6 +129,6 @@ export async function verifyLlmClaim(
     decision: outcome.value.decision,
     reasons: [reason],
     confidence: outcome.value.confidence,
-    severity: outcome.value.severity,
+    severity: outcome.value.severity as FindingSeverity,
   };
 }

@@ -207,8 +207,7 @@ module.exports = {
     {
       name: "api-must-not-import-review-worker",
       severity: "error",
-      comment:
-        "The public API creates durable review obligations; it must not invoke worker internals directly.",
+      comment: "The public API creates durable review obligations; it must not invoke worker internals directly.",
       from: { path: "^apps/api/" },
       to: { path: "^apps/review-worker/" },
     },
@@ -260,11 +259,11 @@ module.exports = {
         `Every module under packages/${pkg}/src must be reachable from its ` +
         "index. A module nothing imports is dead code or an accident.",
       // Every declared entry point, not just the root one. `package.json`
-      // `exports` publishes `./eval`, `./domain`, `./api/v1` and `./internal`
+      // `exports` publishes `./eval`, `./domain`, `./api/v1`, `./dashboard/v1` and `./internal`
       // as separate subpaths, and a module reachable only from one of those is
       // reachable — it is how consumers are meant to get at it.
       from: {
-        path: `^packages/${pkg}/src/(index|eval/index|domain/index|api/v1/index|internal/index)\\.ts$`,
+        path: `^packages/${pkg}/src/(index|eval/index|domain/index|api/v1/index|dashboard/v1/index|internal/index)\\.ts$`,
       },
       to: {
         path: `^packages/${pkg}/src/.+\\.ts$`,
@@ -272,7 +271,7 @@ module.exports = {
         // directly — so they are not required to be reachable from each other.
         pathNot: [
           "\\.d\\.ts$",
-          `^packages/${pkg}/src/(index|eval/index|domain/index|api/v1/index|internal/index)\\.ts$`,
+          `^packages/${pkg}/src/(index|eval/index|domain/index|api/v1/index|dashboard/v1/index|internal/index)\\.ts$`,
         ],
         reachable: false,
       },

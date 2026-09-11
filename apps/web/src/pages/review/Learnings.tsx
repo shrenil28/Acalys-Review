@@ -134,15 +134,11 @@ export function LearningsPage() {
               <EmptyState
                 icon={<Sparkles />}
                 title="No learnings yet"
-                description="Reply to a review comment with a correction, or add one here, and Acalys will apply it to future reviews."
+                description="Acalys has not recorded any learnings for this organization yet."
                 action={
-                  <Button
-                    variant="brand"
-                    onClick={() => setCreating(true)}
-                    disabled={!canMutate}
-                  >
-                    Add learning
-                  </Button>
+                  canMutate ? (
+                    <Button variant="brand" onClick={() => setCreating(true)}>Add learning</Button>
+                  ) : undefined
                 }
               />
             ) : filtered.length === 0 ? (
@@ -171,20 +167,19 @@ export function LearningsPage() {
                         {learning.appliedCount === null ? " · usage not available" : ` · applied ${learning.appliedCount}×`}
                       </p>
                     </div>
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      aria-label="Delete learning"
-                      className="opacity-0 transition-opacity group-hover:opacity-100"
-                      disabled={!canMutate}
-                      onClick={() =>
-                        setItems((current) =>
-                          current.filter((entry) => entry.id !== learning.id),
-                        )
-                      }
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {canMutate ? (
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label="Delete learning"
+                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={() =>
+                          setItems((current) => current.filter((entry) => entry.id !== learning.id))
+                        }
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -194,7 +189,7 @@ export function LearningsPage() {
       )}
 
       <Modal
-        open={creating}
+        open={creating && canMutate}
         onClose={() => setCreating(false)}
         title="Add learning"
         description="Write it the way you would explain the rule to a new teammate."

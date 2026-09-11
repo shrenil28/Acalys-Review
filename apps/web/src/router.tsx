@@ -1,5 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router-dom";
 import { AppShell } from "@/components/layout/AppShell";
+import { DashboardSessionGate } from "@/components/auth/DashboardSessionGate";
 
 import { ExplorePage } from "@/pages/Explore";
 import { LoginPage } from "@/pages/Login";
@@ -59,7 +60,7 @@ export const router = createBrowserRouter([
   { path: "/login", element: <LoginPage />, errorElement: <ErrorPage /> },
   {
     path: "/",
-    element: <AppShell />,
+    element: <DashboardSessionGate><AppShell /></DashboardSessionGate>,
     errorElement: <ErrorPage />,
     children: [
       { index: true, element: <ExplorePage /> },
