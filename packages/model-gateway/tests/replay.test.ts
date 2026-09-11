@@ -46,8 +46,6 @@ describe("cassette persistence", () => {
     const path = join(directory, "review.json");
     await writeFile(`${path}.lock`, "external-owner", "utf8");
     const store = new JsonCassetteStore(path, { lockTimeoutMs: 25 });
-    await expect(store.write(entry)).rejects.toThrow(
-      /refusing unsafe stale-lock removal/,
-    );
+    await expect(store.write(entry)).rejects.toThrow(/refusing unsafe stale-lock removal/);
   });
 });

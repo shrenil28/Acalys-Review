@@ -32,25 +32,12 @@ export class CredentialRing<T> {
     return this.#active;
   }
 
-  /** Checks every configured generation, including expired verification-only values. */
-  public hasEmptyString(): boolean {
-    return (
-      (typeof this.#active === "string" && this.#active.length === 0) ||
-      this.#previous.some(
-        (entry) => typeof entry.value === "string" && entry.value.length === 0,
-      )
-    );
-  }
-
   public verificationCandidates(): readonly T[] {
     const at = this.#now().getTime();
     return [
       this.#active,
       ...this.#previous
-        .filter(
-          (entry) =>
-            entry.validUntil === undefined || entry.validUntil.getTime() > at,
-        )
+        .filter((entry) => entry.validUntil === undefined || entry.validUntil.getTime() > at)
         .map((entry) => entry.value),
     ];
   }

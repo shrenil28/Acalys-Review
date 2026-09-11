@@ -26,7 +26,7 @@ import type {
   WebhookInbox,
 } from "@acalys/database";
 
-import { ingestDelivery, type PipelineOutcome } from "./pipeline.js";
+import { ingestDelivery, type PipelineOutcome, type PipelinePolicyResolver } from "./pipeline.js";
 
 export type WorkerOutcomeKind =
   | PipelineOutcome["kind"]
@@ -37,8 +37,7 @@ export type WorkerOutcomeKind =
 export type ReviewExecutionOutcome =
   | {
       readonly kind: "settled";
-      readonly state:
-        "publishing" | "completed" | "failed" | "cancelled" | "superseded";
+      readonly state: "publishing" | "completed" | "failed" | "cancelled" | "superseded";
     }
   | { readonly kind: "deferred"; readonly state: string }
   | { readonly kind: "retryable_failure"; readonly errorCode: string }
@@ -74,6 +73,7 @@ export interface WorkerObserver {
 export interface WorkerOptions {
   readonly inbox: WebhookInbox;
   readonly store: ReviewIngestionStore;
+  readonly policy?: PipelinePolicyResolver | undefined;
   readonly reviewExecution: ReviewExecutionPort;
   /** Jobs claimed per poll. */
   readonly batchSize?: number | undefined;
@@ -140,6 +140,7 @@ export function createWorker(options: WorkerOptions): RunningWorker {
 
     const outcome = await ingestDelivery(delivery, {
       store: options.store,
+      ...(options.policy === undefined ? {} : { policy: options.policy }),
       ...(options.now === undefined ? {} : { now: options.now }),
     });
 
@@ -211,7 +212,6 @@ export function createWorker(options: WorkerOptions): RunningWorker {
             return;
           }
         }
-        return execution;
       }
 
       case "ignored":

@@ -25,8 +25,7 @@ const taxonomyCodes = [
 function preflight() {
   const problems = [];
   for (const path of [appPath, suitePath]) {
-    if (!existsSync(path))
-      problems.push(`${path.slice(ROOT.length + 1)} is missing`);
+    if (!existsSync(path)) problems.push(`${path.slice(ROOT.length + 1)} is missing`);
   }
   if (problems.length > 0) return problems;
 
@@ -34,45 +33,27 @@ function preflight() {
   const tests = readFileSync(suitePath, "utf8");
 
   if (!app.includes("errorResponseSchema.safeParse(result.body)")) {
-    problems.push(
-      "handler non-2xx bodies must be checked by errorResponseSchema",
-    );
+    problems.push("handler non-2xx bodies must be checked by errorResponseSchema");
   }
   if (!app.includes('type === "entity.parse.failed"')) {
-    problems.push(
-      "malformed JSON must have an explicit framework-error projection",
-    );
+    problems.push("malformed JSON must have an explicit framework-error projection");
   }
   if (!app.includes('type === "entity.too.large"')) {
-    problems.push(
-      "oversized request bodies must have an explicit framework-error projection",
-    );
+    problems.push("oversized request bodies must have an explicit framework-error projection");
   }
   if (!app.includes('app.use("/api/v1", (_request, response) =>')) {
     problems.push("undeclared /api/v1 routes must have a JSON 404 boundary");
   }
   if (!app.includes("PUBLIC_ACALYS_ERROR_MESSAGE")) {
-    problems.push(
-      "typed platform errors must use an explicit public-message projection",
-    );
+    problems.push("typed platform errors must use an explicit public-message projection");
   }
-  if (
-    /serialized\.message|error\.message\s*,\s*error\.retryability/u.test(app)
-  ) {
-    problems.push(
-      "typed error messages must not be forwarded verbatim to the public API",
-    );
+  if (/serialized\.message|error\.message\s*,\s*error\.retryability/u.test(app)) {
+    problems.push("typed error messages must not be forwarded verbatim to the public API");
   }
-  if (
-    !tests.includes(
-      "schema-validates handler error bodies before serialization",
-    )
-  ) {
+  if (!tests.includes("schema-validates handler error bodies before serialization")) {
     problems.push("missing malformed handler-error witness");
   }
-  if (
-    !tests.includes("malformed JSON, oversized bodies, and unknown v1 routes")
-  ) {
+  if (!tests.includes("malformed JSON, oversized bodies, and unknown v1 routes")) {
     problems.push("missing framework/404 error-boundary witness");
   }
   if (!tests.includes("native or hostile thrown values")) {

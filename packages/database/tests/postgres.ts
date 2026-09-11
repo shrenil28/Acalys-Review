@@ -578,10 +578,7 @@ async function connect(port: number, database: string): Promise<TestDatabase> {
     .filter((name) => /^\d{4}_.+\.sql$/u.test(name))
     .sort((left, right) => left.localeCompare(right));
   const migrations = migrationNames.map((name) =>
-    readFileSync(
-      fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)),
-      "utf8",
-    ),
+    readFileSync(fileURLToPath(new URL(`../migrations/${name}`, import.meta.url)), "utf8"),
   );
 
   const apply = async (): Promise<void> => {

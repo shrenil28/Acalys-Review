@@ -1,0 +1,29 @@
+{
+  "checkpoint": "Phase 4 / Checkpoint 4.6 FINAL SOURCE CANDIDATE",
+  "snapshot": "2026-09-11-final-source",
+  "base_snapshot": "2026-09-11-1115",
+  "source_acceptance": {
+    "phase4_probes": "11/11 pass",
+    "phase3_preflight": "pass",
+    "typescript_parser": "626 TS/TSX files; 0 syntax diagnostics"
+  },
+  "executable_acceptance": {
+    "status": "blocked_environment",
+    "blocked_by": [
+      "repository-local vitest",
+      "dependency-cruiser",
+      "repository-local typescript",
+      "eslint",
+      "prettier",
+      "Docker/Postgres"
+    ],
+    "browser_acceptance_included": false
+  },
+  "hardening": [
+    "SQL-bounded analytics/repository/report projections",
+    "report generation live-authorization revalidation and 500-definition cap",
+    "database-authoritative canonical cache payload size",
+    "32 MiB aggregate cache preload bound",
+    "authoritative Phase-4 acceptance runner"
+  ]
+}

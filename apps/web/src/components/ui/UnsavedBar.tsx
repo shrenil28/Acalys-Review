@@ -14,11 +14,16 @@ export function useUnsaved<T extends object>(initial: T) {
     (part: Partial<T>) => setDraft((current) => ({ ...current, ...part })),
     [],
   );
+  const replace = useCallback((value: T) => {
+    setBaseline(value);
+    setDraft(value);
+  }, []);
 
   return {
     draft,
     patch,
     setDraft,
+    replace,
     dirty: JSON.stringify(draft) !== JSON.stringify(baseline),
     reset: () => setDraft(baseline),
     commit: () => setBaseline(draft),

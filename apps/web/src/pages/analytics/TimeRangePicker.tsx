@@ -51,15 +51,31 @@ export const refreshIntervals = [
 
 const isValid = (date: Date) => date instanceof Date && !Number.isNaN(date.getTime());
 
-/** Never throws: an unparsable date formats as an empty string. */
-const stamp = (date: Date) =>
-  isValid(date) ? date.toISOString().replace("T", " ").slice(0, 19) : "";
-
-/** Never throws: falls back to now so the UI always has something to render. */
-const parseStamp = (value: string) => {
-  const parsed = new Date(String(value).replace(" ", "T") + "Z");
-  return isValid(parsed) ? parsed : new Date();
+/** Format/parse absolute wall-clock fields without changing their underlying instant. */
+const stamp = (date: Date, timezone: "UTC" | "Browser") => {
+  if (!isValid(date)) return "";
+  const year = timezone === "UTC" ? date.getUTCFullYear() : date.getFullYear();
+  const month = (timezone === "UTC" ? date.getUTCMonth() : date.getMonth()) + 1;
+  const day = timezone === "UTC" ? date.getUTCDate() : date.getDate();
+  const hour = timezone === "UTC" ? date.getUTCHours() : date.getHours();
+  const minute = timezone === "UTC" ? date.getUTCMinutes() : date.getMinutes();
+  const second = timezone === "UTC" ? date.getUTCSeconds() : date.getSeconds();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${year}-${pad(month)}-${pad(day)} ${pad(hour)}:${pad(minute)}:${pad(second)}`;
 };
+
+const parseStamp = (value: string, timezone: "UTC" | "Browser") => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/u.exec(value.trim());
+  if (match === null) return new Date(Number.NaN);
+  const [, y,m,d,h,min,sec="00"] = match;
+  const parts = [Number(y),Number(m)-1,Number(d),Number(h),Number(min),Number(sec)] as const;
+  const parsed = timezone === "UTC"
+    ? new Date(Date.UTC(...parts))
+    : new Date(...parts);
+  return parsed;
+};
+
+const dateStamp = (date: Date, timezone: "UTC" | "Browser") => stamp(date, timezone).slice(0, 10);
 
 export function makeRange(label = "Last 30 days"): TimeRange {
   const preset = quickRanges.find((entry) => entry.label === label) ?? quickRanges[3];
@@ -238,8 +254,8 @@ export function TimeRangePicker({
 }) {
   const [query, setQuery] = useState("");
   const range = safeRange(rawRange);
-  const [fromDraft, setFromDraft] = useState(stamp(range.from));
-  const [toDraft, setToDraft] = useState(stamp(range.to));
+  const [fromDraft, setFromDraft] = useState(stamp(range.from, timezone));
+  const [toDraft, setToDraft] = useState(stamp(range.to, timezone));
   const [calendarFor, setCalendarFor] = useState<"from" | "to" | null>(null);
 
   const span = range.to.getTime() - range.from.getTime();
@@ -264,7 +280,7 @@ export function TimeRangePicker({
     );
   }, [query]);
 
-  const label = range.label ?? `${stamp(range.from)} to ${stamp(range.to)}`;
+  const label = range.label ?? `${stamp(range.from, timezone)} to ${stamp(range.to, timezone)}`;
 
   return (
     <div className="flex items-center gap-0.5">
@@ -284,8 +300,8 @@ export function TimeRangePicker({
           <button
             type="button"
             onClick={() => {
-              setFromDraft(stamp(range.from));
-              setToDraft(stamp(range.to));
+              setFromDraft(stamp(range.from, timezone));
+              setToDraft(stamp(range.to, timezone));
               toggle();
             }}
             className={cn(
@@ -305,13 +321,10 @@ export function TimeRangePicker({
             {calendarFor && (
               <Calendar
                 value={
-                  new Date(
-                    (calendarFor === "from" ? fromDraft : toDraft).replace(" ", "T") +
-                      "Z",
-                  )
+                  parseStamp(calendarFor === "from" ? fromDraft : toDraft, timezone)
                 }
-                rangeStart={parseStamp(fromDraft)}
-                rangeEnd={parseStamp(toDraft)}
+                rangeStart={parseStamp(fromDraft, timezone)}
+                rangeEnd={parseStamp(toDraft, timezone)}
                 time={(calendarFor === "from" ? fromDraft : toDraft).slice(11, 16)}
                 onTimeChange={(next) => {
                   const draft = calendarFor === "from" ? fromDraft : toDraft;
@@ -325,7 +338,7 @@ export function TimeRangePicker({
                   const time = /^\d{2}:\d{2}(:\d{2})?$/.test(draft.slice(11))
                     ? draft.slice(11).padEnd(8, ":00").slice(0, 8)
                     : "00:00:00";
-                  const next = `${date.toISOString().slice(0, 10)} ${time}`;
+                  const next = `${dateStamp(date, timezone)} ${time}`;
                   if (calendarFor === "from") setFromDraft(next);
                   else setToDraft(next);
                 }}
@@ -367,8 +380,8 @@ export function TimeRangePicker({
                   variant="secondary"
                   className="w-full"
                   onClick={() => {
-                    const from = new Date(fromDraft.replace(" ", "T") + "Z");
-                    const to = new Date(toDraft.replace(" ", "T") + "Z");
+                    const from = parseStamp(fromDraft, timezone);
+                    const to = parseStamp(toDraft, timezone);
                     if (isValid(from) && isValid(to)) {
                       onChange({ from, to });
                       close();
@@ -422,9 +435,12 @@ export function TimeRangePicker({
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() =>
-                  onTimezoneChange(timezone === "UTC" ? "Browser" : "UTC")
-                }
+                onClick={() => {
+                  const next = timezone === "UTC" ? "Browser" : "UTC";
+                  setFromDraft(stamp(range.from, next));
+                  setToDraft(stamp(range.to, next));
+                  onTimezoneChange(next);
+                }}
               >
                 Change time settings
               </Button>

@@ -18,3 +18,9 @@ export {
   type GithubOAuthIdentity,
   type GithubOAuthOptions,
 } from "./github-oauth.js";
+
+export {
+  GitlabOAuthService,
+  type GitlabOAuthIdentity,
+  type GitlabOAuthOptions,
+} from "./gitlab-oauth.js";

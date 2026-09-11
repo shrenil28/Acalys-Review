@@ -10,13 +10,9 @@ import {
 } from "./postgres.js";
 
 const HAS_DOCKER = dockerAvailable();
-const describeWithPostgres = HAS_DOCKER
-  ? describe
-  : describe.skip.bind(describe);
+const describeWithPostgres = HAS_DOCKER ? describe : describe.skip.bind(describe);
 if (!HAS_DOCKER) {
-  console.warn(
-    "\n  ⚠ Docker unavailable — Phase 3 pre-merge-check bound tests SKIPPED.\n",
-  );
+  console.warn("\n  ⚠ Docker unavailable — Phase 3 pre-merge-check bound tests SKIPPED.\n");
 }
 
 const ORG = "0192f8a1-1400-7000-8000-000000000101";
@@ -53,7 +49,7 @@ async function seedRun(database: TestDatabase): Promise<void> {
   await database.pool.query(
     `INSERT INTO review_requests
        (id,organization_id,repository_id,pull_request_id,revision_id,target,trigger,requested_by,execution_mode,execution_strategy,idempotency_scope,idempotency_key,requested_at,correlation_id)
-     VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,'api','{"kind":"api_key"}'::jsonb,'full','standard',$2::uuid::text,'phase3-check-bound',$6,'phase3-check-bound')`,
+     VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,'api','{"kind":"api_key"}'::jsonb,'full','standard',$2,'phase3-check-bound',$6,'phase3-check-bound')`,
     [REQUEST, ORG, REPO, PR, REVISION, NOW],
   );
   await database.pool.query(
@@ -82,10 +78,7 @@ describeWithPostgres("Phase 3 non-pageable pre-merge-check bound", () => {
 
   beforeAll(async () => {
     database = await startPostgres("phase3_premerge_check_bound");
-    await assertSuiteIsActuallyRunning(database, [
-      "premerge_check_results",
-      "review_runs",
-    ]);
+    await assertSuiteIsActuallyRunning(database, ["premerge_check_results", "review_runs"]);
   }, 180_000);
 
   afterAll(async () => {
@@ -115,10 +108,7 @@ describeWithPostgres("Phase 3 non-pageable pre-merge-check bound", () => {
     );
     expect(updated.rowCount).toBe(1);
 
-    const page = await new ApiStore(database.pool).listReviewChecks(
-      { organizationId: ORG },
-      RUN,
-    );
+    const page = await new ApiStore(database.pool).listReviewChecks({ organizationId: ORG }, RUN);
     expect(page?.items).toHaveLength(100);
     expect(page?.nextCursor).toBeUndefined();
   });
@@ -132,9 +122,7 @@ describeWithPostgres("Phase 3 non-pageable pre-merge-check bound", () => {
       insertCheck(database, "check-concurrent-a"),
       insertCheck(database, "check-concurrent-b"),
     ]);
-    expect(
-      attempts.filter((attempt) => attempt.status === "fulfilled"),
-    ).toHaveLength(1);
+    expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
     const rejected = attempts.find((attempt) => attempt.status === "rejected");
     expect(rejected).toBeDefined();
     expect((rejected as PromiseRejectedResult).reason).toMatchObject({

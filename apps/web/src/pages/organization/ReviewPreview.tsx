@@ -1,20 +1,26 @@
 import { AcalysMark } from "@/components/icons";
 import { Avatar } from "@/components/ui/Misc";
 import { Badge } from "@/components/ui/Badge";
-import { previewChanges, type OrgConfig } from "@/data/orgSettings";
-import { currentUser } from "@/lib/session";
+import { previewChanges, type OrgConfig } from "./settings-model";
 import { cn } from "@/lib/utils";
 
 /**
  * Live preview of the comment Acalys will post. Every block here is
  * driven by the config on the left, so toggling a setting shows its effect.
  */
+export interface ReviewPreviewIdentity {
+  readonly name: string;
+  readonly avatarUrl?: string | undefined;
+}
+
 export function ReviewPreview({
   config,
   viewMode,
+  author = { name: "Pull request author" },
 }: {
   config: OrgConfig;
   viewMode: "Concise" | "Detailed";
+  author?: ReviewPreviewIdentity | undefined;
 }) {
   const detailed = viewMode === "Detailed";
 
@@ -23,8 +29,8 @@ export function ReviewPreview({
       {/* Pull request description, edited in place by the bot */}
       <article className="overflow-hidden rounded-lg border border-line bg-surface">
         <header className="flex items-center gap-2 border-b border-line px-3 py-2">
-          <Avatar src={currentUser.avatarUrl} name="shrenil28" size={22} />
-          <span className="text-sm font-medium text-fg">shrenil28</span>
+          <Avatar src={author.avatarUrl ?? ""} name={author.name} size={22} />
+          <span className="text-sm font-medium text-fg">{author.name}</span>
           <span className="text-xs text-fg-subtle">edited by acalysai</span>
         </header>
 

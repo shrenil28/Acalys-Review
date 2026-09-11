@@ -47,8 +47,8 @@ Provider response objects never escape an adapter.
 ## Analyzer contract
 
 The LLM correctness analyzer receives `AssembledContext` and nothing else. It
-returns candidates only. A model selects an _ordinal already admitted by the
-planner_, not an arbitrary path. The runtime derives the canonical path/span
+returns candidates only. A model selects an *ordinal already admitted by the
+planner*, not an arbitrary path. The runtime derives the canonical path/span
 from that context item; an ordinal without a truthful positional span is
 rejected rather than anchored at line 1.
 

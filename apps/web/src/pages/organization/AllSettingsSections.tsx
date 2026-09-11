@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/Badge";
 import { Switch } from "@/components/ui/Misc";
 import { Textarea } from "@/components/ui/Input";
-import { languages, type KbScope, type OrgConfig } from "@/data/orgSettings";
+import { languages, type KbScope, type OrgConfig } from "./settings-model";
 import { InstructionsBlock, Panel, Row, Select } from "./parts";
 import { NoItems, PathInstructionList } from "./NoItems";
 import type { Update } from "./SettingsSections";

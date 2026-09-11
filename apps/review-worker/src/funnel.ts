@@ -263,11 +263,7 @@ export async function runVerification(
     } finally {
       clearInterval(heartbeat);
     }
-    if (leaseLost !== undefined) {
-      throw leaseLost instanceof Error
-        ? leaseLost
-        : new Error("Verification lease renewal failed", { cause: leaseLost });
-    }
+    if (leaseLost !== undefined) throw leaseLost;
 
     // A final renewal closes the race between the last heartbeat and the
     // persistence fence. If ownership moved, this worker stops before writing.

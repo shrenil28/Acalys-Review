@@ -1,10 +1,10 @@
 import { lazy, Suspense } from "react";
 import { Link } from "react-router-dom";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, BarChart3 } from "lucide-react";
 import { MultiStatPanel, Panel } from "@/components/charts/Panel";
 import { DashboardSkeleton } from "@/components/ui/Skeleton";
-import { AreaTrend, BarTrend, series } from "@/components/charts/Charts";
 import { Badge } from "@/components/ui/Badge";
+import { EmptyState } from "@/components/ui/Misc";
 import {
   LiveFailureState,
   LiveMisconfiguredState,
@@ -67,21 +67,19 @@ export function KnowledgeBaseView() {
 
       <div className="grid gap-3 xl:grid-cols-2">
         <Panel title="Weekly Learnings Applied">
-          <AreaTrend
-            data={[]}
-            seriesDefs={[
-              { key: "value", label: "Applied", color: series.brand },
-            ]}
+          <EmptyState
+            icon={<BarChart3 />}
+            title="Usage trend not available yet"
+            description="The knowledge records are live. Time-series usage analytics are owned by Phase 13 and are not fabricated from fixtures in API mode."
+            className="min-h-[210px] border-0"
           />
         </Panel>
         <Panel title="Learnings by Repository">
-          <BarTrend
-            data={[]}
-            layout="vertical"
-            height={210}
-            seriesDefs={[
-              { key: "value", label: "Learnings", color: series.teal },
-            ]}
+          <EmptyState
+            icon={<BarChart3 />}
+            title="Repository usage analytics not available yet"
+            description="Repository-level knowledge usage aggregation is scheduled for Phase 13."
+            className="min-h-[210px] border-0"
           />
         </Panel>
       </div>
@@ -98,27 +96,33 @@ export function KnowledgeBaseView() {
           </Link>
         }
       >
-        <ul className="divide-y divide-line">
-          {items.slice(0, 5).map((learning) => (
-            <li key={learning.id} className="flex items-start gap-3 py-2.5">
-              <Badge tone={learning.scope === "Organization" ? "purple" : "neutral"}>
-                {learning.scope === "Organization"
-                  ? "Org"
-                  : learning.scope === "Path"
-                    ? learning.path ?? "Path"
-                    : learning.repo ?? "Repository"}
-              </Badge>
-              <p className="min-w-0 flex-1 text-sm leading-relaxed text-fg-muted">
-                {learning.content}
-              </p>
-              <span className="shrink-0 text-xs tabular-nums text-fg-subtle">
-                {learning.appliedCount === null
-                  ? "—"
-                  : `${String(learning.appliedCount)}×`}
-              </span>
-            </li>
-          ))}
-        </ul>
+        {items.length === 0 ? (
+          <EmptyState
+            title="No learnings yet"
+            description="Live knowledge is connected, but this organization has not recorded any learnings."
+            className="border-0"
+          />
+        ) : (
+          <ul className="divide-y divide-line">
+            {items.slice(0, 5).map((learning) => (
+              <li key={learning.id} className="flex items-start gap-3 py-2.5">
+                <Badge tone={learning.scope === "Organization" ? "purple" : "neutral"}>
+                  {learning.scope === "Organization"
+                    ? "Org"
+                    : learning.scope === "Path"
+                      ? learning.path ?? "Path"
+                      : learning.repo ?? "Repository"}
+                </Badge>
+                <p className="min-w-0 flex-1 text-sm leading-relaxed text-fg-muted">
+                  {learning.content}
+                </p>
+                <span className="shrink-0 text-xs tabular-nums text-fg-subtle">
+                  {learning.appliedCount === null ? "—" : `${String(learning.appliedCount)}×`}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </Panel>
     </div>
   );

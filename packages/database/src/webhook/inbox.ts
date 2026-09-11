@@ -93,6 +93,8 @@ export interface WebhookDelivery {
   /** Why it was ignored or how it failed. Never secret material. */
   readonly outcomeReason: string | null;
   readonly attempts: number;
+  /** Fencing generation for this exact claim. Increments on every reclaim. */
+  readonly claimGeneration: number;
 }
 
 export const deliveryStateSchema = z.enum(DELIVERY_STATES);

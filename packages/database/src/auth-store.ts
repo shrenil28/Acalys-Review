@@ -84,8 +84,7 @@ export class AuthStore {
       ],
     );
     const row = result.rows[0];
-    if (row === undefined)
-      throw new Error("OAuth identity upsert returned no row");
+    if (row === undefined) throw new Error("OAuth identity upsert returned no row");
     return row.id;
   }
 
@@ -108,9 +107,7 @@ export class AuthStore {
    * membership row returned by the same statement. If any insert/update fails,
    * no identity or membership side effect survives independently.
    */
-  public async establishOAuthSession(
-    input: EstablishOAuthSessionInput,
-  ): Promise<{
+  public async establishOAuthSession(input: EstablishOAuthSessionInput): Promise<{
     readonly userId: string;
     readonly membershipId: string;
     readonly role: AuthRole;
@@ -179,8 +176,7 @@ export class AuthStore {
         ],
       );
       const row = result.rows[0];
-      if (row === undefined)
-        throw new Error("OAuth session establishment returned no row");
+      if (row === undefined) throw new Error("OAuth session establishment returned no row");
       return {
         userId: row.user_id,
         membershipId: row.membership_id,
@@ -197,9 +193,7 @@ export class AuthStore {
     readonly organizationId: string;
     readonly tokenHash: string;
     readonly ttlMillis: number;
-  }): Promise<
-    { readonly createdAt: Date; readonly expiresAt: Date } | undefined
-  > {
+  }): Promise<{ readonly createdAt: Date; readonly expiresAt: Date } | undefined> {
     if (!Number.isSafeInteger(input.ttlMillis) || input.ttlMillis <= 0) {
       throw new Error("Session TTL must be a positive safe integer");
     }
@@ -215,31 +209,18 @@ export class AuthStore {
       const membershipId = membership.rows[0]?.membership_id;
       if (membershipId === undefined) return undefined;
 
-      const clock = await client.query<{ database_now: Date }>(
-        `SELECT clock_timestamp() AS database_now`,
-      );
+      const clock = await client.query<{ database_now: Date }>(`SELECT clock_timestamp() AS database_now`);
       const databaseNow = clock.rows[0]?.database_now;
-      if (databaseNow === undefined)
-        throw new Error("Database clock returned no session timestamp");
+      if (databaseNow === undefined) throw new Error("Database clock returned no session timestamp");
       const expiresAt = new Date(databaseNow.getTime() + input.ttlMillis);
       if (!Number.isFinite(expiresAt.getTime())) {
-        throw new Error(
-          "Session expiry is outside the supported timestamp range",
-        );
+        throw new Error("Session expiry is outside the supported timestamp range");
       }
       await client.query(
         `INSERT INTO auth_sessions
            (id, user_id, organization_id, membership_id, token_hash, created_at, expires_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          input.id,
-          input.userId,
-          input.organizationId,
-          membershipId,
-          input.tokenHash,
-          databaseNow,
-          expiresAt,
-        ],
+        [input.id, input.userId, input.organizationId, membershipId, input.tokenHash, databaseNow, expiresAt],
       );
       return { createdAt: databaseNow, expiresAt };
     });
@@ -268,8 +249,7 @@ export class AuthStore {
         [tokenHash],
       );
       const located = locator.rows[0];
-      if (located === undefined || located.membership_id === null)
-        return undefined;
+      if (located === undefined || located.membership_id === null) return undefined;
 
       // Lock membership before the credential row. Membership deletion cascades
       // toward credential referents, so using the same lock order avoids a
@@ -304,17 +284,10 @@ export class AuthStore {
       // Read the authoritative clock only after all rows that can delay the
       // decision are locked. A credential cannot expire while waiting and then
       // be accepted against a stale pre-lock timestamp.
-      const clock = await client.query<{ database_now: Date }>(
-        `SELECT clock_timestamp() AS database_now`,
-      );
+      const clock = await client.query<{ database_now: Date }>(`SELECT clock_timestamp() AS database_now`);
       const databaseNow = clock.rows[0]?.database_now;
-      if (databaseNow === undefined)
-        throw new Error("Database clock returned no session timestamp");
-      if (
-        row.revoked_at !== null ||
-        row.rotated_at !== null ||
-        row.expires_at.getTime() <= databaseNow.getTime()
-      ) {
+      if (databaseNow === undefined) throw new Error("Database clock returned no session timestamp");
+      if (row.revoked_at !== null || row.rotated_at !== null || row.expires_at.getTime() <= databaseNow.getTime()) {
         return undefined;
       }
 
@@ -358,8 +331,7 @@ export class AuthStore {
         [input.currentHash],
       );
       const located = locator.rows[0];
-      if (located === undefined || located.membership_id === null)
-        return undefined;
+      if (located === undefined || located.membership_id === null) return undefined;
 
       const membership = await client.query(
         `SELECT 1
@@ -387,25 +359,16 @@ export class AuthStore {
       const row = current.rows[0];
       if (row === undefined) return undefined;
 
-      const clock = await client.query<{ database_now: Date }>(
-        `SELECT clock_timestamp() AS database_now`,
-      );
+      const clock = await client.query<{ database_now: Date }>(`SELECT clock_timestamp() AS database_now`);
       const databaseNow = clock.rows[0]?.database_now;
-      if (databaseNow === undefined)
-        throw new Error("Database clock returned no session timestamp");
-      if (
-        row.revoked_at !== null ||
-        row.rotated_at !== null ||
-        row.expires_at.getTime() <= databaseNow.getTime()
-      ) {
+      if (databaseNow === undefined) throw new Error("Database clock returned no session timestamp");
+      if (row.revoked_at !== null || row.rotated_at !== null || row.expires_at.getTime() <= databaseNow.getTime()) {
         return undefined;
       }
 
       const expiresAt = new Date(databaseNow.getTime() + input.ttlMillis);
       if (!Number.isFinite(expiresAt.getTime())) {
-        throw new Error(
-          "Session expiry is outside the supported timestamp range",
-        );
+        throw new Error("Session expiry is outside the supported timestamp range");
       }
       await client.query(
         `INSERT INTO auth_sessions
@@ -433,10 +396,7 @@ export class AuthStore {
     });
   }
 
-  public async revokeSession(
-    id: string,
-    organizationId: string,
-  ): Promise<boolean> {
+  public async revokeSession(id: string, organizationId: string): Promise<boolean> {
     const result = await this.pool.query(
       `WITH database_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
        UPDATE auth_sessions AS s
@@ -473,16 +433,10 @@ export class AuthStore {
         if (membershipId === null) return "membership_missing";
       }
 
-      const clock = await client.query<{ database_now: Date }>(
-        `SELECT clock_timestamp() AS database_now`,
-      );
+      const clock = await client.query<{ database_now: Date }>(`SELECT clock_timestamp() AS database_now`);
       const databaseNow = clock.rows[0]?.database_now;
-      if (databaseNow === undefined)
-        throw new Error("Database clock returned no API-key timestamp");
-      if (
-        input.expiresAt !== undefined &&
-        input.expiresAt.getTime() <= databaseNow.getTime()
-      ) {
+      if (databaseNow === undefined) throw new Error("Database clock returned no API-key timestamp");
+      if (input.expiresAt !== undefined && input.expiresAt.getTime() <= databaseNow.getTime()) {
         return "invalid_expiry";
       }
 
@@ -535,8 +489,7 @@ export class AuthStore {
         [hash],
       );
       const located = locator.rows[0];
-      if (located === undefined || located.owner_kind === "legacy_unbound")
-        return undefined;
+      if (located === undefined || located.owner_kind === "legacy_unbound") return undefined;
 
       if (
         located.owner_kind === "organization" &&
@@ -547,8 +500,7 @@ export class AuthStore {
 
       let membershipRole: AuthRole | undefined;
       if (located.owner_kind === "user") {
-        if (located.user_id === null || located.membership_id === null)
-          return undefined;
+        if (located.user_id === null || located.membership_id === null) return undefined;
         const membership = await client.query<{ role: AuthRole }>(
           `SELECT role
              FROM memberships
@@ -588,17 +540,10 @@ export class AuthStore {
         return undefined;
       }
 
-      const clock = await client.query<{ database_now: Date }>(
-        `SELECT clock_timestamp() AS database_now`,
-      );
+      const clock = await client.query<{ database_now: Date }>(`SELECT clock_timestamp() AS database_now`);
       const databaseNow = clock.rows[0]?.database_now;
-      if (databaseNow === undefined)
-        throw new Error("Database clock returned no API-key timestamp");
-      if (
-        row.revoked_at !== null ||
-        (row.expires_at !== null &&
-          row.expires_at.getTime() <= databaseNow.getTime())
-      ) {
+      if (databaseNow === undefined) throw new Error("Database clock returned no API-key timestamp");
+      if (row.revoked_at !== null || (row.expires_at !== null && row.expires_at.getTime() <= databaseNow.getTime())) {
         return undefined;
       }
 
@@ -609,18 +554,13 @@ export class AuthStore {
         [row.api_key_id, databaseNow],
       );
       const scopes = Array.isArray(row.scopes)
-        ? row.scopes.filter(
-            (scope): scope is string => typeof scope === "string",
-          )
+        ? row.scopes.filter((scope): scope is string => typeof scope === "string")
         : [];
       return {
         apiKeyId: row.api_key_id,
         userId: row.user_id,
         organizationId: row.organization_id,
-        role:
-          membershipRole === undefined
-            ? row.role
-            : lowerRole(row.role, membershipRole),
+        role: membershipRole === undefined ? row.role : lowerRole(row.role, membershipRole),
         scopes,
         expiresAt: row.expires_at,
         revokedAt: row.revoked_at,
@@ -628,10 +568,7 @@ export class AuthStore {
     });
   }
 
-  public async revokeApiKey(
-    id: string,
-    organizationId: string,
-  ): Promise<boolean> {
+  public async revokeApiKey(id: string, organizationId: string): Promise<boolean> {
     const result = await this.pool.query(
       `WITH database_clock AS MATERIALIZED (SELECT clock_timestamp() AS at)
        UPDATE api_keys AS k
@@ -665,16 +602,10 @@ export class AuthStore {
     readonly reason?: "principal" | "organization";
     readonly windowStart: Date;
   }> {
-    if (
-      !Number.isSafeInteger(input.perPrincipalLimit) ||
-      input.perPrincipalLimit <= 0
-    ) {
+    if (!Number.isSafeInteger(input.perPrincipalLimit) || input.perPrincipalLimit <= 0) {
       throw new Error("perPrincipalLimit must be a positive safe integer");
     }
-    if (
-      !Number.isSafeInteger(input.perOrganizationLimit) ||
-      input.perOrganizationLimit <= 0
-    ) {
+    if (!Number.isSafeInteger(input.perOrganizationLimit) || input.perOrganizationLimit <= 0) {
       throw new Error("perOrganizationLimit must be a positive safe integer");
     }
 
@@ -683,8 +614,7 @@ export class AuthStore {
         `SELECT date_trunc('minute', clock_timestamp()) AS window_start`,
       );
       const windowStart = clock.rows[0]?.window_start;
-      if (windowStart === undefined)
-        throw new Error("Database clock returned no rate-limit window");
+      if (windowStart === undefined) throw new Error("Database clock returned no rate-limit window");
 
       const bump = async (bucket: string, limit: number): Promise<number> => {
         const result = await client.query<{ request_count: number }>(
@@ -699,8 +629,7 @@ export class AuthStore {
           [input.organizationId, bucket, windowStart, limit + 1],
         );
         const count = result.rows[0]?.request_count;
-        if (count === undefined)
-          throw new Error("Rate-limit increment returned no counter");
+        if (count === undefined) throw new Error("Rate-limit increment returned no counter");
         return count;
       };
 
@@ -720,25 +649,17 @@ export class AuthStore {
           [input.organizationId, bucket, windowStart],
         );
         if (decremented.rowCount !== 1) {
-          throw new Error(
-            "Rate-limit refund could not find the consumed bucket",
-          );
+          throw new Error("Rate-limit refund could not find the consumed bucket");
         }
       };
 
       const principalBucket = `principal:${input.principalId}`;
-      const principalCount = await bump(
-        principalBucket,
-        input.perPrincipalLimit,
-      );
+      const principalCount = await bump(principalBucket, input.perPrincipalLimit);
       if (principalCount > input.perPrincipalLimit) {
         return { allowed: false, reason: "principal", windowStart };
       }
 
-      const organizationCount = await bump(
-        "organization",
-        input.perOrganizationLimit,
-      );
+      const organizationCount = await bump("organization", input.perOrganizationLimit);
       if (organizationCount > input.perOrganizationLimit) {
         await refund(principalBucket);
         return { allowed: false, reason: "organization", windowStart };
@@ -748,9 +669,7 @@ export class AuthStore {
     });
   }
 
-  private async inTransaction<T>(
-    work: (client: PgClient) => Promise<T>,
-  ): Promise<T> {
+  private async inTransaction<T>(work: (client: PgClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");

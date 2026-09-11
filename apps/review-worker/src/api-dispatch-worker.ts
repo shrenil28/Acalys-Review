@@ -1,5 +1,5 @@
 import {
-  type ReviewDispatchStore,
+  ReviewDispatchStore,
   StaleReviewDispatchClaim,
   type ReviewDispatchClaim,
   type ReviewDispatchExecutionGuard,
@@ -9,12 +9,11 @@ import type { ReviewExecutionPort } from "./worker.js";
 export interface ApiDispatchWorkerOptions {
   readonly store: ReviewDispatchStore;
   readonly reviewExecution: ReviewExecutionPort;
-  readonly batchSize?: number | undefined;
-  readonly leaseMillis?: number | undefined;
-  readonly pollIntervalMillis?: number | undefined;
-  readonly retryBackoffMillis?: number | undefined;
-  readonly observer?:
-    { readonly onError?: ((error: unknown) => void) | undefined } | undefined;
+  readonly batchSize?: number;
+  readonly leaseMillis?: number;
+  readonly pollIntervalMillis?: number;
+  readonly retryBackoffMillis?: number;
+  readonly observer?: { readonly onError?: (error: unknown) => void };
 }
 
 export interface RunningApiDispatchWorker {
@@ -47,11 +46,7 @@ export function createApiDispatchWorker(
         await options.store.complete(claim.reviewRunId, claim.claimGeneration);
         return;
       case "deferred":
-        await options.store.defer(
-          claim.reviewRunId,
-          claim.claimGeneration,
-          pollMillis,
-        );
+        await options.store.defer(claim.reviewRunId, claim.claimGeneration, pollMillis);
         return;
       case "retryable_failure":
         await options.store.release(
@@ -137,10 +132,7 @@ export function createApiDispatchWorker(
         case "settled":
           // The lifecycle became terminal/publishing between claim and execution.
           // No review work is owed; remove only this generation's dispatch row.
-          await options.store.complete(
-            claim.reviewRunId,
-            claim.claimGeneration,
-          );
+          await options.store.complete(claim.reviewRunId, claim.claimGeneration);
           return;
         case "owned":
           await executeOwnedClaim(claim, acquisition.guard);

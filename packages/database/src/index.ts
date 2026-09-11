@@ -130,7 +130,10 @@ export {
   type IdempotencyAcquire,
 } from "./api-store.js";
 
-export { createPostgresPool, type CloseablePgPool } from "./pool.js";
+export {
+  createPostgresPool,
+  type CloseablePgPool,
+} from "./pool.js";
 
 export {
   ReviewDispatchStore,
@@ -141,8 +144,75 @@ export {
   type ReviewDispatchReplay,
 } from "./review/api-dispatch-store.js";
 
+export { ApiMutationStore, type IdempotencyIdentity, type IdempotentMutationOutcome } from "./api-mutation-store.js";
+
 export {
-  ApiMutationStore,
-  type IdempotencyIdentity,
-  type IdempotentMutationOutcome,
-} from "./api-mutation-store.js";
+  DashboardAdminStore,
+  type DashboardApiKeyRow,
+  type DashboardInvitationRow,
+  type DashboardMemberRow,
+  type DashboardOrganizationRow,
+  type DashboardProviderConnectionRow,
+  type DashboardProvisionedIdentity,
+  type DashboardSessionRow,
+  type InvitationCancellationOutcome,
+  type InvitationCreationOutcome,
+  type InvitationRedemptionOutcome,
+  type MemberRemovalOutcome,
+  type MembershipRoleUpdate,
+} from "./dashboard-admin-store.js";
+
+export {
+  DashboardIntegrationStore,
+  IntegrationCredentialCipher,
+  IntegrationCredentialUnavailable,
+  type CredentialRotationOutcome,
+  type DashboardIntegrationKey,
+  type DashboardIntegrationRow,
+  type DashboardIntegrationStatus,
+  type IntegrationCredentialKeyring,
+  type IntegrationMutationOutcome,
+  type JiraChallengeCreationOutcome,
+  type JiraChallengeRedemptionOutcome,
+  type LinearOAuthAttempt,
+  type StoredIntegrationCredential,
+} from "./integration-store.js";
+
+export {
+  DashboardSettingsStore,
+  type EffectiveReviewPolicyEnvelope,
+  type OrganizationReviewSettingsRow,
+  type RepositoryReviewSettingsRow,
+  type ReviewSettingsMutationOutcome,
+} from "./dashboard-settings-store.js";
+
+export {
+  DashboardAnalyticsStore,
+  type DashboardAnalyticsFilters,
+  type DashboardAnalyticsSnapshot,
+} from "./dashboard-analytics-store.js";
+
+export {
+  ReviewAnalysisCacheStore,
+  REVIEW_ANALYSIS_CACHE_TTL_MILLIS,
+  REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES,
+  REVIEW_ANALYSIS_CACHE_MAX_WRITE_ENTRIES,
+  REVIEW_ANALYSIS_CACHE_MAX_PRELOAD_BYTES,
+  REVIEW_ANALYSIS_CACHE_MAX_METADATA_ENTRIES,
+  type PersistedReviewAnalysisCacheEntry,
+  type ReviewAnalysisCacheDeleteOutcome,
+  type ReviewAnalysisCacheMetadata,
+} from "./review-analysis-cache-store.js";
+
+export * from "./dashboard-notification-store.js";
+
+export * from "./dashboard-repository-store.js";
+
+export * from "./dashboard-security-store.js";
+
+export {
+  DashboardReportStore,
+  type DashboardReportCreateOutcome,
+  type DashboardReportDeleteOutcome,
+  type DashboardReportGenerateOutcome,
+} from "./dashboard-report-store.js";

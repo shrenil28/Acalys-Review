@@ -44,9 +44,9 @@ describe("Webhook signature verification", () => {
   it("accepts the previous webhook secret during an explicit rotation grace set", () => {
     const previous = "previous webhook secret";
     const signature = signWebhookBody(previous, BODY);
-    expect(verifyWebhookSignature([SECRET, previous], BODY, signature)).toEqual(
-      { ok: true },
-    );
+    expect(
+      verifyWebhookSignature([SECRET, previous], BODY, signature),
+    ).toEqual({ ok: true });
   });
 
   it("rejects an empty generation in a rotated webhook-secret set", () => {

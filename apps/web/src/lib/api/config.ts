@@ -119,3 +119,7 @@ export function resolveDataMode(
 
   return { kind: "fixtures" };
 }
+
+
+/** Dashboard/admin callers use the same fail-closed data-source decision. */
+export const resolveDataConfig = resolveDataMode;

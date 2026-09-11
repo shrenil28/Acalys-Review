@@ -162,8 +162,7 @@ export interface ProviderUnknown {
   readonly detail: string;
 }
 
-export type ProviderOutcome =
-  ProviderSuccess | ProviderKnownFailure | ProviderUnknown;
+export type ProviderOutcome = ProviderSuccess | ProviderKnownFailure | ProviderUnknown;
 
 export interface ModelProviderAdapter {
   readonly provider: ModelProvider;
@@ -226,10 +225,7 @@ export interface ModelBudgetReservationPort {
     readonly requestedCostMicroUsd: number;
     readonly at: Date;
   }): Promise<
-    | {
-        readonly kind: "reserved";
-        readonly reservation: ModelBudgetReservation;
-      }
+    | { readonly kind: "reserved"; readonly reservation: ModelBudgetReservation }
     | { readonly kind: "budget_exceeded" }
   >;
 }
@@ -244,9 +240,7 @@ export interface CredentialPolicy {
 }
 
 export interface ModelAdmissionPort {
-  enter(
-    policy: CredentialPolicy,
-  ): Promise<
+  enter(policy: CredentialPolicy): Promise<
     | { readonly kind: "entered"; readonly release: () => Promise<void> }
     | { readonly kind: "rate_limited" }
   >;

@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2022",
     "useDefineForClassFields": true,
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -18,9 +22,20 @@
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
-      "@acalys/contracts/api/v1": ["../../packages/contracts/src/api/v1/index.ts"]
+      "@/*": [
+        "./src/*"
+      ],
+      "@acalys/contracts/api/v1": [
+        "../../packages/contracts/src/api/v1/index.ts"
+      ],
+      "@acalys/contracts/dashboard/v1": [
+        "../../packages/contracts/src/dashboard/v1/index.ts"
+      ]
     }
   },
-  "include": ["src", "tests", "vite.config.ts"]
+  "include": [
+    "src",
+    "tests",
+    "vite.config.ts"
+  ]
 }

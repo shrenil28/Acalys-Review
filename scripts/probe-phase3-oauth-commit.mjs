@@ -13,8 +13,7 @@ const postgresPath = join(ROOT, postgresSuite);
 function preflight() {
   const problems = [];
   for (const path of [servicePath, storePath, unitPath, postgresPath]) {
-    if (!existsSync(path))
-      problems.push(`${path.slice(ROOT.length + 1)} is missing`);
+    if (!existsSync(path)) problems.push(`${path.slice(ROOT.length + 1)} is missing`);
   }
   if (problems.length > 0) return problems;
 
@@ -24,92 +23,49 @@ function preflight() {
   const postgres = readFileSync(postgresPath, "utf8");
 
   if (!service.includes("this.#store.establishOAuthSession({")) {
-    problems.push(
-      "GitHub session establishment must delegate to one atomic store operation",
-    );
+    problems.push("GitHub session establishment must delegate to one atomic store operation");
   }
   const establishStart = service.indexOf("public async establishGithubSession");
-  const establishEnd = service.indexOf(
-    "public async issueSession",
-    establishStart,
-  );
-  const establishBody =
-    establishStart >= 0 && establishEnd > establishStart
-      ? service.slice(establishStart, establishEnd)
-      : "";
-  if (
-    establishBody.includes("upsertOAuthIdentity") ||
-    establishBody.includes("upsertMembership") ||
-    establishBody.includes("this.issueSession")
-  ) {
-    problems.push(
-      "GitHub session establishment must not split identity, membership, and session persistence",
-    );
+  const establishEnd = service.indexOf("public async issueSession", establishStart);
+  const establishBody = establishStart >= 0 && establishEnd > establishStart
+    ? service.slice(establishStart, establishEnd)
+    : "";
+  if (establishBody.includes("upsertOAuthIdentity") || establishBody.includes("upsertMembership") || establishBody.includes("this.issueSession")) {
+    problems.push("GitHub session establishment must not split identity, membership, and session persistence");
   }
   if (establishBody.includes("#now") || establishBody.includes("new Date(")) {
-    problems.push(
-      "OAuth commit chronology must not come from the API process clock",
-    );
+    problems.push("OAuth commit chronology must not come from the API process clock");
   }
   if (!store.includes("public async establishOAuthSession")) {
     problems.push("AuthStore.establishOAuthSession is missing");
   }
-  if (
-    !store.includes("WITH database_clock AS MATERIALIZED") ||
-    !store.includes("oauth_user AS (") ||
-    !store.includes("oauth_membership AS (") ||
-    !store.includes("oauth_session AS (")
-  ) {
-    problems.push(
-      "OAuth commit must use one Postgres-clock data-modifying transaction graph",
-    );
+  if (!store.includes("WITH database_clock AS MATERIALIZED") || !store.includes("oauth_user AS (") || !store.includes("oauth_membership AS (") || !store.includes("oauth_session AS (")) {
+    problems.push("OAuth commit must use one Postgres-clock data-modifying transaction graph");
   }
-  if (
-    !store.includes(
-      "JOIN oauth_membership AS membership ON membership.id = session.membership_id",
-    )
-  ) {
-    problems.push(
-      "issued session must be projected from the exact committed membership row",
-    );
+  if (!store.includes("JOIN oauth_membership AS membership ON membership.id = session.membership_id")) {
+    problems.push("issued session must be projected from the exact committed membership row");
   }
   if (/readonly now: Date/u.test(store)) {
-    problems.push(
-      "OAuth identity/membership store inputs must not accept a replica-supplied timestamp",
-    );
+    problems.push("OAuth identity/membership store inputs must not accept a replica-supplied timestamp");
   }
-  if (
-    !store.includes(
-      "updated_at = GREATEST(users.updated_at, EXCLUDED.updated_at)",
-    )
-  ) {
-    problems.push(
-      "OAuth identity updated_at must remain monotonic under clock adjustments",
-    );
+  if (!store.includes("updated_at = GREATEST(users.updated_at, EXCLUDED.updated_at)")) {
+    problems.push("OAuth identity updated_at must remain monotonic under clock adjustments");
   }
-  if (
-    !store.includes(
-      "updated_at = GREATEST(memberships.updated_at, EXCLUDED.updated_at)",
-    )
-  ) {
-    problems.push(
-      "membership updated_at must remain monotonic under clock adjustments",
-    );
+  if (!store.includes("updated_at = GREATEST(memberships.updated_at, EXCLUDED.updated_at)")) {
+    problems.push("membership updated_at must remain monotonic under clock adjustments");
   }
 
   for (const witness of [
     "commits GitHub identity, membership role, and first session through one store operation",
   ]) {
-    if (!unit.includes(witness))
-      problems.push(`missing unit witness: ${witness}`);
+    if (!unit.includes(witness)) problems.push(`missing unit witness: ${witness}`);
   }
   for (const witness of [
     "commits OAuth identity, membership role, and first session with one database timestamp",
     "rolls back identity and membership refresh when first-session insertion fails",
     "concurrent OAuth callbacks converge on one canonical identity and membership",
   ]) {
-    if (!postgres.includes(witness))
-      problems.push(`missing Postgres witness: ${witness}`);
+    if (!postgres.includes(witness)) problems.push(`missing Postgres witness: ${witness}`);
   }
   return problems;
 }
@@ -146,13 +102,9 @@ if (docker.status !== 0) {
   process.exit(2);
 }
 
-const result = spawnSync(
-  process.execPath,
-  [vitest, "run", unitSuite, postgresSuite],
-  {
-    cwd: ROOT,
-    stdio: "inherit",
-    env: { ...process.env, ACALYS_REQUIRE_POSTGRES: "1" },
-  },
-);
+const result = spawnSync(process.execPath, [vitest, "run", unitSuite, postgresSuite], {
+  cwd: ROOT,
+  stdio: "inherit",
+  env: { ...process.env, ACALYS_REQUIRE_POSTGRES: "1" },
+});
 process.exit(result.status ?? 2);

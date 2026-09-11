@@ -31,14 +31,12 @@ function blob(sha: string, text: string) {
   } as const;
 }
 
-function fixtureRequest(
-  options: {
-    readonly patch?: string | undefined;
-    readonly headText?: string | undefined;
-    readonly baseText?: string | undefined;
-    readonly changedFiles?: number | undefined;
-  } = {},
-): GithubRepositoryRequest {
+function fixtureRequest(options: {
+  readonly patch?: string | undefined;
+  readonly headText?: string | undefined;
+  readonly baseText?: string | undefined;
+  readonly changedFiles?: number | undefined;
+} = {}): GithubRepositoryRequest {
   const headText = options.headText ?? "one\ntwo\nthree\nfour\n";
   const baseText = options.baseText ?? "one\ntwo\nold\nfour\n";
   return async ({ path }) => {
@@ -64,14 +62,7 @@ function fixtureRequest(
         body: {
           sha: HEAD,
           truncated: false,
-          tree: [
-            {
-              path: "src/a.ts",
-              type: "blob",
-              sha: HEAD_BLOB,
-              size: Buffer.byteLength(headText),
-            },
-          ],
+          tree: [{ path: "src/a.ts", type: "blob", sha: HEAD_BLOB, size: Buffer.byteLength(headText) }],
         },
       };
     }
@@ -81,14 +72,7 @@ function fixtureRequest(
         body: {
           sha: BASE,
           truncated: false,
-          tree: [
-            {
-              path: "src/a.ts",
-              type: "blob",
-              sha: BASE_BLOB,
-              size: Buffer.byteLength(baseText),
-            },
-          ],
+          tree: [{ path: "src/a.ts", type: "blob", sha: BASE_BLOB, size: Buffer.byteLength(baseText) }],
         },
       };
     }
@@ -99,10 +83,7 @@ function fixtureRequest(
       return { status: 200, body: blob(BASE_BLOB, baseText) };
     }
     if (path.includes(`/contents/src/a.ts?ref=${HEAD}`)) {
-      return {
-        status: 200,
-        body: { type: "file", ...blob(HEAD_BLOB, headText) },
-      };
+      return { status: 200, body: { type: "file", ...blob(HEAD_BLOB, headText) } };
     }
     return { status: 404, body: undefined };
   };
@@ -144,30 +125,14 @@ describe("GitHub repository source adapter", () => {
           status: 200,
           body: {
             merge_base_commit: { sha: MERGE_BASE },
-            files: [
-              {
-                filename: "src/a.ts",
-                status: "modified",
-                patch: "@@ -1 +1 @@\n-a\n+b",
-              },
-            ],
+            files: [{ filename: "src/a.ts", status: "modified", patch: "@@ -1 +1 @@\n-a\n+b" }],
           },
         };
       }
       if (path.includes(`/git/trees/${HEAD}`)) {
         return {
           status: 200,
-          body: {
-            truncated: false,
-            tree: [
-              {
-                path: "src/a.ts",
-                type: "blob",
-                sha: HEAD_BLOB,
-                size: binary.length,
-              },
-            ],
-          },
+          body: { truncated: false, tree: [{ path: "src/a.ts", type: "blob", sha: HEAD_BLOB, size: binary.length }] },
         };
       }
       if (path.includes(`/git/trees/${BASE}`)) {
@@ -201,8 +166,6 @@ describe("GitHub repository source adapter", () => {
     expect(await reader.readTextFile(revision, "src/a.ts")).toBe(
       "one\ntwo\nthree\nfour\n",
     );
-    expect(
-      await reader.readTextFile(revision, "src/missing.ts"),
-    ).toBeUndefined();
+    expect(await reader.readTextFile(revision, "src/missing.ts")).toBeUndefined();
   });
 });

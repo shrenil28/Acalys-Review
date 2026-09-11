@@ -125,9 +125,7 @@ export type ClaimOutcome =
  */
 export class StaleVerificationClaim extends Error {
   public constructor(public readonly invocationId: string) {
-    super(
-      `Verification invocation ${invocationId} is no longer owned by this claim.`,
-    );
+    super(`Verification invocation ${invocationId} is no longer owned by this claim.`);
     this.name = "StaleVerificationClaim";
   }
 }
@@ -323,15 +321,9 @@ export class VerificationScheduler {
 
       const row = claimed.rows[0];
       if (row !== undefined) {
-        if (
-          row.claim_token === null ||
-          row.claim_token === undefined ||
-          row.claim_expires_at === null ||
-          row.claim_expires_at === undefined
-        ) {
-          throw new Error(
-            "claimed verification invocation has no lease identity",
-          );
+        if (row.claim_token === null || row.claim_token === undefined ||
+            row.claim_expires_at === null || row.claim_expires_at === undefined) {
+          throw new Error("claimed verification invocation has no lease identity");
         }
         return {
           kind: "claimed",
@@ -360,15 +352,10 @@ export class VerificationScheduler {
       );
       const found = current.rows[0];
       if (found === undefined) {
-        throw new Error(
-          `Verification invocation ${invocationId} does not exist.`,
-        );
+        throw new Error(`Verification invocation ${invocationId} does not exist.`);
       }
       if (found.state === "settled") return { kind: "settled" };
-      if (
-        found.claim_expires_at === null ||
-        found.claim_expires_at === undefined
-      ) {
+      if (found.claim_expires_at === null || found.claim_expires_at === undefined) {
         throw new Error("claimed verification invocation has no expiry");
       }
       return {

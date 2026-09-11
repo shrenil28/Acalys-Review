@@ -17,50 +17,29 @@ const mutationRoutes = [
 function preflight() {
   const problems = [];
   for (const path of [appPath, suitePath]) {
-    if (!existsSync(path))
-      problems.push(`${path.slice(ROOT.length + 1)} is missing`);
+    if (!existsSync(path)) problems.push(`${path.slice(ROOT.length + 1)} is missing`);
   }
   if (problems.length > 0) return problems;
 
   const app = readFileSync(appPath, "utf8");
   const tests = readFileSync(suitePath, "utf8");
 
-  if (
-    !app.includes(
-      "const declaredErrorStatuses = route.errorStatuses as readonly number[];",
-    )
-  ) {
-    problems.push(
-      "handler errors must derive their allowed status set from route.errorStatuses",
-    );
+  if (!app.includes("const declaredErrorStatuses = route.errorStatuses as readonly number[];")) {
+    problems.push("handler errors must derive their allowed status set from route.errorStatuses");
   }
   if (!app.includes("if (!declaredErrorStatuses.includes(result.status))")) {
-    problems.push(
-      "undeclared handler error statuses must fail closed at the API boundary",
-    );
+    problems.push("undeclared handler error statuses must fail closed at the API boundary");
   }
   if (!app.includes("if (error instanceof IdempotencyKeyRequired)")) {
-    problems.push(
-      "boundary-owned idempotency validation must remain outside handler status results",
-    );
+    problems.push("boundary-owned idempotency validation must remain outside handler status results");
   }
-  if (
-    !tests.includes(
-      "preserves the boundary-owned idempotency-key error outside route-declared handler statuses",
-    )
-  ) {
+  if (!tests.includes("preserves the boundary-owned idempotency-key error outside route-declared handler statuses")) {
     problems.push("missing idempotency-boundary witness");
   }
-  if (
-    !tests.includes(
-      "serializes a schema-valid handler error only when its status is declared by the route",
-    )
-  ) {
+  if (!tests.includes("serializes a schema-valid handler error only when its status is declared by the route")) {
     problems.push("missing declared handler-status witness");
   }
-  if (
-    !tests.includes("rejects an undeclared schema-valid error status from %s")
-  ) {
+  if (!tests.includes("rejects an undeclared schema-valid error status from %s")) {
     problems.push("missing undeclared handler-status witness");
   }
   for (const route of mutationRoutes) {

@@ -13,8 +13,7 @@ export class StaticModelRouter implements ModelRoutingPolicy {
     version: string,
     routes: Readonly<Record<ModelTaskClass, ModelRoute>>,
   ) {
-    if (version.trim() === "")
-      throw new Error("routing policy version is required");
+    if (version.trim() === "") throw new Error("routing policy version is required");
     this.version = version;
     this.#routes = routes;
   }

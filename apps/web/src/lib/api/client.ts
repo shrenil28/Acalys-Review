@@ -44,81 +44,148 @@ export interface ApiClientOptions {
   readonly fetch?: typeof globalThis.fetch | undefined;
 }
 
+export interface ApiRequestInit {
+  readonly signal?: AbortSignal | undefined;
+  readonly body?: unknown;
+  readonly headers?: Readonly<Record<string, string>> | undefined;
+}
+
 export interface ApiClient {
+  request<TSchema extends z.ZodType>(
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
+    path: string,
+    schema: TSchema,
+    init?: ApiRequestInit,
+  ): Promise<ApiResult<z.infer<TSchema>>>;
   get<TSchema extends z.ZodType>(
     path: string,
     schema: TSchema,
     init?: { readonly signal?: AbortSignal | undefined },
   ): Promise<ApiResult<z.infer<TSchema>>>;
+  post<TSchema extends z.ZodType>(
+    path: string,
+    schema: TSchema,
+    init?: ApiRequestInit,
+  ): Promise<ApiResult<z.infer<TSchema>>>;
+  put<TSchema extends z.ZodType>(
+    path: string,
+    schema: TSchema,
+    init?: ApiRequestInit,
+  ): Promise<ApiResult<z.infer<TSchema>>>;
+  /** Opens a validated authenticated SSE response without exposing fetch to pages. */
+  eventStream(
+    path: string,
+    init?: {
+      readonly signal?: AbortSignal | undefined;
+      readonly lastEventId?: string | undefined;
+    },
+  ): Promise<ApiResult<ReadableStream<Uint8Array>>>;
 }
 
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const doFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
 
+  const headersFor = (extra: Readonly<Record<string, string>> = {}) => {
+    const token = options.authorization?.();
+    return {
+      Accept: "application/json",
+      ...(token === undefined ? {} : { Authorization: token }),
+      ...extra,
+    };
+  };
+
+  const rejected = (status: number): ApiResult<never> => ({
+    kind: "rejected",
+    status,
+    category: categorize(status),
+    detail: `the server responded ${String(status)}`,
+  });
+
+  const request: ApiClient["request"] = async (method, path, schema, init) => {
+    let response: Response;
+    try {
+      const hasBody = init?.body !== undefined;
+      response = await doFetch(`${options.baseUrl}${path}`, {
+        method,
+        credentials: "include",
+        headers: headersFor({
+          ...(hasBody ? { "Content-Type": "application/json" } : {}),
+          ...(init?.headers ?? {}),
+        }),
+        ...(hasBody ? { body: JSON.stringify(init.body) } : {}),
+        ...(init?.signal === undefined ? {} : { signal: init.signal }),
+      });
+    } catch (error) {
+      return {
+        kind: "transport",
+        detail: error instanceof Error ? error.message : "request failed",
+      };
+    }
+
+    if (!response.ok) return rejected(response.status);
+
+    let body: unknown;
+    try {
+      body = await response.json();
+    } catch {
+      return { kind: "contract", detail: "the response was not valid JSON" };
+    }
+
+    const parsed = schema.safeParse(body);
+    if (!parsed.success) {
+      const first = parsed.error.issues[0];
+      return {
+        kind: "contract",
+        detail:
+          first === undefined
+            ? "the response did not match the API contract"
+            : `the response did not match the API contract at ${first.path.join(".") || "(root)"}`,
+      };
+    }
+    return { kind: "ok", value: parsed.data };
+  };
+
   return {
-    async get(path, schema, init) {
+    request,
+    get(path, schema, init) {
+      return request("GET", path, schema, init);
+    },
+    post(path, schema, init) {
+      return request("POST", path, schema, init);
+    },
+    put(path, schema, init) {
+      return request("PUT", path, schema, init);
+    },
+    async eventStream(path, init) {
       let response: Response;
-
       try {
-        // Inside the `try`, with the fetch it belongs to. Obtaining a token is
-        // part of making the request and can fail like any other part of it —
-        // a provider that throws (expired session, refresh failure) outside
-        // this block rejected the promise instead of returning a result, and
-        // the caller's `.then` never ran: the page stayed on `loading`
-        // forever rather than reporting that nothing could be asked.
-        const token = options.authorization?.();
-
         response = await doFetch(`${options.baseUrl}${path}`, {
           method: "GET",
-          headers: {
-            Accept: "application/json",
-            ...(token === undefined ? {} : { Authorization: token }),
-          },
+          credentials: "include",
+          headers: headersFor({
+            Accept: "text/event-stream",
+            ...(init?.lastEventId === undefined
+              ? {}
+              : { "Last-Event-ID": init.lastEventId }),
+          }),
           ...(init?.signal === undefined ? {} : { signal: init.signal }),
         });
       } catch (error) {
-        // Offline, DNS, CORS, abort. No response exists, so nothing can be
-        // said about the resource — which is not the same as saying it is
-        // empty.
         return {
           kind: "transport",
           detail: error instanceof Error ? error.message : "request failed",
         };
       }
 
-      if (!response.ok) {
-        return {
-          kind: "rejected",
-          status: response.status,
-          category: categorize(response.status),
-          // The status, not the body. A body can contain anything a
-          // misconfigured server decided to include.
-          detail: `the server responded ${String(response.status)}`,
-        };
+      if (!response.ok) return rejected(response.status);
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.toLowerCase().startsWith("text/event-stream")) {
+        return { kind: "contract", detail: "the response was not an event stream" };
       }
-
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch {
-        return { kind: "contract", detail: "the response was not valid JSON" };
+      if (response.body === null) {
+        return { kind: "contract", detail: "the event stream had no response body" };
       }
-
-      const parsed = schema.safeParse(body);
-      if (!parsed.success) {
-        // The path that failed, never the value at it — a validation failure
-        // on a credential field would otherwise print the credential.
-        const first = parsed.error.issues[0];
-        return {
-          kind: "contract",
-          detail:
-            first === undefined
-              ? "the response did not match the API contract"
-              : `the response did not match the API contract at ${first.path.join(".") || "(root)"}`,
-        };
-      }
-
-      return { kind: "ok", value: parsed.data };
+      return { kind: "ok", value: response.body };
     },
   };
 }

@@ -8,13 +8,9 @@ import {
 } from "./postgres.js";
 
 const HAS_DOCKER = dockerAvailable();
-const describeWithPostgres = HAS_DOCKER
-  ? describe
-  : describe.skip.bind(describe);
+const describeWithPostgres = HAS_DOCKER ? describe : describe.skip.bind(describe);
 if (!HAS_DOCKER) {
-  console.warn(
-    "\n  ⚠ Docker unavailable — Phase 3 mutation-clock tests SKIPPED.\n",
-  );
+  console.warn("\n  ⚠ Docker unavailable — Phase 3 mutation-clock tests SKIPPED.\n");
 }
 
 describeWithPostgres("Phase 3 mutation database-clock authority", () => {
@@ -91,13 +87,9 @@ describeWithPostgres("Phase 3 mutation database-clock authority", () => {
   }
 
   it("uses one Postgres timestamp for idempotency, request, run, dispatch, and the create response", async () => {
-    const before = await database.pool.query<{ at: Date }>(
-      "SELECT clock_timestamp() AS at",
-    );
+    const before = await database.pool.query<{ at: Date }>("SELECT clock_timestamp() AS at");
     const outcome = await createReview("mutation-clock-create");
-    const after = await database.pool.query<{ at: Date }>(
-      "SELECT clock_timestamp() AS at",
-    );
+    const after = await database.pool.query<{ at: Date }>("SELECT clock_timestamp() AS at");
     expect(outcome.kind).toBe("result");
 
     const timestamps = await database.pool.query<{
@@ -134,14 +126,9 @@ describeWithPostgres("Phase 3 mutation database-clock authority", () => {
     ].map((value) => value.getTime());
     expect(new Set(millis).size).toBe(1);
     expect(millis[0]).toBeGreaterThanOrEqual(before.rows[0]?.at.getTime() ?? 0);
-    expect(millis[0]).toBeLessThanOrEqual(
-      after.rows[0]?.at.getTime() ?? Number.MAX_SAFE_INTEGER,
-    );
+    expect(millis[0]).toBeLessThanOrEqual(after.rows[0]?.at.getTime() ?? Number.MAX_SAFE_INTEGER);
 
-    const body =
-      outcome.kind === "result"
-        ? (outcome.body as { createdAt: string })
-        : undefined;
+    const body = outcome.kind === "result" ? (outcome.body as { createdAt: string }) : undefined;
     expect(Date.parse(body?.createdAt ?? "")).toBe(millis[0]);
   });
 
@@ -163,20 +150,13 @@ describeWithPostgres("Phase 3 mutation database-clock authority", () => {
 
     const store = new ApiMutationStore(database.pool);
     const cancelled = await store.cancelReview({
-      identity: identity(
-        "mutation-clock-cancel",
-        "cancelReview",
-        "b".repeat(64),
-      ),
+      identity: identity("mutation-clock-cancel", "cancelReview", "b".repeat(64)),
       reviewRunId: runId,
       reason: "clock monotonicity witness",
     });
     expect(cancelled.kind).toBe("result");
 
-    const persisted = await database.pool.query<{
-      completed_at: Date;
-      transition_at: Date;
-    }>(
+    const persisted = await database.pool.query<{ completed_at: Date; transition_at: Date }>(
       `SELECT r.completed_at, t.at AS transition_at
          FROM review_runs r
          JOIN review_run_transitions t ON t.run_id=r.id AND t.to_state='cancelled'
@@ -186,28 +166,17 @@ describeWithPostgres("Phase 3 mutation database-clock authority", () => {
     const row = persisted.rows[0];
     expect(row).toBeDefined();
     if (row === undefined || futureStartedAt === undefined) return;
-    expect(row.completed_at.getTime()).toBeGreaterThanOrEqual(
-      futureStartedAt.getTime(),
-    );
+    expect(row.completed_at.getTime()).toBeGreaterThanOrEqual(futureStartedAt.getTime());
     expect(row.transition_at.getTime()).toBe(row.completed_at.getTime());
-    const body =
-      cancelled.kind === "result"
-        ? (cancelled.body as { completedAt: string })
-        : undefined;
-    expect(Date.parse(body?.completedAt ?? "")).toBe(
-      row.completed_at.getTime(),
-    );
+    const body = cancelled.kind === "result" ? (cancelled.body as { completedAt: string }) : undefined;
+    expect(Date.parse(body?.completedAt ?? "")).toBe(row.completed_at.getTime());
   });
 
   it("converges concurrent same-key replicas on one database-timestamped response", async () => {
     const firstStore = new ApiMutationStore(database.pool);
     const secondStore = new ApiMutationStore(database.pool);
     const request = {
-      identity: identity(
-        "mutation-clock-concurrent",
-        "createReview",
-        "c".repeat(64),
-      ),
+      identity: identity("mutation-clock-concurrent", "createReview", "c".repeat(64)),
       repositoryId: REPO,
       pullRequestId: PR,
       requestedBy: { kind: "api_key", id: "key-mutation-clock" },
@@ -218,10 +187,7 @@ describeWithPostgres("Phase 3 mutation database-clock authority", () => {
       firstStore.createReview(request),
       secondStore.createReview(request),
     ]);
-    expect(results.map((result) => result.kind).sort()).toEqual([
-      "replay",
-      "result",
-    ]);
+    expect(results.map((result) => result.kind).sort()).toEqual(["replay", "result"]);
     const bodies = results.map((result) =>
       result.kind === "result" || result.kind === "replay"
         ? (result.body as { id: string; createdAt: string })
@@ -229,43 +195,29 @@ describeWithPostgres("Phase 3 mutation database-clock authority", () => {
     );
     expect(bodies[0]).toEqual(bodies[1]);
 
-    const rows = await database.pool.query<{
-      created_at: Date;
-      completed_at: Date;
-    }>(
+    const rows = await database.pool.query<{ created_at: Date; completed_at: Date }>(
       `SELECT created_at,completed_at FROM api_idempotency
         WHERE organization_id=$1 AND idempotency_key=$2`,
       [ORG, "mutation-clock-concurrent"],
     );
     expect(rows.rowCount).toBe(1);
-    expect(rows.rows[0]?.completed_at.getTime()).toBe(
-      rows.rows[0]?.created_at.getTime(),
-    );
+    expect(rows.rows[0]?.completed_at.getTime()).toBe(rows.rows[0]?.created_at.getTime());
   });
 
   it("never completes an idempotency record before its own database-created timestamp", async () => {
     const store = new ApiMutationStore(database.pool);
     const outcome = await store.cancelReview({
-      identity: identity(
-        "mutation-clock-not-found",
-        "cancelReview",
-        "d".repeat(64),
-      ),
+      identity: identity("mutation-clock-not-found", "cancelReview", "d".repeat(64)),
       reviewRunId: "0192f8a1-0000-7000-8000-000000000799",
     });
     expect(outcome.kind).toBe("result");
     if (outcome.kind === "result") expect(outcome.status).toBe(404);
 
-    const row = await database.pool.query<{
-      created_at: Date;
-      completed_at: Date;
-    }>(
+    const row = await database.pool.query<{ created_at: Date; completed_at: Date }>(
       `SELECT created_at,completed_at FROM api_idempotency
         WHERE organization_id=$1 AND idempotency_key=$2`,
       [ORG, "mutation-clock-not-found"],
     );
-    expect(row.rows[0]?.completed_at.getTime()).toBe(
-      row.rows[0]?.created_at.getTime(),
-    );
+    expect(row.rows[0]?.completed_at.getTime()).toBe(row.rows[0]?.created_at.getTime());
   });
 });

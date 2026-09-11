@@ -162,13 +162,6 @@ export default tseslint.config(
     files: ["**/tests/**/*.ts", "**/*.test.ts"],
     rules: {
       "no-restricted-syntax": "off",
-      // Promise-returning test doubles intentionally settle synchronously.
-      // Requiring a meaningless `await` in every mock obscures the behavior
-      // under test without making production code safer.
-      "@typescript-eslint/require-await": "off",
-      // Error-boundary tests deliberately throw hostile non-Error values to
-      // prove that public responses still fail closed.
-      "@typescript-eslint/only-throw-error": "off",
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/no-unsafe-argument": "off",

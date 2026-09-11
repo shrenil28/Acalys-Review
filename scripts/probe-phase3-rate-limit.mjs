@@ -16,8 +16,7 @@ function count(source, needle) {
 function preflight() {
   const problems = [];
   for (const path of [storePath, mainPath, appPath, suitePath]) {
-    if (!existsSync(path))
-      problems.push(`${path.slice(ROOT.length + 1)} is missing`);
+    if (!existsSync(path)) problems.push(`${path.slice(ROOT.length + 1)} is missing`);
   }
   if (problems.length > 0) return problems;
 
@@ -27,43 +26,28 @@ function preflight() {
   const tests = readFileSync(suitePath, "utf8");
 
   if (count(store, "consumeApiRateLimits") !== 1) {
-    problems.push(
-      "AuthStore must define exactly one consumeApiRateLimits method",
-    );
+    problems.push("AuthStore must define exactly one consumeApiRateLimits method");
   }
   if (!store.includes("date_trunc('minute', clock_timestamp())")) {
     problems.push("rate-limit window must come from the Postgres clock");
   }
   if (
-    !store.includes(
-      "WHEN api_rate_windows.request_count < $4 THEN api_rate_windows.request_count + 1",
-    ) ||
+    !store.includes("WHEN api_rate_windows.request_count < $4 THEN api_rate_windows.request_count + 1") ||
     !store.includes("ELSE api_rate_windows.request_count")
   ) {
-    problems.push(
-      "denied rate-limit counters must saturate monotonically without decreasing",
-    );
+    problems.push("denied rate-limit counters must saturate monotonically without decreasing");
   }
   if (!store.includes("await refund(principalBucket)")) {
     problems.push("organization denial must refund the principal increment");
   }
-  if (
-    main.includes("getTime()/60_000") ||
-    main.includes("windowStart=new Date")
-  ) {
-    problems.push(
-      "API bootstrap must not derive rate-limit windows from process time",
-    );
+  if (main.includes("getTime()/60_000") || main.includes("windowStart=new Date")) {
+    problems.push("API bootstrap must not derive rate-limit windows from process time");
   }
   if (!main.includes("authStore.consumeApiRateLimits")) {
-    problems.push(
-      "API bootstrap must use the transactional dual-bucket limiter",
-    );
+    problems.push("API bootstrap must use the transactional dual-bucket limiter");
   }
   if (/consumeRate:\s*\(input:[\s\S]{0,180}readonly now: Date/u.test(app)) {
-    problems.push(
-      "API rate-limit callback must not accept an application timestamp",
-    );
+    problems.push("API rate-limit callback must not accept an application timestamp");
   }
   for (const witness of [
     "uses the database clock as the shared fixed-window authority",
@@ -71,8 +55,7 @@ function preflight() {
     "does not burn principal quota when the organization bucket is already exhausted",
     "never lowers an existing counter during a rolling limit change",
   ]) {
-    if (!tests.includes(witness))
-      problems.push(`missing Postgres witness: ${witness}`);
+    if (!tests.includes(witness)) problems.push(`missing Postgres witness: ${witness}`);
   }
   return problems;
 }

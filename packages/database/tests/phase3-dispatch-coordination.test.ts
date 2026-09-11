@@ -12,13 +12,9 @@ import {
 } from "./postgres.js";
 
 const HAS_DOCKER = dockerAvailable();
-const describeWithPostgres = HAS_DOCKER
-  ? describe
-  : describe.skip.bind(describe);
+const describeWithPostgres = HAS_DOCKER ? describe : describe.skip.bind(describe);
 if (!HAS_DOCKER) {
-  console.warn(
-    "\n  ⚠ Docker unavailable — Phase 3 dispatch coordination tests SKIPPED.\n",
-  );
+  console.warn("\n  ⚠ Docker unavailable — Phase 3 dispatch coordination tests SKIPPED.\n");
 }
 
 describeWithPostgres("Phase 3 API dispatch coordination", () => {
@@ -90,11 +86,9 @@ describeWithPostgres("Phase 3 API dispatch coordination", () => {
       correlationId: `corr-${key}`,
     });
     expect(result.kind).toBe("result");
-    if (result.kind !== "result")
-      throw new Error("review creation did not return a result");
+    if (result.kind !== "result") throw new Error("review creation did not return a result");
     const body = result.body as { id?: unknown };
-    if (typeof body.id !== "string")
-      throw new Error("review creation returned no run id");
+    if (typeof body.id !== "string") throw new Error("review creation returned no run id");
     return body.id;
   }
 
@@ -160,10 +154,7 @@ describeWithPostgres("Phase 3 API dispatch coordination", () => {
     expect(claim).toBeDefined();
     if (claim === undefined) return;
 
-    const acquisition = await dispatch.acquireExecutionGuard(
-      runId,
-      claim.claimGeneration,
-    );
+    const acquisition = await dispatch.acquireExecutionGuard(runId, claim.claimGeneration);
     expect(acquisition.kind).toBe("owned");
     if (acquisition.kind !== "owned") return;
 
@@ -223,10 +214,7 @@ describeWithPostgres("Phase 3 API dispatch coordination", () => {
     expect(claim).toBeDefined();
     if (claim === undefined) return;
 
-    const acquisition = await first.acquireExecutionGuard(
-      runId,
-      claim.claimGeneration,
-    );
+    const acquisition = await first.acquireExecutionGuard(runId, claim.claimGeneration);
     expect(acquisition.kind).toBe("owned");
     if (acquisition.kind !== "owned") return;
 
@@ -262,19 +250,15 @@ describeWithPostgres("Phase 3 API dispatch coordination", () => {
     expect(claim).toBeDefined();
     if (claim === undefined) return;
 
-    await first.deadLetter(
-      runId,
-      claim.claimGeneration,
-      "acalys.error.dispatch-test",
+    await first.deadLetter(runId, claim.claimGeneration, "acalys.error.dispatch-test");
+    await expect(first.complete(runId, claim.claimGeneration)).rejects.toBeInstanceOf(
+      StaleReviewDispatchClaim,
     );
-    await expect(
-      first.complete(runId, claim.claimGeneration),
-    ).rejects.toBeInstanceOf(StaleReviewDispatchClaim);
     const dead = await database.pool.query<{
       claim_generation: number;
       dead_lettered_at: Date | null;
     }>(
-      `SELECT claim_generation::integer AS claim_generation,dead_lettered_at
+      `SELECT claim_generation,dead_lettered_at
          FROM review_dispatch_jobs
         WHERE review_run_id=$1`,
       [runId],
@@ -294,11 +278,7 @@ describeWithPostgres("Phase 3 API dispatch coordination", () => {
     expect(right.attempt).toBe(2);
     expect(left.reviewRunId).not.toBe(runId);
 
-    const runs = await database.pool.query<{
-      id: string;
-      attempt: number;
-      state: string;
-    }>(
+    const runs = await database.pool.query<{ id: string; attempt: number; state: string }>(
       `SELECT id,attempt,state FROM review_runs WHERE request_id=(SELECT request_id FROM review_runs WHERE id=$1) ORDER BY attempt`,
       [runId],
     );
@@ -317,12 +297,11 @@ describeWithPostgres("Phase 3 API dispatch coordination", () => {
       [[runId, left.reviewRunId]],
     );
     expect(jobs.rows).toHaveLength(2);
+    expect(jobs.rows.find((row) => row.review_run_id === runId)?.dead_lettered_at).toBeInstanceOf(
+      Date,
+    );
     expect(
-      jobs.rows.find((row) => row.review_run_id === runId)?.dead_lettered_at,
-    ).toBeInstanceOf(Date);
-    expect(
-      jobs.rows.find((row) => row.review_run_id === left.reviewRunId)
-        ?.dead_lettered_at,
+      jobs.rows.find((row) => row.review_run_id === left.reviewRunId)?.dead_lettered_at,
     ).toBeNull();
   });
 });

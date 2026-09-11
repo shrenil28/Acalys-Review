@@ -50,10 +50,8 @@ const ALL_MUTATIONS = [
     boundary: "idempotency",
     name: "an idempotency key may be reused for a different canonical request",
     file: "packages/database/src/api-mutation-store.ts",
-    // Anchored on the expression, not the whole statement: the formatter is free
-    // to wrap the `if`, and a statement-shaped anchor silently stops matching.
-    find: "row.request_digest !== identity.requestDigest",
-    replace: "false",
+    find: '        if (row.request_digest !== identity.requestDigest) return { kind: "conflict" };',
+    replace: '        if (false) return { kind: "conflict" };',
     suite: "packages/database/tests/phase3-api.test.ts",
   },
   {
@@ -62,10 +60,9 @@ const ALL_MUTATIONS = [
     name: "a malformed successful handler result is serialized",
     file: "apps/api/src/app.ts",
     find:
-      "          const checked = route.response.safeParse(result.body);\n" +
+      '          const checked = route.response.safeParse(result.body);\n' +
       '          if (!checked.success) throw new Error("RESPONSE_CONTRACT_VIOLATION");',
-    replace:
-      "          const checked = { success: true, data: result.body } as const;",
+    replace: "          const checked = { success: true, data: result.body } as const;",
     suite: "apps/api/tests/app.test.ts",
   },
 ];
@@ -87,21 +84,16 @@ function manifestPreflight() {
   if (MUTATIONS.length === 0) problems.push("no mutation definitions selected");
 
   for (const mutation of MUTATIONS) {
-    if (ids.has(mutation.id))
-      problems.push(`duplicate mutation id ${String(mutation.id)}`);
+    if (ids.has(mutation.id)) problems.push(`duplicate mutation id ${String(mutation.id)}`);
     ids.add(mutation.id);
 
     const target = join(ROOT, mutation.file);
     if (!existsSync(target)) {
-      problems.push(
-        `#${String(mutation.id)} target does not exist: ${mutation.file}`,
-      );
+      problems.push(`#${String(mutation.id)} target does not exist: ${mutation.file}`);
       continue;
     }
     if (!existsSync(join(ROOT, mutation.suite))) {
-      problems.push(
-        `#${String(mutation.id)} suite does not exist: ${mutation.suite}`,
-      );
+      problems.push(`#${String(mutation.id)} suite does not exist: ${mutation.suite}`);
     }
 
     const source = readFileSync(target, "utf8");
@@ -133,12 +125,7 @@ function assertExecutionTreeIsSafe() {
   try {
     dirty = execFileSync(
       "git",
-      [
-        "status",
-        "--porcelain",
-        "--",
-        ...new Set(MUTATIONS.map((mutation) => mutation.file)),
-      ],
+      ["status", "--porcelain", "--", ...new Set(MUTATIONS.map((mutation) => mutation.file))],
       { cwd: ROOT, encoding: "utf8" },
     ).trim();
   } catch {
@@ -251,17 +238,11 @@ for (const mutation of MUTATIONS) {
 
   const mutated = original.replace(mutation.find, mutation.replace);
   writeFileSync(path, mutated);
-  const present =
-    readFileSync(path, "utf8").includes(mutation.replace) &&
-    mutated !== original;
+  const present = readFileSync(path, "utf8").includes(mutation.replace) && mutated !== original;
 
   if (!present) {
     restore(mutation.file, backup);
-    results.push({
-      ...mutation,
-      verdict: "INVALID",
-      detail: "mutation not present on disk",
-    });
+    results.push({ ...mutation, verdict: "INVALID", detail: "mutation not present on disk" });
     continue;
   }
 
@@ -278,16 +259,13 @@ for (const mutation of MUTATIONS) {
     continue;
   }
 
-  const assertions = (report.testResults ?? []).flatMap(
-    (file) => file.assertionResults ?? [],
-  );
+  const assertions = (report.testResults ?? []).flatMap((file) => file.assertionResults ?? []);
   const notRun = new Set(["pending", "skipped", "todo"]);
   const executed = assertions.filter((test) => !notRun.has(test.status)).length;
   const skipped = assertions.filter((test) => notRun.has(test.status)).length;
   const failed = assertions.filter((test) => test.status === "failed").length;
   const brokenSuites = (report.testResults ?? []).filter(
-    (file) =>
-      file.status === "failed" && (file.assertionResults ?? []).length === 0,
+    (file) => file.status === "failed" && (file.assertionResults ?? []).length === 0,
   ).length;
 
   const verdict =
@@ -296,14 +274,7 @@ for (const mutation of MUTATIONS) {
       : executed === 0 || skipped > 0 || brokenSuites > 0
         ? "INVALID"
         : "SURVIVED";
-  results.push({
-    ...mutation,
-    verdict,
-    executed,
-    skipped,
-    failed,
-    brokenSuites,
-  });
+  results.push({ ...mutation, verdict, executed, skipped, failed, brokenSuites });
 }
 
 for (const result of results) {
@@ -316,12 +287,8 @@ for (const result of results) {
   );
 }
 
-const semantic = results.filter(
-  (result) => result.verdict === "SEMANTIC_KILL",
-).length;
-const survived = results.filter(
-  (result) => result.verdict === "SURVIVED",
-).length;
+const semantic = results.filter((result) => result.verdict === "SEMANTIC_KILL").length;
+const survived = results.filter((result) => result.verdict === "SURVIVED").length;
 const invalid = results.filter((result) => result.verdict === "INVALID").length;
 console.log(
   `Phase 3 mutations: ${String(semantic)} semantic kills, ` +

@@ -17,6 +17,10 @@ export default defineConfig({
         __dirname,
         "../../packages/contracts/src/api/v1/index.ts",
       ),
+      "@acalys/contracts/dashboard/v1": path.resolve(
+        __dirname,
+        "../../packages/contracts/src/dashboard/v1/index.ts",
+      ),
     },
   },
   server: { port: 5173, host: true },

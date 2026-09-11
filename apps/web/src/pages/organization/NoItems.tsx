@@ -1,7 +1,7 @@
 import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Input, Textarea } from "@/components/ui/Input";
-import type { PathInstruction } from "@/data/orgSettings";
+import type { PathInstruction } from "./settings-model";
 
 /**
  * The dotted "No items" placeholder the app shows for every list-shaped
