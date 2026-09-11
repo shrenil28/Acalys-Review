@@ -61,10 +61,6 @@ export interface KnowledgeView {
 const repositoryPageSchema = pageDtoSchema(repositoryDtoSchema);
 const knowledgePageSchema = pageDtoSchema(knowledgeItemDtoSchema);
 
-function failureFrom<T>(result: ApiResult<T>): LiveFailure | undefined {
-  if (result.kind === "ok") return undefined;
-  return result as LiveFailure;
-}
 
 
 function apiClient(baseUrl: string, authorization = browserAuthorization()) {
@@ -322,11 +318,10 @@ export function useRepositoryDirectory(refreshToken = 0): LiveState<readonly Rep
     void request.promise
       .then((result) => {
         if (!active) return;
-        const failure = failureFrom(result);
         setState(
-          failure === undefined
+          result.kind === "ok"
             ? { status: "ready", source: "api", value: result.value }
-            : { status: "failed", failure },
+            : { status: "failed", failure: result },
         );
       })
       .catch((error: unknown) => {
@@ -403,11 +398,10 @@ export function useKnowledgeDirectory(): LiveState<readonly KnowledgeView[]> {
     void request.promise
       .then((result) => {
         if (!active) return;
-        const failure = failureFrom(result);
         setState(
-          failure === undefined
+          result.kind === "ok"
             ? { status: "ready", source: "api", value: result.value }
-            : { status: "failed", failure },
+            : { status: "failed", failure: result },
         );
       })
       .catch((error: unknown) => {

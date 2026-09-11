@@ -8,6 +8,7 @@ import {
   VerificationStore,
   type AttemptRecord,
   type ScheduledInvocation,
+  type VerificationClaim,
 } from "../src/index.js";
 import {
   assertSuiteIsActuallyRunning,
@@ -145,12 +146,34 @@ describeWithPostgres("Verification persistence converges", () => {
       reason,
     });
 
-  const attempt = (
+  /**
+   * Ownership for an invocation, taken once and reused.
+   *
+   * An attempt may only be written under the lease that owns the invocation,
+   * so the helper claims on first use and remembers the token: re-claiming an
+   * invocation this worker already holds would come back `busy`, not a second
+   * generation.
+   */
+  const claims = new Map<string, VerificationClaim>();
+  const claimFor = async (invocationId: string): Promise<VerificationClaim> => {
+    const held = claims.get(invocationId);
+    if (held !== undefined) return held;
+    const ownership = await scheduler().claim(invocationId, "test-worker", 60_000);
+    if (ownership.kind !== "claimed") {
+      throw new Error(`expected a verification claim, got ${ownership.kind}`);
+    }
+    claims.set(invocationId, ownership.claim);
+    return ownership.claim;
+  };
+
+  const attempt = async (
     ids: { runId: string; candidateId: string },
     invocation: ScheduledInvocation,
     overrides: Partial<AttemptRecord> = {},
-  ): AttemptRecord => ({
+  ): Promise<AttemptRecord> => ({
     invocationId: invocation.invocationId,
+    claimToken: (await claimFor(invocation.invocationId)).claimToken,
+    claimGeneration: (await claimFor(invocation.invocationId)).claimGeneration,
     attempt: invocation.attempt,
     candidateFindingId: ids.candidateId,
     reviewRunId: ids.runId,
@@ -174,7 +197,7 @@ describeWithPostgres("Verification persistence converges", () => {
     // Redelivery, not retry. An at-least-once worker delivering its own work
     // twice must converge rather than accumulate.
     const ids = await seed();
-    const record = attempt(ids, await schedule(ids, 1));
+    const record = await attempt(ids, await schedule(ids, 1));
 
     const [first, second] = await Promise.all([
       store().recordAttempt(record),
@@ -195,7 +218,7 @@ describeWithPostgres("Verification persistence converges", () => {
     expect(first.attempt).toBe(1);
 
     const rejected = await store().recordAttempt(
-      attempt(ids, first, {
+      await attempt(ids, first, {
         outcome: {
           status: "completed",
           decision: "rejected",
@@ -213,7 +236,7 @@ describeWithPostgres("Verification persistence converges", () => {
     expect(second.attempt).toBe(2);
     expect(second.allocated).toBe(true);
 
-    const verified = await store().recordAttempt(attempt(ids, second));
+    const verified = await store().recordAttempt(await attempt(ids, second));
 
     expect(verified.id).not.toBe(rejected.id);
 
@@ -243,7 +266,7 @@ describeWithPostgres("Verification persistence converges", () => {
     // `invocation_id` would have let it through while looking correct.
     await expect(
       store().recordAttempt(
-        attempt(ids, { ...second, attempt: first.attempt }),
+        await attempt(ids, { ...second, attempt: first.attempt }),
       ),
     ).rejects.toThrow(/verification_attempts_from_invocation/);
     expect(await store().attemptsFor(ids.candidateId)).toHaveLength(0);
@@ -252,10 +275,10 @@ describeWithPostgres("Verification persistence converges", () => {
     // attempt, `ON CONFLICT (invocation_id)` converges without inserting, so
     // the database checks nothing and the caller is handed a row it did not
     // describe. The store refuses it explicitly.
-    await store().recordAttempt(attempt(ids, first));
+    await store().recordAttempt(await attempt(ids, first));
     await expect(
       store().recordAttempt(
-        attempt(ids, { ...first, attempt: second.attempt }),
+        await attempt(ids, { ...first, attempt: second.attempt }),
       ),
     ).rejects.toThrow(AttemptIdentityConflict);
 
@@ -277,12 +300,12 @@ describeWithPostgres("Verification persistence converges", () => {
     const ids = await seed();
     const invocation = await schedule(ids, 1);
 
-    await store().recordAttempt(attempt(ids, invocation));
+    await store().recordAttempt(await attempt(ids, invocation));
 
     // Same invocation. Different conclusion.
     await expect(
       store().recordAttempt(
-        attempt(ids, invocation, {
+        await attempt(ids, invocation, {
           outcome: {
             status: "completed",
             decision: "rejected",
@@ -297,7 +320,7 @@ describeWithPostgres("Verification persistence converges", () => {
     // Same decision, different reasons — still two executions, still refused.
     await expect(
       store().recordAttempt(
-        attempt(ids, invocation, {
+        await attempt(ids, invocation, {
           outcome: {
             status: "completed",
             decision: "verified",
@@ -312,7 +335,7 @@ describeWithPostgres("Verification persistence converges", () => {
     // A genuine redelivery — byte-identical result — still converges. Without
     // this the check would have made at-least-once delivery unusable, which is
     // the failure mode a stricter invariant usually introduces.
-    const replayed = await store().recordAttempt(attempt(ids, invocation));
+    const replayed = await store().recordAttempt(await attempt(ids, invocation));
     expect(replayed.inserted).toBe(false);
     expect(await store().attemptsFor(ids.candidateId)).toHaveLength(1);
   }, 60_000);
@@ -320,7 +343,7 @@ describeWithPostgres("Verification persistence converges", () => {
   it("stores an unavailable attempt without it resembling a decision", async () => {
     const ids = await seed();
     const stored = await store().recordAttempt(
-      attempt(ids, await schedule(ids, 1), {
+      await attempt(ids, await schedule(ids, 1), {
         outcome: { status: "unavailable", failure: "model_timeout" },
       }),
     );
@@ -337,7 +360,7 @@ describeWithPostgres("Verification persistence converges", () => {
     // is two comments about one defect.
     const ids = await seed();
     const stored = await store().recordAttempt(
-      attempt(ids, await schedule(ids, 1)),
+      await attempt(ids, await schedule(ids, 1)),
     );
 
     const promotion = {
@@ -376,7 +399,7 @@ describeWithPostgres("Verification persistence converges", () => {
     // The property that matters most: not merely idempotent function by
     // function, but convergent across a crash boundary.
     const ids = await seed();
-    const record = attempt(ids, await schedule(ids, 1));
+    const record = await attempt(ids, await schedule(ids, 1));
 
     const first = await store().recordAttempt(record);
     // The worker dies here. A replacement redelivers the same invocation.
@@ -412,7 +435,7 @@ describeWithPostgres("Verification persistence converges", () => {
     const ids = await seed();
     for (const decision of ["rejected", "inconclusive"] as const) {
       const stored = await store().recordAttempt(
-        attempt(ids, await schedule(ids, decision === "rejected" ? 1 : 2), {
+        await attempt(ids, await schedule(ids, decision === "rejected" ? 1 : 2), {
           outcome: {
             status: "completed",
             decision,

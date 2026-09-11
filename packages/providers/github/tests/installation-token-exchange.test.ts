@@ -21,7 +21,7 @@ const signer = {
 
 describe("GitHub installation token exchange", () => {
   it("requests the exact repository and permission scope and normalizes the token", async () => {
-    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
     const exchange = createGithubInstallationTokenExchange({
       signer,
       fetch: async (input, init) => {

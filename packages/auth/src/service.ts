@@ -5,7 +5,7 @@ import {
   UnauthorizedError,
   ValidationError,
 } from "@acalys/contracts/domain";
-import { type AuthRole, AuthStore } from "@acalys/database";
+import { AuthStore } from "@acalys/database";
 
 export const AUTH_ROLES = ["owner", "admin", "member", "read_only"] as const;
 export type Role = (typeof AUTH_ROLES)[number];

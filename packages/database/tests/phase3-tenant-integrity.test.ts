@@ -200,7 +200,7 @@ async function expectConstraint(
   expectedConstraint: string,
 ): Promise<void> {
   try {
-    await database.pool.query(sql, values);
+    await database.pool.query(sql, [...values]);
     throw new Error(`expected ${expectedConstraint} to reject the write`);
   } catch (error) {
     expect((error as { readonly constraint?: string }).constraint).toBe(expectedConstraint);

@@ -594,7 +594,7 @@ function page(
   }
 }
 
-function publicPage<T extends { readonly items: readonly unknown[]; readonly nextCursor?: string }>(
+function publicPage<T extends { readonly items: readonly unknown[]; readonly nextCursor?: string | undefined }>(
   value: T,
   binding: PaginationCursorBinding,
   encode: (binding: PaginationCursorBinding, rowId: string) => string,

@@ -152,7 +152,7 @@ describe("GithubOAuthService", () => {
       stateSecrets: new CredentialRing("state-secret"),
       callbackUrl: "https://app.example.test/oauth/github/callback",
       now: () => NOW,
-      fetchImpl: (async (input: URL | RequestInfo) => {
+      fetchImpl: (async (input: URL | Request | string) => {
         const url = String(input);
         requests.push(url);
         if (url.includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { status: 200 });
@@ -195,7 +195,7 @@ describe("GitlabOAuthService", () => {
       stateSecrets: new CredentialRing("gitlab-state"),
       callbackUrl: "https://app.example.test/dashboard/v1/auth/gitlab/callback",
       now: () => NOW,
-      fetchImpl: (async (input: URL | RequestInfo) => {
+      fetchImpl: (async (input: URL | Request | string) => {
         const url = String(input);
         if (url.endsWith("/oauth/token")) return new Response(JSON.stringify({ access_token: "gitlab-token" }), { status: 200 });
         if (url.endsWith("/api/v4/user/emails")) return new Response(JSON.stringify([

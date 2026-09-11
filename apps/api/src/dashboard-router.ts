@@ -492,9 +492,12 @@ export function createDashboardRouter(options: DashboardRouterOptions): Router {
       const body = dashboardUpdateMemberBodySchema.parse(request.body);
       const memberId = dashboardIdSchema.parse(request.params["id"] ?? "");
       const outcome = await options.store.updateMemberRole({ organizationId: principal.organizationId, actorUserId: principal.userId, memberId, role: body.role });
-      if (outcome.kind === "not_found") { response.status(404).json({ code: "NOT_FOUND", message: "Member not found" }); return; }
-      if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot change that role" }); return; }
-      if (outcome.kind === "last_owner") { response.status(409).json({ code: "LAST_OWNER", message: "The final organization owner cannot be demoted" }); return; }
+      if (outcome.kind !== "updated") {
+        if (outcome.kind === "not_found") { response.status(404).json({ code: "NOT_FOUND", message: "Member not found" }); return; }
+        if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot change that role" }); return; }
+        response.status(409).json({ code: "LAST_OWNER", message: "The final organization owner cannot be demoted" });
+        return;
+      }
       const row = outcome.member;
       response.json(dashboardMemberSchema.parse({ id: row.id, userId: row.userId, displayName: row.displayName, email: row.primaryEmail,
         provider: row.provider, providerUserId: row.providerUserId, role: row.role, analyticsTeam: row.analyticsTeam,
@@ -508,8 +511,11 @@ export function createDashboardRouter(options: DashboardRouterOptions): Router {
       const memberId = dashboardIdSchema.parse(request.params["id"] ?? "");
       const body = dashboardUpdateMemberAnalyticsTeamBodySchema.parse(request.body);
       const outcome = await options.store.updateMemberAnalyticsTeamAuthorized({ organizationId: principal.organizationId, actorUserId: principal.userId, memberId, team: body.team });
-      if (outcome.kind === "not_found") { response.status(404).json({ code: "NOT_FOUND", message: "Member not found" }); return; }
-      if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot update analytics teams" }); return; }
+      if (outcome.kind !== "updated") {
+        if (outcome.kind === "not_found") { response.status(404).json({ code: "NOT_FOUND", message: "Member not found" }); return; }
+        response.status(403).json({ code: "FORBIDDEN", message: "This account cannot update analytics teams" });
+        return;
+      }
       const row = outcome.member;
       response.json(dashboardMemberSchema.parse({ id: row.id, userId: row.userId, displayName: row.displayName, email: row.primaryEmail,
         provider: row.provider, providerUserId: row.providerUserId, role: row.role, analyticsTeam: row.analyticsTeam,
@@ -575,9 +581,12 @@ export function createDashboardRouter(options: DashboardRouterOptions): Router {
       const outcome = await options.store.removeMemberAuthorized({
         organizationId: principal.organizationId, actorUserId: principal.userId, memberId,
       });
-      if (outcome.kind === "not_found") { response.status(404).json({ code: "NOT_FOUND", message: "Member not found" }); return; }
-      if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot remove that member" }); return; }
-      if (outcome.kind === "last_owner") { response.status(409).json({ code: "LAST_OWNER", message: "The final organization owner cannot be removed" }); return; }
+      if (outcome.kind !== "removed") {
+        if (outcome.kind === "not_found") { response.status(404).json({ code: "NOT_FOUND", message: "Member not found" }); return; }
+        if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot remove that member" }); return; }
+        response.status(409).json({ code: "LAST_OWNER", message: "The final organization owner cannot be removed" });
+        return;
+      }
       response.json(dashboardRemoveMemberResponseSchema.parse({
         removed: true, revokedSessions: outcome.revokedSessions, revokedApiKeys: outcome.revokedApiKeys,
       }));
@@ -763,8 +772,11 @@ export function createDashboardRouter(options: DashboardRouterOptions): Router {
         organizationId: principal.organizationId, actorUserId: principal.userId,
         expectedRevision: body.expectedRevision, secret, ttlMillis: 15 * 60_000,
       });
-      if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot install Jira" }); return; }
-      if (outcome.kind === "revision_conflict") { response.status(409).json({ code: "REVISION_CONFLICT", message: "Jira integration changed; reload and retry" }); return; }
+      if (outcome.kind !== "created") {
+        if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot install Jira" }); return; }
+        response.status(409).json({ code: "REVISION_CONFLICT", message: "Jira integration changed; reload and retry" });
+        return;
+      }
       response.json(dashboardJiraChallengeResponseSchema.parse({ secret, expiresAt: outcome.expiresAt.toISOString() }));
     } catch (error) { sendFailure(response, error); }
   });
@@ -1124,9 +1136,12 @@ export function createDashboardRouter(options: DashboardRouterOptions): Router {
       if (options.reportStore === undefined) { response.status(503).json({ code: "REPORTS_NOT_CONFIGURED", message: "Report storage is unavailable" }); return; }
       const reportId = dashboardIdSchema.parse(request.params["id"] ?? ""); const body = dashboardGenerateReportBodySchema.parse(request.body);
       const outcome = await options.reportStore.generateAuthorized({ organizationId: principal.organizationId, actorUserId: principal.userId, reportId, expectedRevision: body.expectedRevision });
-      if (outcome.kind === "not_found") { response.status(404).json({ code: "NOT_FOUND", message: "Report not found" }); return; }
-      if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot generate reports" }); return; }
-      if (outcome.kind === "revision_conflict") { response.status(409).json({ code: "REVISION_CONFLICT", message: "Report changed; reload and retry" }); return; }
+      if (outcome.kind !== "generated") {
+        if (outcome.kind === "not_found") { response.status(404).json({ code: "NOT_FOUND", message: "Report not found" }); return; }
+        if (outcome.kind === "forbidden") { response.status(403).json({ code: "FORBIDDEN", message: "This account cannot generate reports" }); return; }
+        response.status(409).json({ code: "REVISION_CONFLICT", message: "Report changed; reload and retry" });
+        return;
+      }
       response.status(201).json(dashboardReportRunSchema.parse(outcome.run));
     } catch (error) { sendFailure(response, error); }
   });

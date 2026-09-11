@@ -9,7 +9,10 @@ import { Table, TableEmpty, TableShell, Td, Th, Tr } from "@/components/ui/Table
 import { useToast } from "@/components/ui/Toast";
 import { LiveFailureState, LiveTableLoading } from "@/components/live/LiveDataState";
 import { Page, PageHeader } from "@/components/layout/PageHeader";
-import { loadSecurityFindings, type DashboardSecurityFinding } from "@/lib/api/dashboardAdmin";
+import { loadSecurityFindings, type DashboardSecurityFindingsResponse } from "@/lib/api/dashboardAdmin";
+import type { LiveFailure } from "@/lib/api/liveDashboard";
+
+type DashboardSecurityFinding = DashboardSecurityFindingsResponse["items"][number];
 import { resolveDataConfig } from "@/lib/api/config";
 import { dismissFinding } from "@/lib/api/reviewWorkflow";
 import { cn } from "@/lib/utils";
@@ -22,13 +25,13 @@ export function PrFindingsLive() {
   const toast = useToast();
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
   const [items, setItems] = useState<readonly DashboardSecurityFinding[]>([]);
-  const [failure, setFailure] = useState<{ kind: "transport" | "contract" | "rejected"; detail: string; status?: number } | null>(null);
+  const [failure, setFailure] = useState<LiveFailure | null>(null);
   const [query, setQuery] = useState(""); const [repo, setRepo] = useState("All"); const [severity, setSeverity] = useState("All"); const [expanded, setExpanded] = useState<string[]>([]);
   const [dismissTarget, setDismissTarget] = useState<DashboardSecurityFinding | null>(null); const [reason, setReason] = useState(""); const [dismissing, setDismissing] = useState(false);
   const refresh = async (signal?: AbortSignal) => {
     const result = await loadSecurityFindings({ limit: 1000 }, signal); if (signal?.aborted) return;
     if (result.kind === "ok") { setItems(result.value.items); setState("ready"); return; }
-    if (result.kind === "rejected") setFailure({ kind: "rejected", status: result.status, detail: result.detail }); else if (result.kind === "transport" || result.kind === "contract") setFailure({ kind: result.kind, detail: result.detail }); else setFailure({ kind: "contract", detail: result.detail }); setState("failed");
+    if (result.kind === "rejected") setFailure({ kind: "rejected", status: result.status, category: result.category, detail: result.detail }); else if (result.kind === "transport" || result.kind === "contract") setFailure({ kind: result.kind, detail: result.detail }); else setFailure({ kind: "contract", detail: result.detail }); setState("failed");
   };
   useEffect(() => { const controller = new AbortController(); void refresh(controller.signal); return () => controller.abort(); }, []);
   const repos = useMemo(() => ["All", ...new Set(items.map((item) => item.repositoryName))], [items]);

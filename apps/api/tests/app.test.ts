@@ -40,10 +40,10 @@ interface AppFixtureOptions {
   readonly organizationId?: string;
   readonly cursorSecrets?: readonly string[];
   readonly rateAllowed?: boolean;
-  readonly api?: Partial<Record<keyof ApiStore, (...args: never[]) => unknown>>;
-  readonly mutations?: Partial<
-    Record<keyof ApiMutationStore, (...args: never[]) => unknown>
-  >;
+  readonly api?: Partial<Record<keyof ApiStore, (...args: never[]) => unknown>> | undefined;
+  readonly mutations?:
+    | Partial<Record<keyof ApiMutationStore, (...args: never[]) => unknown>>
+    | undefined;
   readonly logger?: ApiRequestLogger;
   readonly heartbeatMillis?: number;
   readonly pollMillis?: number;
@@ -109,56 +109,57 @@ const TOO_LONG_ID = "x".repeat(257);
 const PAGINATION_CURSOR_UUID = "018f4b20-7c00-7abc-8def-1234567890ab";
 
 
-const malformedRequests = [
-  ["listRepositories", "get", "/api/v1/repositories?limit=0"],
-  ["getRepository", "get", `/api/v1/repositories/${TOO_LONG_ID}`],
+/** One route exercise: name, method, path, and an optional request body. */
+type RouteCase = readonly [name: string, method: string, path: string, body: unknown];
+
+const malformedRequests: readonly RouteCase[] = [
+  ["listRepositories", "get", "/api/v1/repositories?limit=0", undefined],
+  ["getRepository", "get", `/api/v1/repositories/${TOO_LONG_ID}`, undefined],
   [
     "listPullRequests",
     "get",
-    `/api/v1/repositories/${TOO_LONG_ID}/pull-requests`,
-  ],
+    `/api/v1/repositories/${TOO_LONG_ID}/pull-requests`, undefined],
   ["createReview", "post", "/api/v1/reviews", { repositoryId: "" }],
-  ["getReview", "get", `/api/v1/reviews/${TOO_LONG_ID}`],
+  ["getReview", "get", `/api/v1/reviews/${TOO_LONG_ID}`, undefined],
   ["cancelReview", "post", "/api/v1/reviews/review-1/cancel", { reason: "" }],
-  ["getReviewSummary", "get", `/api/v1/reviews/${TOO_LONG_ID}/summary`],
-  ["listReviewFindings", "get", "/api/v1/reviews/review-1/findings?limit=0"],
-  ["listReviewChecks", "get", `/api/v1/reviews/${TOO_LONG_ID}/pre-merge-checks`],
-  ["getFinding", "get", `/api/v1/findings/${TOO_LONG_ID}`],
+  ["getReviewSummary", "get", `/api/v1/reviews/${TOO_LONG_ID}/summary`, undefined],
+  ["listReviewFindings", "get", "/api/v1/reviews/review-1/findings?limit=0", undefined],
+  ["listReviewChecks", "get", `/api/v1/reviews/${TOO_LONG_ID}/pre-merge-checks`, undefined],
+  ["getFinding", "get", `/api/v1/findings/${TOO_LONG_ID}`, undefined],
   ["dismissFinding", "post", "/api/v1/findings/finding-1/dismiss", { reason: "" }],
   [
     "listConversations",
     "get",
-    `/api/v1/repositories/${TOO_LONG_ID}/conversations`,
-  ],
-  ["resolveConversation", "post", `/api/v1/conversations/${TOO_LONG_ID}/resolve`],
-  ["listKnowledge", "get", "/api/v1/knowledge?limit=0"],
+    `/api/v1/repositories/${TOO_LONG_ID}/conversations`, undefined],
+  ["resolveConversation", "post", `/api/v1/conversations/${TOO_LONG_ID}/resolve`, undefined],
+  ["listKnowledge", "get", "/api/v1/knowledge?limit=0", undefined],
 ] as const;
 
-const successRequests = [
-  ["listRepositories", "get", "/api/v1/repositories"],
-  ["getRepository", "get", "/api/v1/repositories/repository-1"],
-  ["listPullRequests", "get", "/api/v1/repositories/repository-1/pull-requests"],
+const successRequests: readonly RouteCase[] = [
+  ["listRepositories", "get", "/api/v1/repositories", undefined],
+  ["getRepository", "get", "/api/v1/repositories/repository-1", undefined],
+  ["listPullRequests", "get", "/api/v1/repositories/repository-1/pull-requests", undefined],
   [
     "createReview",
     "post",
     "/api/v1/reviews",
     { repositoryId: "repository-1", pullRequestId: "pull-request-1" },
   ],
-  ["getReview", "get", "/api/v1/reviews/review-1"],
+  ["getReview", "get", "/api/v1/reviews/review-1", undefined],
   ["cancelReview", "post", "/api/v1/reviews/review-1/cancel", {}],
-  ["getReviewSummary", "get", "/api/v1/reviews/review-1/summary"],
-  ["listReviewFindings", "get", "/api/v1/reviews/review-1/findings"],
-  ["listReviewChecks", "get", "/api/v1/reviews/review-1/pre-merge-checks"],
-  ["getFinding", "get", "/api/v1/findings/finding-1"],
+  ["getReviewSummary", "get", "/api/v1/reviews/review-1/summary", undefined],
+  ["listReviewFindings", "get", "/api/v1/reviews/review-1/findings", undefined],
+  ["listReviewChecks", "get", "/api/v1/reviews/review-1/pre-merge-checks", undefined],
+  ["getFinding", "get", "/api/v1/findings/finding-1", undefined],
   [
     "dismissFinding",
     "post",
     "/api/v1/findings/finding-1/dismiss",
     { reason: "not actionable" },
   ],
-  ["listConversations", "get", "/api/v1/repositories/repository-1/conversations"],
-  ["resolveConversation", "post", "/api/v1/conversations/conversation-1/resolve"],
-  ["listKnowledge", "get", "/api/v1/knowledge"],
+  ["listConversations", "get", "/api/v1/repositories/repository-1/conversations", undefined],
+  ["resolveConversation", "post", "/api/v1/conversations/conversation-1/resolve", undefined],
+  ["listKnowledge", "get", "/api/v1/knowledge", undefined],
 ] as const;
 
 async function send(
@@ -171,7 +172,7 @@ async function send(
   let call = method === "post" ? agent.post(path) : agent.get(path);
   call = call.set("authorization", "Bearer test");
   if (method === "post") call = call.set("idempotency-key", "phase3-test-key");
-  if (body !== undefined) call = call.send(body);
+  if (body !== undefined) call = call.send(body as object);
   return call;
 }
 
@@ -182,7 +183,7 @@ describe("API v1 boundary", () => {
 
   it.each(malformedRequests)(
     "rejects malformed input before the %s handler",
-    async (_name, method, path, body) => {
+    async (_name: string, method: string, path: string, body: unknown) => {
       let calls = 0;
       const counting = async () => {
         calls += 1;
@@ -259,7 +260,7 @@ describe("API v1 boundary", () => {
 
   it.each(successRequests)(
     "refuses a malformed successful response from %s",
-    async (_name, method, path, body) => {
+    async (_name: string, method: string, path: string, body: unknown) => {
       const response = await send(appWith(), method, path, body);
       expect(response.status).toBe(500);
       expect(response.body.code).toBe("INTERNAL_ERROR");

@@ -1,3 +1,4 @@
+import type { LiveFailure } from "@/lib/api/liveDashboard";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { LiveFailureState, LiveMisconfiguredState } from "@/components/live/LiveDataState";
 import { Button } from "@/components/ui/Button";
@@ -36,7 +37,7 @@ function LiveSettings() {
   const toast = useToast();
   const [baseline, setBaseline] = useState<DashboardNotificationPreferences | null>(null);
   const [draft, setDraft] = useState<DashboardNotificationPreferences | null>(null);
-  const [failure, setFailure] = useState<{ kind: "transport" | "contract" | "rejected"; detail: string; status?: number } | null>(null);
+  const [failure, setFailure] = useState<LiveFailure | null>(null);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -44,7 +45,7 @@ function LiveSettings() {
     void loadNotificationPreferences(controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.kind === "ok") { setBaseline(result.value); setDraft(result.value); setFailure(null); return; }
-      if (result.kind === "rejected") setFailure({ kind: "rejected", detail: result.detail, status: result.status });
+      if (result.kind === "rejected") setFailure({ kind: "rejected", status: result.status, category: result.category, detail: result.detail });
       else if (result.kind === "transport" || result.kind === "contract") setFailure({ kind: result.kind, detail: result.detail });
       else setFailure({ kind: "contract", detail: result.detail });
     });

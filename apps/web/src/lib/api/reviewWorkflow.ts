@@ -160,7 +160,7 @@ export function useLivePullRequests(refreshToken = 0): LiveState<readonly LivePu
           (repo) => collectPullRequests(api, repo, signal),
         );
         const failed = results.find((result) => result.kind !== "ok");
-        if (failed !== undefined && failed.kind !== "ok") return failed;
+        if (failed !== undefined) return failed;
         return {
           kind: "ok" as const,
           value: results.flatMap((result) => (result.kind === "ok" ? result.value : [])),
@@ -306,7 +306,7 @@ export async function loadReviewArtifacts(
     collectConversations(api, pullRequest, signal),
   ]);
   const failed = [findings, checks, conversations].find((result) => result.kind !== "ok");
-  if (failed !== undefined && failed.kind !== "ok") return failed;
+  if (failed !== undefined) return failed;
 
   let summary: ReviewSummaryDto | undefined;
   if (run.state === "completed") {

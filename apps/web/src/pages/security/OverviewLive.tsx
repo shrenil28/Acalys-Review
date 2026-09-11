@@ -1,3 +1,4 @@
+import type { LiveFailure } from "@/lib/api/liveDashboard";
 import { useEffect, useState } from "react";
 import { ShieldAlert } from "lucide-react";
 import { LiveEmptyState, LiveFailureState, LiveTableLoading } from "@/components/live/LiveDataState";
@@ -10,13 +11,13 @@ import { loadSecurityFindings, type DashboardSecurityFindingsResponse } from "@/
 export function SecurityOverviewLive() {
   const [state, setState] = useState<"loading" | "ready" | "failed">("loading");
   const [data, setData] = useState<DashboardSecurityFindingsResponse | null>(null);
-  const [failure, setFailure] = useState<{ kind: "transport" | "contract" | "rejected"; detail: string; status?: number } | null>(null);
+  const [failure, setFailure] = useState<LiveFailure | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     void loadSecurityFindings({ limit: 20 }, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.kind === "ok") { setData(result.value); setState("ready"); return; }
-      if (result.kind === "rejected") setFailure({ kind: "rejected", status: result.status, detail: result.detail });
+      if (result.kind === "rejected") setFailure({ kind: "rejected", status: result.status, category: result.category, detail: result.detail });
       else if (result.kind === "transport" || result.kind === "contract") setFailure({ kind: result.kind, detail: result.detail });
       else setFailure({ kind: "contract", detail: result.detail });
       setState("failed");

@@ -370,6 +370,31 @@ function LiveIntegrations() {
     toast({ title: "Jira disconnected" });
   };
 
+  /**
+   * The MCP and Jira sections are built but deliberately not rendered: both stay
+   * stored-only until their authenticated control-plane and review-runtime paths
+   * exist, as the note at the foot of this page says. Their state, readers and
+   * handlers are held here so the capability is deferred rather than deleted,
+   * and this reference keeps that deferral explicit instead of unused.
+   */
+  void [
+    mcpOpen,
+    setMcpOpen,
+    mcpServers,
+    connectMcp,
+    removeMcp,
+    jiraChallenge,
+    jiraMetadata,
+    issueJiraChallenge,
+    disconnectJira,
+    Copy,
+    Server,
+    Ticket,
+    Trash2,
+    Textarea,
+    copyToClipboard,
+  ];
+
 
   return (
     <Page className="max-w-[1040px]">
@@ -396,7 +421,7 @@ function LiveIntegrations() {
                   <h2 className="text-sm font-medium text-fg">Linear</h2>
                   <p className="text-xs text-fg-subtle">Issue context for the exact admitted review subject</p>
                 </div>
-                <Badge tone={linear?.status === "connected" ? "green" : "neutral"}>
+                <Badge tone={linear?.status === "connected" ? "success" : "neutral"}>
                   {linear?.status === "connected" ? "Connected" : "Not connected"}
                 </Badge>
               </header>
@@ -447,7 +472,7 @@ function LiveIntegrations() {
                   <h2 className="text-sm font-medium text-fg">CircleCI</h2>
                   <p className="text-xs text-fg-subtle">Exact head-SHA and pull-request CI evidence</p>
                 </div>
-                <Badge tone={circleci?.status === "connected" ? "green" : "neutral"}>
+                <Badge tone={circleci?.status === "connected" ? "success" : "neutral"}>
                   {circleci?.status === "connected" ? "Connected" : "Not connected"}
                 </Badge>
               </header>
@@ -500,7 +525,7 @@ function LiveIntegrations() {
                       Account {connection.externalAccountId}{connection.installationRef ? ` · Installation ${connection.installationRef}` : ""}
                     </span>
                   </span>
-                  <Badge tone={connection.status === "active" ? "green" : "neutral"}>{connection.status}</Badge>
+                  <Badge tone={connection.status === "active" ? "success" : "neutral"}>{connection.status}</Badge>
                 </div>
               ))}
             </div>

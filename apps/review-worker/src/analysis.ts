@@ -790,7 +790,7 @@ export async function runRealAnalysis(
           configFactsDigest: config.digest,
           instructionFactsDigest: instructionIdentity,
           contextDigest,
-          ...(options.llm.externalContextDigest === undefined
+          ...(options.llm?.externalContextDigest === undefined
             ? {}
             : { externalContextDigest: options.llm.externalContextDigest }),
           ...(options.reviewPolicy === undefined

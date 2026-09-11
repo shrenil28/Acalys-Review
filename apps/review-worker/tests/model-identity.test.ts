@@ -2,18 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import { modelAnalyzerInputDigest } from "../src/analysis.js";
 
+const baseChangedFile = {
+  path: "src/a.ts",
+  content: "export const a = 1;",
+  changedLines: [1],
+} as const;
+
 const base = {
   repositoryId: "repo",
   baseSha: "base",
   mergeBaseSha: "merge",
   headSha: "head",
-  changed: [
-    {
-      path: "src/a.ts",
-      content: "export const a = 1;",
-      changedLines: [1],
-    },
-  ],
+  changed: [baseChangedFile],
   configFactsDigest: "c".repeat(64),
   instructionFactsDigest: "i".repeat(64),
   contextDigest: "x".repeat(64),
@@ -50,7 +50,7 @@ describe("model analyzer input identity", () => {
       ...base,
       changed: [
         {
-          ...base.changed[0],
+          ...baseChangedFile,
           base: { kind: "present" as const, content: "export const a = 0;" },
         },
       ],
@@ -59,7 +59,7 @@ describe("model analyzer input identity", () => {
       ...withBase,
       changed: [
         {
-          ...withBase.changed[0],
+          ...baseChangedFile,
           base: { kind: "present" as const, content: "export const a = -1;" },
         },
       ],

@@ -15,7 +15,7 @@ import type {
 class MemoryUsage implements ModelUsagePort {
   readonly observations: ModelInteractionObservation[] = [];
 
-  public async usageForRun() {
+  public async usageForRun(_reviewRunId: string) {
     const live = this.observations.filter((entry) => entry.providerDispatched);
     return {
       calls: live.length,

@@ -92,7 +92,7 @@ export function DashboardLayout() {
           <TimeRangePicker range={range} onChange={setRange} timezone={timezone} onTimezoneChange={setTimezone} refresh={refresh} onRefreshChange={setRefresh} />
         </TopBarActions>
         <section aria-label="Dashboard filters" className="sticky top-0 z-20 flex flex-wrap items-center gap-2 bg-canvas/95 px-4 py-2 backdrop-blur sm:px-6">
-          <FilterChip label="Repository Name" options={repositoryOptions} selected={repo} onChange={setRepo} />
+          <FilterChip label="Repository Name" options={[...repositoryOptions]} selected={repo} onChange={setRepo} />
           <FilterChip label="Username" options={[...usernameOptions]} selected={username} onChange={setUsername} />
           <FilterChip label={isIdeCli ? "Team" : "Teams"} options={[...teamOptions]} selected={team} onChange={setTeam} />
           {analytics.status === "ready" ? <span className="text-2xs text-fg-subtle">{analytics.value.summary.reviews} review runs in the selected range</span> : null}

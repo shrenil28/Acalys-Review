@@ -1,3 +1,4 @@
+import type { LiveFailure } from "@/lib/api/liveDashboard";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, Info, PlusCircle, Search, Trash2, X } from "lucide-react";
 import { LiveEmptyState, LiveFailureState, LiveTableLoading } from "@/components/live/LiveDataState";
@@ -45,8 +46,8 @@ function FilterChip({ label, options, selected, onChange }: { label: string; opt
   );
 }
 
-function failure(result: Awaited<ReturnType<typeof loadReviewCaches>>): { kind: "transport" | "contract" | "rejected"; detail: string; status?: number } {
-  if (result.kind === "rejected") return { kind: "rejected", status: result.status, detail: result.detail };
+function failure(result: Awaited<ReturnType<typeof loadReviewCaches>>): LiveFailure {
+  if (result.kind === "rejected") return { kind: "rejected", status: result.status, category: result.category, detail: result.detail };
   if (result.kind === "transport" || result.kind === "contract") return { kind: result.kind, detail: result.detail };
   return { kind: "contract", detail: result.kind === "misconfigured" ? result.detail : "The cache response could not be loaded." };
 }

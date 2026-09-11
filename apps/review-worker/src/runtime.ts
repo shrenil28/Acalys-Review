@@ -275,7 +275,7 @@ export function createProductionReviewRuntime(
     ...(options.worker?.leaseMillis === undefined ? {} : { leaseMillis: options.worker.leaseMillis }),
     ...(options.worker?.pollIntervalMillis === undefined ? {} : { pollIntervalMillis: options.worker.pollIntervalMillis }),
     ...(options.worker?.retryBackoffMillis === undefined ? {} : { retryBackoffMillis: options.worker.retryBackoffMillis }),
-    ...(options.worker?.observer === undefined ? {} : { observer: { onError: options.worker.observer.onError } }),
+    ...(options.worker?.observer === undefined ? {} : { observer: options.worker.observer }),
   });
 
   const worker = createWorker({
