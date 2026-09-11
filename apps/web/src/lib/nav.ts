@@ -65,9 +65,17 @@ export const navigation: NavEntry[] = [
       items: [
         { label: "PR reviews", to: "/analytics/pr-reviews" },
         { label: "IDE/CLI reviews", to: "/analytics/ide-cli-reviews" },
+        {
+          label: "PR Security reviews",
+          to: "/analytics/pr-security-reviews",
+        },
         { label: "Reports", to: "/reports" },
       ],
     },
+  },
+  {
+    kind: "link",
+    leaf: { label: "Connections", to: "/integrations", icon: Plug },
   },
   { kind: "divider", id: "d1" },
   {
@@ -81,7 +89,6 @@ export const navigation: NavEntry[] = [
       items: [
         { label: "Triage", to: "/review/triage" },
         { label: "Repositories", to: "/review/repositories" },
-        { label: "Integrations", to: "/integrations" },
         { label: "Learnings", to: "/review/learnings" },
         { label: "Caches", to: "/review/cache" },
         { label: "Organization Settings", to: "/organization/settings/general" },

@@ -125,6 +125,15 @@
   .hover-surface:hover {
     background-color: var(--cr-hover);
   }
+
+  /* The sidebar uses floating "View more" controls as its scroll affordance. */
+  .sidebar-nav-scroll {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .sidebar-nav-scroll::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @layer utilities {

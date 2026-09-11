@@ -148,6 +148,7 @@ function ScrollPill({
 
 export function SidebarNav() {
   const scrollerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [overflow, setOverflow] = useState({ up: false, down: false });
 
   const syncOverflow = useCallback(() => {
@@ -160,29 +161,45 @@ export function SidebarNav() {
   }, []);
 
   useEffect(() => {
-    syncOverflow();
     const node = scrollerRef.current;
     if (!node) return;
+
+    // The viewport can stay the same size while expanding a group changes the
+    // scrollable content height, so observe both boxes.
     const observer = new ResizeObserver(syncOverflow);
     observer.observe(node);
-    return () => observer.disconnect();
+    if (contentRef.current) observer.observe(contentRef.current);
+    const frame = requestAnimationFrame(syncOverflow);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
   }, [syncOverflow]);
 
-  const scrollBy = (delta: number) =>
-    scrollerRef.current?.scrollBy({ top: delta, behavior: "smooth" });
+  const scrollBy = (direction: -1 | 1) => {
+    const node = scrollerRef.current;
+    if (!node) return;
+    node.scrollBy({
+      top: direction * Math.max(180, node.clientHeight * 0.62),
+      behavior: "smooth",
+    });
+  };
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {overflow.up && <ScrollPill direction="up" onClick={() => scrollBy(-220)} />}
+      {overflow.up && <ScrollPill direction="up" onClick={() => scrollBy(-1)} />}
       {overflow.down && (
-        <ScrollPill direction="down" onClick={() => scrollBy(220)} />
+        <ScrollPill direction="down" onClick={() => scrollBy(1)} />
       )}
       <div
         ref={scrollerRef}
         onScroll={syncOverflow}
-        className="min-h-0 flex-1 overflow-y-auto"
+        className="sidebar-nav-scroll min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
-        <NavList />
+        <div ref={contentRef}>
+          <NavList />
+        </div>
       </div>
     </div>
   );

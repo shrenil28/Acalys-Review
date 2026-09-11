@@ -1,277 +1,262 @@
-import { useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-import { ArrowRight, BookOpen, Info, ListChecks, Plus, PlusCircle } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { Card, CardHeader } from "@/components/ui/Card";
+import { Drawer } from "@/components/ui/Modal";
+import { SearchInput } from "@/components/ui/Input";
+import { Skeleton, usePageLoad } from "@/components/ui/Skeleton";
+import { Table, TableShell, Td, Th, Tr } from "@/components/ui/Table";
 import { useToast } from "@/components/ui/Toast";
-import { FormSkeleton, usePageLoad } from "@/components/ui/Skeleton";
-import { GitHubIcon, JiraIcon, LinearIcon } from "@/components/icons";
+import {
+  GitHubIcon,
+  GitLabIcon,
+  JiraIcon,
+  LinearIcon,
+} from "@/components/icons";
 import { Page } from "@/components/layout/PageHeader";
 import { TopBarActions } from "@/components/layout/TopBar";
-import {
-  ciIntegrations,
-  issueTrackers,
-  mcpServers,
-  type Capability,
-} from "@/data/integrations";
-import { McpServerModal } from "@/components/integrations/McpServerModal";
-import {
-  CircleCiModal,
-  JiraInstallModal,
-} from "@/components/integrations/ConnectModals";
-import { cn } from "@/lib/utils";
+import { connectorCatalogue, type Connector } from "@/data/integrations";
 
-const tabs = [
-  { slug: "mcp", label: "MCP Servers" },
-  { slug: "integrations", label: "Issue Tracking" },
-  { slug: "ci-cd", label: "CI/CD" },
-] as const;
+/** A connection the organization has authorized. */
+interface Connection {
+  id: string;
+  connector: Connector;
+  type: string;
+  scopes: string;
+}
 
-type TabSlug = (typeof tabs)[number]["slug"];
+const COLUMNS = ["Connection", "Connector", "Type", "Scopes"] as const;
 
-/** Brand mark where we have one, otherwise a lettered tile. */
-function ServiceMark({ id, letter }: { id: string; letter: string }) {
+/** Brand mark where the app ships one, otherwise a tinted lettered tile. */
+function ConnectorMark({ connector }: { connector: Connector }) {
   const shared = "h-4 w-4 text-fg";
-  if (id === "copilot") return <GitHubIcon className={shared} />;
-  if (id === "linear") return <LinearIcon className={shared} />;
-  if (id === "jira") return <JiraIcon className={shared} />;
+  if (connector.id === "github" || connector.id === "copilot")
+    return <GitHubIcon className={shared} />;
+  if (connector.id === "gitlab" || connector.id === "gitlab-self-hosted")
+    return <GitLabIcon className={shared} />;
+  if (connector.id === "jira") return <JiraIcon className={shared} />;
+  if (connector.id === "linear") return <LinearIcon className={shared} />;
   return (
-    <span className="flex h-4 w-4 items-center justify-center rounded-[3px] bg-[var(--cr-active)] text-[9px] font-semibold text-fg">
-      {letter}
+    <span
+      aria-hidden
+      className="flex h-4 w-4 items-center justify-center rounded-[3px] text-[9px] font-semibold text-white"
+      style={{ backgroundColor: connector.tone }}
+    >
+      {connector.letter}
     </span>
   );
 }
 
-function CapabilityTile({ capability }: { capability: Capability }) {
-  const Icon = capability.label === "Coding Plan" ? ListChecks : BookOpen;
+/**
+ * The table's own loading shape.
+ *
+ * The header row stays on screen while the body is pending, so the column
+ * meaning is readable before any data arrives and the layout does not shift
+ * when it does.
+ */
+function LoadingRows() {
   return (
-    <Link
-      to={capability.to}
-      className="flex items-start gap-2.5 rounded-md border border-line px-3 py-2.5 transition-colors hover:bg-[var(--cr-hover)]"
+    <tbody>
+      {Array.from({ length: 6 }, (_, row) => (
+        <Tr key={row}>
+          {COLUMNS.map((column, index) => (
+            <Td key={column}>
+              <Skeleton
+                className="h-3.5"
+                style={{ width: index === 0 ? "58%" : "44%" }}
+              />
+            </Td>
+          ))}
+        </Tr>
+      ))}
+    </tbody>
+  );
+}
+
+function AddConnectionDrawer({
+  open,
+  onClose,
+  onSelect,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSelect: (connector: Connector) => void;
+}) {
+  const [query, setQuery] = useState("");
+
+  const categories = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return connectorCatalogue;
+    return connectorCatalogue
+      .map((category) => ({
+        ...category,
+        connectors: category.connectors.filter((connector) =>
+          connector.name.toLowerCase().includes(needle),
+        ),
+      }))
+      .filter((category) => category.connectors.length > 0);
+  }, [query]);
+
+  return (
+    <Drawer
+      open={open}
+      onClose={onClose}
+      size="wide"
+      title={
+        <>
+          <h2 className="text-sm font-medium text-fg">Add connection</h2>
+          <p className="mt-0.5 text-xs text-fg-subtle">
+            Choose a connector to get started.
+          </p>
+        </>
+      }
+      footer={
+        <Button size="sm" variant="outline" onClick={onClose}>
+          Cancel
+        </Button>
+      }
     >
-      <Icon className="mt-0.5 h-3.5 w-3.5 shrink-0 text-fg-subtle" />
-      <span className="min-w-0">
-        <span className="flex items-center gap-1 text-sm text-fg">
-          {capability.label}
-          <ArrowRight className="h-3 w-3 text-fg-subtle" />
-        </span>
-        <span className="mt-0.5 block text-xs text-fg-subtle">
-          {capability.description}
-        </span>
-      </span>
-    </Link>
+      <SearchInput
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder="Search connectors..."
+        aria-label="Search connectors"
+      />
+
+      {categories.length === 0 ? (
+        <p className="py-10 text-center text-sm text-fg-subtle">
+          No connectors match “{query.trim()}”.
+        </p>
+      ) : (
+        categories.map((category) => (
+          <section key={category.id} className="mt-5">
+            <h3 className="text-xs font-medium text-fg-subtle">
+              {category.label}
+            </h3>
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {category.connectors.map((connector) => (
+                <button
+                  key={connector.id}
+                  type="button"
+                  onClick={() => onSelect(connector)}
+                  className="flex items-center gap-2.5 rounded-md border border-line bg-surface px-3 py-2.5 text-left transition-colors hover:bg-[var(--cr-hover)]"
+                >
+                  <ConnectorMark connector={connector} />
+                  <span className="min-w-0 truncate text-sm text-fg">
+                    {connector.name}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))
+      )}
+    </Drawer>
   );
 }
 
 export function IntegrationsPage() {
   const loading = usePageLoad();
   const toast = useToast();
-  const [params, setParams] = useSearchParams();
-  const [added] = useState<string[]>([]);
-  const [connected, setConnected] = useState<string[]>([]);
-  const [mcpModal, setMcpModal] = useState<{ name: string; host: string } | null>(null);
-  const [mcpOpen, setMcpOpen] = useState(false);
-  const [jiraOpen, setJiraOpen] = useState(false);
-  const [circleOpen, setCircleOpen] = useState(false);
+  const [connections, setConnections] = useState<Connection[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  const tab = (tabs.find((entry) => entry.slug === params.get("tab"))?.slug ??
-    "mcp");
-
-  const setTab = (slug: TabSlug) => {
-    const next = new URLSearchParams(params);
-    if (slug === "mcp") next.delete("tab");
-    else next.set("tab", slug);
-    setParams(next, { replace: true });
+  const add = (connector: Connector) => {
+    setPickerOpen(false);
+    setConnections((current) => [
+      ...current,
+      {
+        id: `${connector.id}-${String(current.length + 1)}`,
+        connector,
+        type: "OAuth",
+        scopes: "Read",
+      },
+    ]);
+    toast({ title: `${connector.name} connected` });
   };
 
-  const connect = (name: string, id: string) => {
-    setConnected((current) => [...current, id]);
-    toast({ title: `${name} connected` });
-  };
-
-  if (loading)
-    return (
-      <Page className="max-w-[1040px]">
-        <FormSkeleton cards={3} />
-      </Page>
-    );
+  // Absence of data and absence of knowledge are different states: while the
+  // request is pending the table shows its own shape, and only a settled empty
+  // result is allowed to say there is nothing here.
+  const empty = !loading && connections.length === 0;
 
   return (
-    <Page className="max-w-[1040px]">
+    <Page className="max-w-[1140px]">
       <TopBarActions>
         <Button
           size="sm"
-          variant="outline"
+          variant="secondary"
           icon={<Plus className="h-3.5 w-3.5" />}
-          onClick={() => {
-            setMcpModal(null);
-            setMcpOpen(true);
-          }}
+          onClick={() => setPickerOpen(true)}
         >
-          New MCP Server
+          Add connection
         </Button>
       </TopBarActions>
 
-      {/* Segmented tabs, centred above the content */}
-      <div className="flex justify-center">
-        <div className="inline-flex items-center gap-1 rounded-lg border border-line bg-surface p-1">
-          {tabs.map((entry) => (
-            <button
-              key={entry.slug}
-              type="button"
-              onClick={() => setTab(entry.slug)}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm transition-colors",
-                entry.slug === tab
-                  ? "bg-[var(--cr-active)] font-medium text-fg"
-                  : "text-fg-subtle hover:text-fg",
-              )}
-            >
-              {entry.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <Card>
+        <CardHeader
+          title="Connections"
+          description="Manage the connections available to Review, Slack, and Discord."
+        />
+      </Card>
 
-      {tab === "mcp" && (
-        <div className="mt-6 space-y-2.5">
-          <div
-            className="flex items-start gap-3 rounded-lg border border-line px-4 py-3.5"
-            style={{
-              backgroundImage:
-                "radial-gradient(var(--cr-line) 0.5px, transparent 0.5px)",
-              backgroundSize: "5px 5px",
-            }}
+      {empty ? (
+        <div className="mt-4 flex flex-col items-center justify-center rounded-lg border border-line bg-surface px-6 py-16 text-center">
+          <p className="text-sm font-medium text-fg">No connections yet</p>
+          <p className="mt-1.5 text-sm text-fg-subtle">
+            Connect your tools to let the agent access external services.
+          </p>
+          <Button
+            className="mt-5"
+            size="sm"
+            variant="secondary"
+            onClick={() => setPickerOpen(true)}
           >
-            <Info className="mt-0.5 h-4 w-4 shrink-0 text-fg-subtle" />
-            <p className="text-sm leading-relaxed text-fg-muted">
-              MCP server connections are shared across your organization. To
-              maintain least privilege, we recommend configuring with a{" "}
-              <strong className="font-semibold text-fg">service account</strong> or{" "}
-              <strong className="font-semibold text-fg">scoped credentials</strong>.
-            </p>
-          </div>
-
-          {mcpServers.map((server) => (
-            <div
-              key={server.id}
-              className="flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3.5"
-            >
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--cr-hover)]">
-                <ServiceMark id={server.id} letter={server.letter} />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium text-fg">
-                  {server.name}
-                </span>
-                <span className="block truncate font-mono text-xs text-fg-subtle">
-                  {server.host}
-                </span>
-              </span>
-              <Button
-                size="sm"
-                variant={added.includes(server.id) ? "outline" : "secondary"}
-                icon={
-                  added.includes(server.id) ? undefined : (
-                    <PlusCircle className="h-3.5 w-3.5" />
-                  )
-                }
-                onClick={() => {
-                  setMcpModal({ name: server.name, host: server.host });
-                  setMcpOpen(true);
-                }}
-              >
-                {added.includes(server.id) ? "Added" : "Add"}
-              </Button>
-            </div>
-          ))}
+            Add connection
+          </Button>
         </div>
-      )}
-
-      {tab === "integrations" && (
-        <div className="mt-6 grid gap-3 md:grid-cols-2">
-          {issueTrackers.map((tracker) => (
-            <section
-              key={tracker.id}
-              className="flex flex-col rounded-lg border border-line bg-surface p-4"
-            >
-              <header className="flex items-center gap-2.5">
-                <ServiceMark id={tracker.id} letter={tracker.name[0]} />
-                <h2 className="flex-1 text-sm font-medium text-fg">
-                  {tracker.name}
-                </h2>
-                <Button
-                  size="sm"
-                  variant={connected.includes(tracker.id) ? "outline" : "secondary"}
-                  onClick={() => (tracker.id === "jira" ? setJiraOpen(true) : connect(tracker.name, tracker.id))}
-                  disabled={connected.includes(tracker.id)}
-                >
-                  {connected.includes(tracker.id) ? "Connected" : "Connect"}
-                </Button>
-              </header>
-
-              <p className="mt-4 text-sm text-fg-muted">{tracker.tagline}</p>
-
-              {tracker.note && (
-                <div className="mt-3 space-y-1.5">
-                  <p className="text-xs text-fg-subtle">{tracker.note.text}</p>
-                  <a
-                    href={tracker.note.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block text-xs text-fg-muted underline underline-offset-2 hover:text-fg"
-                  >
-                    {tracker.note.linkLabel}
-                  </a>
-                </div>
-              )}
-
-              <p className="mt-3 text-xs text-fg-subtle">
-                {tracker.name} integration capabilities:
-              </p>
-
-              <div className="mt-2 space-y-2">
-                {tracker.capabilities.map((capability) => (
-                  <CapabilityTile key={capability.label} capability={capability} />
+      ) : (
+        <TableShell className="mt-4">
+          <Table>
+            <thead>
+              <tr>
+                {COLUMNS.map((column) => (
+                  <Th key={column}>{column}</Th>
                 ))}
-              </div>
-            </section>
-          ))}
-        </div>
+              </tr>
+            </thead>
+            {loading ? (
+              <LoadingRows />
+            ) : (
+              <tbody>
+                {connections.map((connection) => (
+                  <Tr key={connection.id}>
+                    <Td>
+                      <span className="text-fg">{connection.connector.name}</span>
+                    </Td>
+                    <Td>
+                      <span className="flex items-center gap-2">
+                        <ConnectorMark connector={connection.connector} />
+                        <span className="truncate">
+                          {connection.connector.name}
+                        </span>
+                      </span>
+                    </Td>
+                    <Td>{connection.type}</Td>
+                    <Td>{connection.scopes}</Td>
+                  </Tr>
+                ))}
+              </tbody>
+            )}
+          </Table>
+        </TableShell>
       )}
 
-      {tab === "ci-cd" && (
-        <div className="mt-6 grid gap-3 md:grid-cols-2">
-          {ciIntegrations.map((entry) => (
-            <section
-              key={entry.id}
-              className="rounded-lg border border-line bg-surface p-4"
-            >
-              <header className="flex items-center gap-2.5">
-                <ServiceMark id={entry.id} letter="C" />
-                <h2 className="flex-1 text-sm font-medium text-fg">{entry.name}</h2>
-                <Button
-                  size="sm"
-                  variant={connected.includes(entry.id) ? "outline" : "secondary"}
-                  onClick={() => setCircleOpen(true)}
-                  disabled={connected.includes(entry.id)}
-                >
-                  {connected.includes(entry.id) ? "Connected" : "Connect"}
-                </Button>
-              </header>
-              <p className="mt-3 text-sm leading-relaxed text-fg-muted">
-                {entry.description}
-              </p>
-            </section>
-          ))}
-        </div>
-      )}
-      <McpServerModal
-        open={mcpOpen}
-        preset={mcpModal}
-        onClose={() => setMcpOpen(false)}
+      <AddConnectionDrawer
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onSelect={add}
       />
-      <JiraInstallModal open={jiraOpen} onClose={() => setJiraOpen(false)} />
-      <CircleCiModal open={circleOpen} onClose={() => setCircleOpen(false)} />
     </Page>
   );
 }

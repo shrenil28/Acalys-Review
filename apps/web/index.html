@@ -11,9 +11,171 @@
       href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@300..700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      // Resolve the theme before first paint so the boot splash below is already
+      // the right colour. The app re-reads the same key once React is running.
+      (function () {
+        var saved = null;
+        try {
+          saved = localStorage.getItem("cr:theme");
+        } catch (error) {
+          saved = null;
+        }
+        var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var dark = saved === "dark" || saved === null || (saved === "system" && prefersDark);
+        document.documentElement.classList.toggle("dark", dark);
+      })();
+    </script>
+    <style>
+      /*
+        Boot splash: a 3x3 dot grid with a light running clockwise around it,
+        beside the word "Loading". It lives in the document rather than in the
+        bundle so it is on screen the instant the HTML lands — before React,
+        before index.css — which is also why the tokens are duplicated here as
+        literals (they mirror --cr-canvas / --cr-fg-muted / --cr-fg).
+      */
+      :root {
+        --boot-canvas: oklch(0.977 0.0015 286);
+        --boot-fg: oklch(0.44 0.008 286);
+        --boot-dot: oklch(0.23 0.006 286);
+      }
+      html.dark {
+        --boot-canvas: oklch(0.213 0.0098 305);
+        --boot-fg: oklch(0.767 0.0105 305);
+        --boot-dot: oklch(0.949 0.0035 305);
+      }
+
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      /*
+        Scoped to the splash's lifetime: this rule is unlayered and so outranks
+        index.css's @layer base body rule. Once #boot is removed the app's own
+        canvas colour takes back over.
+      */
+      body:has(#boot) {
+        background: var(--boot-canvas);
+      }
+
+      #boot {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        background: var(--boot-canvas);
+        font-family: Geist, ui-sans-serif, system-ui, sans-serif;
+        font-size: 13px;
+        color: var(--boot-fg);
+        transition: opacity 320ms ease, visibility 320ms;
+      }
+      #boot[data-leaving="true"] {
+        opacity: 0;
+        visibility: hidden;
+      }
+
+      /* The mark: 3px cells, 2px gutters — 13px square, the size of the text. */
+      .boot-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 3px);
+        grid-auto-rows: 3px;
+        gap: 2px;
+      }
+      .boot-grid i {
+        border-radius: 0.5px;
+        background: var(--boot-dot);
+        opacity: 0.16;
+        /*
+          One dot is lit at a time and decays over the next three steps, so the
+          light reads as a single spark travelling the ring rather than eight
+          separate blinks. Eight steps of 110ms = one lap.
+        */
+        animation: boot-chase 880ms linear infinite;
+        animation-delay: calc(var(--o) * 110ms);
+      }
+      /* The centre cell sits out the lap and just breathes underneath it. */
+      .boot-grid i.boot-core {
+        animation: boot-core 880ms ease-in-out infinite;
+      }
+      @keyframes boot-chase {
+        0% {
+          opacity: 1;
+        }
+        12.5% {
+          opacity: 0.62;
+        }
+        25% {
+          opacity: 0.34;
+        }
+        37.5% {
+          opacity: 0.16;
+        }
+        100% {
+          opacity: 0.16;
+        }
+      }
+      @keyframes boot-core {
+        0%,
+        100% {
+          opacity: 0.16;
+        }
+        50% {
+          opacity: 0.34;
+        }
+      }
+
+      .boot-text i {
+        font-style: normal;
+        opacity: 0.3;
+        animation: boot-blink 1.2s ease-in-out infinite;
+      }
+      .boot-text i:nth-child(2) {
+        animation-delay: 0.16s;
+      }
+      .boot-text i:nth-child(3) {
+        animation-delay: 0.32s;
+      }
+      @keyframes boot-blink {
+        0%,
+        100% {
+          opacity: 0.3;
+        }
+        50% {
+          opacity: 1;
+        }
+      }
+
+      /* Motion-sensitive visitors get the mark, held still and legible. */
+      @media (prefers-reduced-motion: reduce) {
+        .boot-grid i,
+        .boot-text i {
+          animation: none;
+          opacity: 0.55;
+        }
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <div id="boot" role="status" aria-label="Loading">
+      <!-- Cells are laid out row by row; --o is their place in the clockwise lap. -->
+      <div class="boot-grid">
+        <i style="--o: 0"></i>
+        <i style="--o: 1"></i>
+        <i style="--o: 2"></i>
+        <i style="--o: 7"></i>
+        <i class="boot-core"></i>
+        <i style="--o: 3"></i>
+        <i style="--o: 6"></i>
+        <i style="--o: 5"></i>
+        <i style="--o: 4"></i>
+      </div>
+      <span class="boot-text">Loading<i>.</i><i>.</i><i>.</i></span>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

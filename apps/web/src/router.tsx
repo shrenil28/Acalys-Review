@@ -17,6 +17,7 @@ import { Reporting } from "@/pages/analytics/Reporting";
 import { DataMetrics } from "@/pages/analytics/DataMetrics";
 import { DataExport } from "@/pages/analytics/DataExport";
 import { IdeCliSummary } from "@/pages/analytics/IdeCli";
+import { PrSecurityReviewsPage } from "@/pages/analytics/PrSecurityReviews";
 import { ReportsPage } from "@/pages/reports/ReportsPage";
 import { CreateReport } from "@/pages/reports/CreateReport";
 
@@ -88,6 +89,10 @@ export const router = createBrowserRouter([
           { path: "organization-trends", element: <OrganizationTrends /> },
           { path: "data-metrics", element: <DataMetrics /> },
         ],
+      },
+      {
+        path: "analytics/pr-security-reviews",
+        element: <PrSecurityReviewsPage />,
       },
       {
         path: "analytics/reports",

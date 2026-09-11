@@ -77,18 +77,36 @@ export function Modal({
   );
 }
 
+/**
+ * Two panel shapes, named rather than passed as classes so every drawer in the
+ * app lands on one of them instead of drifting to a bespoke geometry per page.
+ *
+ * `default` is a narrow sheet flush to the right edge, for a form.
+ * `wide` is the inset panel used for browsing: it floats clear of the viewport
+ * edges and stops short of the left navigation, so the surrounding app stays
+ * visible and the panel reads as covering the content rather than replacing it.
+ */
+const DRAWER_SHAPE = {
+  default: "right-0 top-0 h-full max-w-xl border-l border-line",
+  wide:
+    "inset-y-4 right-2 md:right-3 w-[calc(100%-16px)] md:w-[calc(100%-300px)] " +
+    "max-w-[1280px] rounded-lg border border-line-strong",
+} as const;
+
 export function Drawer({
   open,
   onClose,
   title,
   children,
   footer,
+  size = "default",
 }: {
   open: boolean;
   onClose: () => void;
   title: ReactNode;
   children: ReactNode;
   footer?: ReactNode;
+  size?: keyof typeof DRAWER_SHAPE;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -96,7 +114,14 @@ export function Drawer({
       if (event.key === "Escape") onClose();
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    // The page behind a modal must not scroll: a wheel gesture aimed at the
+    // panel otherwise moves the content underneath it.
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
   }, [open, onClose]);
 
   if (!open) return null;
@@ -111,7 +136,10 @@ export function Drawer({
       <aside
         role="dialog"
         aria-modal="true"
-        className="absolute right-0 top-0 flex h-full w-full max-w-xl flex-col border-l border-line bg-shell shadow-pop"
+        className={cn(
+          "absolute flex w-full flex-col overflow-hidden bg-shell shadow-pop",
+          DRAWER_SHAPE[size],
+        )}
       >
         <header className="flex items-center justify-between gap-4 border-b border-line px-4 py-3">
           <div className="min-w-0 flex-1">{title}</div>

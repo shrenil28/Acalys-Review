@@ -28,18 +28,21 @@ for (const view of [...prReviewViews, ...ideCliViews]) {
 }
 
 const extra: Record<string, string> = {
-  "/integrations": "Integrations",
+  "/integrations": "Connections",
   "/plan/plans": "Plan List",
   "/reports": "Reports",
   "/reports/recurring/new": "Create Report",
   "/reports/ondemand/new": "Create Report",
   "/analytics/pr-reviews": "PR reviews",
   "/analytics/ide-cli-reviews": "IDE/CLI reviews",
+  "/analytics/pr-security-reviews": "PR Security reviews",
   "/login": "Sign in",
 };
 
 export function buildCrumbs(pathname: string): Crumb[] {
   if (pathname === "/") return [{ label: "Explore" }];
+  if (pathname === "/analytics/pr-security-reviews")
+    return [{ label: "PR Security reviews" }];
 
   const crumbs: Crumb[] = [];
   const segments = pathname.split("/").filter(Boolean);
