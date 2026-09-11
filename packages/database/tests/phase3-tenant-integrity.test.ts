@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
+import { seedVerifiedAttempt } from "./finding-provenance.js";
 import { ApiMutationStore, ApiStore } from "../src/index.js";
 import {
   assertSuiteIsActuallyRunning,
@@ -119,7 +120,7 @@ async function seedGraph(database: TestDatabase, organizationId: string): Promis
   await database.pool.query(
     `INSERT INTO review_requests
        (id,organization_id,repository_id,pull_request_id,revision_id,target,trigger,requested_by,execution_mode,execution_strategy,idempotency_scope,idempotency_key,requested_at,correlation_id)
-     VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,'api','{"kind":"api_key"}'::jsonb,'full','standard',$2,$6,$7,$8)`,
+     VALUES ($1,$2::uuid,$3,$4,$5,'{}'::jsonb,'api','{"kind":"api_key"}'::jsonb,'full','standard',$2::text,$6,$7,$8)`,
     [value.requestId, organizationId, value.repositoryId, value.pullRequestId, value.revisionId, `seed-${value.suffix}`, now, `corr-${value.suffix}`],
   );
   await database.pool.query(
@@ -133,11 +134,20 @@ async function seedGraph(database: TestDatabase, organizationId: string): Promis
      VALUES ($1,1,'queued','preparing',$2)`,
     [value.runId, now],
   );
+  const verificationAttemptId = await seedVerifiedAttempt(database, {
+    organizationId,
+    repositoryId: value.repositoryId,
+    reviewRunId: value.runId,
+    fingerprint: value.suffix.repeat(64),
+    severity: "high",
+    category: "security",
+    at: now,
+  });
   await database.pool.query(
     `INSERT INTO review_findings
-       (id,organization_id,repository_id,review_run_id,revision_id,fingerprint_value,severity,category,confidence_score,confidence_level,title,explanation,path,start_line,end_line,state,created_at,updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,'high','security',0.9,'very_high',$7,'evidence','src/index.ts',1,1,'published',$8,$8)`,
-    [value.findingId, organizationId, value.repositoryId, value.runId, value.revisionId, value.suffix.repeat(64), `Finding ${value.suffix}`, now],
+       (id,organization_id,repository_id,review_run_id,revision_id,fingerprint_value,severity,category,confidence_score,confidence_level,title,explanation,path,start_line,end_line,state,verification_attempt_id,created_at,updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,'high','security',0.9,'very_high',$7,'evidence','src/index.ts',1,1,'published',$8,$9,$9)`,
+    [value.findingId, organizationId, value.repositoryId, value.runId, value.revisionId, value.suffix.repeat(64), `Finding ${value.suffix}`, verificationAttemptId, now],
   );
   const foreignSummaryRunId = organizationId === ORG_A ? RUN_B : RUN_A;
   await database.pool.query(
@@ -177,7 +187,7 @@ async function seedGraph(database: TestDatabase, organizationId: string): Promis
   await database.pool.query(
     `INSERT INTO knowledge_items
        (id,organization_id,repository_id,scope,source_type,path,summary,authored,active,recorded_at,created_at,updated_at)
-     VALUES ($1,$2,$3,'repository','learning','src/index.ts',$4,false,true,$5,$5,$5)`,
+     VALUES ($1,$2,$3,'path','learning','src/index.ts',$4,false,true,$5,$5,$5)`,
     [value.knowledgeId, organizationId, value.repositoryId, `knowledge-${value.suffix}`, now],
   );
 }
@@ -257,12 +267,23 @@ describeWithPostgres("Phase 3 tenant graph integrity", () => {
       "pull_requests_repository_tenant_fk",
     );
 
+    // The finding carries a real attempt from its own tenant, so the row is
+    // well-formed in every way except the one under test: the run it names
+    // belongs to the other organization. Without the attempt the insert would
+    // fail on the promotion-referent NOT NULL and never reach the tenant key.
+    const ownAttempt = await database.pool.query<{ id: string }>(
+      `SELECT id FROM verification_attempts WHERE organization_id = $1 AND review_run_id = $2 LIMIT 1`,
+      [ORG_A, RUN_A],
+    );
+    const attemptId = ownAttempt.rows[0]?.id;
+    expect(attemptId).toBeTypeOf("string");
+
     await expectConstraint(
       database,
       `INSERT INTO review_findings
-         (id,organization_id,repository_id,review_run_id,revision_id,fingerprint_value,severity,category,confidence_score,confidence_level,title,explanation,path,start_line,end_line,state,created_at,updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,'high','security',0.9,'very_high','cross','cross','src/x.ts',1,1,'published',$7,$7)`,
-      ["0192f8a1-0000-7000-8000-000000002102", ORG_A, REPO_A, RUN_B, REV_A, "e".repeat(64), now],
+         (id,organization_id,repository_id,review_run_id,revision_id,fingerprint_value,severity,category,confidence_score,confidence_level,title,explanation,path,start_line,end_line,state,verification_attempt_id,created_at,updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,'high','security',0.9,'very_high','cross','cross','src/x.ts',1,1,'published',$7,$8,$8)`,
+      ["0192f8a1-0000-7000-8000-000000002102", ORG_A, REPO_A, RUN_B, REV_A, "e".repeat(64), attemptId, now],
       "review_findings_run_tenant_fk",
     );
 

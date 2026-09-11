@@ -655,12 +655,23 @@ describeWithPostgres(
           requestKey: `test:constraint:${runId}:${String(pass)}`,
           reason: "initial",
         });
+        // And the lease the attempt is written under (0009): the composite key
+        // refuses an attempt that presents ownership no invocation granted.
+        const ownership = await scheduler.claim(
+          invocation.invocationId,
+          "test-worker",
+          60_000,
+        );
+        if (ownership.kind !== "claimed") {
+          throw new Error(`expected a verification claim, got ${ownership.kind}`);
+        }
         return database.pool.query(
           `INSERT INTO verification_attempts (id, organization_id, review_run_id,
            candidate_finding_id, verifier_id, verifier_version, context_digest,
-           cache_key, invocation_id, attempt, created_at, ${columns})
-         VALUES (gen_random_uuid(),$1,$2,$3,'v','1',$4,$5,$6,$7,$8,${values
-           .map((_unused, index) => `$${String(index + 9)}`)
+           cache_key, invocation_id, attempt, claim_token, claim_generation,
+           created_at, ${columns})
+         VALUES (gen_random_uuid(),$1,$2,$3,'v','1',$4,$5,$6,$7,$8,$9,$10,${values
+           .map((_unused, index) => `$${String(index + 11)}`)
            .join(",")})`,
           [
             ORG,
@@ -670,6 +681,8 @@ describeWithPostgres(
             "k".repeat(64),
             invocation.invocationId,
             invocation.attempt,
+            ownership.claim.claimToken,
+            ownership.claim.claimGeneration,
             now,
             ...values,
           ],

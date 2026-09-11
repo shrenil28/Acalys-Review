@@ -484,6 +484,8 @@ function awaitWithHeartbeats<T>(
       | { readonly kind: "error"; readonly error: unknown }
       | undefined;
     let settled = false;
+    /** At most one owed beat is written per completed operation. */
+    let beatOnFinish = false;
 
     const cleanup = (): void => {
       if (timer !== undefined) clearTimeout(timer);
@@ -501,6 +503,36 @@ function awaitWithHeartbeats<T>(
 
     const maybeFinishOperation = (): void => {
       if (settled || operationResult === undefined || heartbeatWrite !== undefined) return;
+      // The keepalive is owed by elapsed idle time, not by whoever won the
+      // race to resolve. The armed timer and the idle clock are different
+      // sources: Node may run a `setTimeout(n)` fractionally before `n`
+      // milliseconds of `performance.now` have passed, so an operation waiting
+      // the same interval can beat the heartbeat every time and re-arm it
+      // forever. A deadline inside the current timer tick is one no timer can
+      // observe any more precisely, so treat it as reached and write the beat
+      // before resolving. Ordering is the one the stream promises: the
+      // keepalive precedes the product frame, which still waits for the
+      // keepalive write to drain.
+      if (!beatOnFinish && heartbeat.remainingMillis() < 1) {
+        beatOnFinish = true;
+        heartbeatWrite = writeSseFrame(response, ": heartbeat\n\n");
+        void heartbeatWrite.then(
+          (writable) => {
+            heartbeatWrite = undefined;
+            if (!writable) {
+              finishClosed();
+              return;
+            }
+            heartbeat.markActivity();
+            maybeFinishOperation();
+          },
+          () => {
+            heartbeatWrite = undefined;
+            finishClosed();
+          },
+        );
+        return;
+      }
       settled = true;
       cleanup();
       if (operationResult.kind === "error") reject(operationResult.error);
@@ -788,7 +820,11 @@ export function createApiApp(options: ApiAppOptions): Express {
         requestLog.log.setContext(context);
         const params = parsePart(route.params, request.params);
         const query = parsePart(route.query, queryObject(request));
-        const body = parsePart(route.body, request.body);
+        // Express 5 leaves `body` undefined when a request carries none, and a
+        // bodyless POST is not a malformed one: every declared body schema is an
+        // object, so an absent body is an empty one. A route that actually
+        // requires a field still fails validation on that field.
+        const body = parsePart(route.body, request.body ?? {});
         const result = await handlers[name](context, params, query, body, request);
         if (result.status >= 200 && result.status < 300) {
           const checked = route.response.safeParse(result.body);

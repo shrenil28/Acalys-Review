@@ -211,7 +211,7 @@ export class ReviewDispatchStore {
 
           const claimed = await client.query<{
             attempts: number;
-            claim_generation: number;
+            claim_generation: string | number;
             claimed_at: Date;
             lease_expires_at: Date;
           }>(
@@ -238,7 +238,7 @@ export class ReviewDispatchStore {
             revisionId: row.revision_id,
             pullRequestId: row.pull_request_id,
             attempts: current.attempts,
-            claimGeneration: current.claim_generation,
+            claimGeneration: Number(current.claim_generation),
             claimedAt: current.claimed_at,
             leaseExpiresAt: current.lease_expires_at,
           });
@@ -275,7 +275,7 @@ export class ReviewDispatchStore {
       ownsLock = true;
 
       const current = await client.query<{
-        claim_generation: number;
+        claim_generation: string | number;
         dead_lettered_at: Date | null;
         lease_expires_at: Date | null;
         state: string;
@@ -289,7 +289,7 @@ export class ReviewDispatchStore {
         [reviewRunId],
       );
       const row = current.rows[0];
-      if (row === undefined || row.claim_generation !== generation || row.dead_lettered_at !== null) {
+      if (row === undefined || Number(row.claim_generation) !== generation || row.dead_lettered_at !== null) {
         await client.query(`SELECT pg_advisory_unlock(hashtextextended($1,0))`, [lockKey]);
         ownsLock = false;
         client.release();

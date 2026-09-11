@@ -83,7 +83,10 @@ describeWithPostgres("Phase 4 durable review-analysis cache", () => {
 
   it("does not expose expired rows as reusable or dashboard-ready", async () => {
     await store.persist({ organizationId: ORG, repositoryId: REPO, entries: [{ fingerprint: FINGERPRINT, payload }] });
-    await database.pool.query(`UPDATE review_analysis_cache_entries SET expires_at=clock_timestamp()-interval '1 second' WHERE organization_id=$1`, [ORG]);
+    // An expired row is one whose whole lifetime is behind us. Moving only the
+    // expiry would invert it against created_at, which the schema forbids, so
+    // age the row the way elapsed time would.
+    await database.pool.query(`UPDATE review_analysis_cache_entries SET created_at=clock_timestamp()-interval '2 seconds', expires_at=clock_timestamp()-interval '1 second' WHERE organization_id=$1`, [ORG]);
     await expect(store.loadReady({ organizationId: ORG, repositoryId: REPO })).resolves.toEqual([]);
     await expect(store.listMetadata(ORG)).resolves.toEqual([]);
     await expect(store.deleteExpired()).resolves.toBe(1);

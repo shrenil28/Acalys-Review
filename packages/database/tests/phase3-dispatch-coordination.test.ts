@@ -255,7 +255,7 @@ describeWithPostgres("Phase 3 API dispatch coordination", () => {
       StaleReviewDispatchClaim,
     );
     const dead = await database.pool.query<{
-      claim_generation: number;
+      claim_generation: string | number;
       dead_lettered_at: Date | null;
     }>(
       `SELECT claim_generation,dead_lettered_at
@@ -263,7 +263,10 @@ describeWithPostgres("Phase 3 API dispatch coordination", () => {
         WHERE review_run_id=$1`,
       [runId],
     );
-    const deadGeneration = dead.rows[0]?.claim_generation;
+    // A raw read of a BIGINT column: pg hands it back as a string, the way the
+    // store's own reads receive it before they coerce.
+    const rawGeneration = dead.rows[0]?.claim_generation;
+    const deadGeneration = rawGeneration === undefined ? undefined : Number(rawGeneration);
     expect(dead.rows[0]?.dead_lettered_at).toBeInstanceOf(Date);
     expect(deadGeneration).toBe(claim.claimGeneration + 1);
     if (deadGeneration === undefined) return;

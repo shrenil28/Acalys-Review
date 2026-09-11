@@ -786,12 +786,23 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
       requestKey: `outage:${context.runId}:${victim ?? ""}`,
       reason: "retry_unavailable",
     });
+    // An attempt is written under the lease that owns its invocation, so the
+    // outage row has to be claimed first the way the worker claims one.
+    const outageClaim = await stores().scheduler.claim(
+      invocation.invocationId,
+      "test-worker",
+      60_000,
+    );
+    if (outageClaim.kind !== "claimed") {
+      throw new Error(`expected a verification claim, got ${outageClaim.kind}`);
+    }
     await database.pool.query(
       `INSERT INTO verification_attempts (id, organization_id, review_run_id,
          candidate_finding_id, status, failure, verifier_id, verifier_version,
-         context_digest, cache_key, invocation_id, attempt, created_at)
+         context_digest, cache_key, invocation_id, attempt, claim_token,
+         claim_generation, created_at)
        VALUES (gen_random_uuid(),$1,$2,$3,'unavailable','model_timeout','v','1',
-         $4,$5,$6,$7,$8)`,
+         $4,$5,$6,$7,$8,$9,$10)`,
       [
         ORG,
         context.runId,
@@ -800,6 +811,8 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
         "k".repeat(64),
         invocation.invocationId,
         invocation.attempt,
+        outageClaim.claim.claimToken,
+        outageClaim.claim.claimGeneration,
         at,
       ],
     );

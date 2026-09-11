@@ -49,7 +49,7 @@ async function seedRun(database: TestDatabase): Promise<void> {
   await database.pool.query(
     `INSERT INTO review_requests
        (id,organization_id,repository_id,pull_request_id,revision_id,target,trigger,requested_by,execution_mode,execution_strategy,idempotency_scope,idempotency_key,requested_at,correlation_id)
-     VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,'api','{"kind":"api_key"}'::jsonb,'full','standard',$2,'phase3-check-bound',$6,'phase3-check-bound')`,
+     VALUES($1,$2::uuid,$3,$4,$5,'{}'::jsonb,'api','{"kind":"api_key"}'::jsonb,'full','standard',$2::text,'phase3-check-bound',$6,'phase3-check-bound')`,
     [REQUEST, ORG, REPO, PR, REVISION, NOW],
   );
   await database.pool.query(

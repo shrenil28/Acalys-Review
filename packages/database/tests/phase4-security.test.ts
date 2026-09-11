@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { DashboardSecurityStore } from "../src/index.js";
 import { assertSuiteIsActuallyRunning, dockerAvailable, startPostgres, type TestDatabase } from "./postgres.js";
+import { seedVerifiedAttempt } from "./finding-provenance.js";
 
 const describeWithPostgres = dockerAvailable() ? describe : describe.skip.bind(describe);
 const ORG_A = "0192f8a1-4100-7000-8000-000000000101";
@@ -25,15 +26,24 @@ async function seedReviewGraph(database: TestDatabase, input: { org: string; rep
   await database.pool.query(`INSERT INTO repositories(id,organization_id,provider,provider_external_id,owner,name,default_branch,visibility,created_at,updated_at) VALUES ($1,$2,'github',$3,'acalys',$4,'main','private',$5,$5)`, [input.repo, input.org, `security-repo-${input.suffix}`, `repo-${input.suffix}`, NOW]);
   await database.pool.query(`INSERT INTO pull_requests(id,organization_id,repository_id,provider,provider_external_id,number,title,author,state,draft,created_at,updated_at) VALUES ($1,$2,$3,'github',$4,$5,$6,$7::jsonb,'open',false,$8,$8)`, [input.pr, input.org, input.repo, `security-pr-${input.suffix}`, input.suffix === "a" ? 17 : 18, `PR ${input.suffix}`, JSON.stringify({ kind: "human", provider: { provider: "github", externalId: `user-${input.suffix}`, handle: `alice-${input.suffix}` } }), NOW]);
   await database.pool.query(`INSERT INTO pull_request_revisions(id,organization_id,repository_id,pull_request_id,sequence,head_sha,head_ref,base_sha,base_ref,merge_base_sha,trigger,created_at) VALUES ($1,$2,$3,$4,1,$5,'feature',$6,'main',NULL,'push',$7)`, [input.rev, input.org, input.repo, input.pr, input.suffix.repeat(40), input.suffix === "a" ? "c".repeat(40) : "d".repeat(40), NOW]);
-  await database.pool.query(`INSERT INTO review_requests(id,organization_id,repository_id,pull_request_id,revision_id,target,trigger,requested_by,execution_mode,execution_strategy,idempotency_scope,idempotency_key,requested_at,correlation_id) VALUES ($1,$2,$3,$4,$5,'{}'::jsonb,'api','{"kind":"api_key"}'::jsonb,'full','standard',$2,$6,$7,$8)`, [input.req, input.org, input.repo, input.pr, input.rev, `security-${input.suffix}`, NOW, `security-corr-${input.suffix}`]);
+  await database.pool.query(`INSERT INTO review_requests(id,organization_id,repository_id,pull_request_id,revision_id,target,trigger,requested_by,execution_mode,execution_strategy,idempotency_scope,idempotency_key,requested_at,correlation_id) VALUES ($1,$2::uuid,$3,$4,$5,'{}'::jsonb,'api','{"kind":"api_key"}'::jsonb,'full','standard',$2::text,$6,$7,$8)`, [input.req, input.org, input.repo, input.pr, input.rev, `security-${input.suffix}`, NOW, `security-corr-${input.suffix}`]);
   await database.pool.query(`INSERT INTO review_runs(id,organization_id,repository_id,request_id,revision_id,attempt,state,execution_mode,execution_strategy,created_at) VALUES ($1,$2,$3,$4,$5,1,'completed','full','standard',$6)`, [input.run, input.org, input.repo, input.req, input.rev, NOW]);
 }
 
 async function insertFinding(database: TestDatabase, input: { id: string; org: string; repo: string; run: string; rev: string; fingerprint: string; severity: string; category: string; state: string; title: string }) {
+  const verificationAttemptId = await seedVerifiedAttempt(database, {
+    organizationId: input.org,
+    repositoryId: input.repo,
+    reviewRunId: input.run,
+    fingerprint: input.fingerprint,
+    severity: input.severity,
+    category: input.category,
+    at: NOW,
+  });
   await database.pool.query(
-    `INSERT INTO review_findings(id,organization_id,repository_id,review_run_id,revision_id,fingerprint_value,severity,category,confidence_score,confidence_level,title,explanation,path,start_line,end_line,state,created_at,updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0.95,'very_high',$9,'Evidence','src/auth.ts',10,12,$10,$11,$11)`,
-    [input.id, input.org, input.repo, input.run, input.rev, input.fingerprint, input.severity, input.category, input.title, input.state, NOW],
+    `INSERT INTO review_findings(id,organization_id,repository_id,review_run_id,revision_id,fingerprint_value,severity,category,confidence_score,confidence_level,title,explanation,path,start_line,end_line,state,verification_attempt_id,created_at,updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,0.95,'very_high',$9,'Evidence','src/auth.ts',10,12,$10,$11,$12,$12)`,
+    [input.id, input.org, input.repo, input.run, input.rev, input.fingerprint, input.severity, input.category, input.title, input.state, verificationAttemptId, NOW],
   );
 }
 

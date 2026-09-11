@@ -398,7 +398,7 @@ export class DashboardAdminStore {
       }>(
         `INSERT INTO dashboard_membership_invitations
            (id, organization_id, email, role, invite_hash, created_by, created_at, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$7 + ($8::double precision * INTERVAL '1 millisecond'))
+         VALUES ($1,$2,$3,$4,$5,$6,$7::timestamptz,$7::timestamptz + ($8::double precision * INTERVAL '1 millisecond'))
          RETURNING id, organization_id, email, role, created_by, created_at, expires_at`,
         [input.id, input.organizationId, email, input.role, input.inviteHash, input.actorUserId, now, input.ttlMillis],
       );
@@ -556,7 +556,7 @@ export class DashboardAdminStore {
       await client.query(
         `INSERT INTO dashboard_login_exchanges
            (id, organization_id, user_id, membership_id, exchange_hash, created_at, expires_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$6 + ($7::double precision * INTERVAL '1 millisecond'))`,
+         VALUES ($1,$2,$3,$4,$5,$6::timestamptz,$6::timestamptz + ($7::double precision * INTERVAL '1 millisecond'))`,
         [input.exchangeId, organizationId, userId, membershipId, input.exchangeHash, row.database_now, input.exchangeTtlMillis],
       );
       return { kind: "redeemed", identity: { organizationId, userId, membershipId } };

@@ -62,7 +62,7 @@ export class GithubOAuthService {
     if (options.clientId.trim().length === 0 || options.clientSecrets.active.length === 0) {
       throw new ValidationError("GitHub OAuth client credentials are required");
     }
-    if (options.stateSecrets.verificationCandidates().some((secret) => secret.length === 0)) {
+    if (options.stateSecrets.configuredValues().some((secret) => secret.length === 0)) {
       throw new ValidationError("OAuth state secrets must not be empty");
     }
     if (!/^[A-Za-z0-9-]{1,100}$/u.test(this.#appSlug)) {

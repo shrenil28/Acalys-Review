@@ -515,6 +515,7 @@ export async function startPostgres(label = "default"): Promise<TestDatabase> {
     database: MAINTENANCE_DATABASE,
     max: 2,
   });
+  admin.on("error", () => undefined);
 
   try {
     await admin.query(`DROP DATABASE IF EXISTS "${database}"`);
@@ -565,6 +566,12 @@ async function connect(port: number, database: string): Promise<TestDatabase> {
     database,
     max: 20,
   });
+  // A pool with no error listener turns a backend-initiated disconnect into an
+  // uncaught exception, which Vitest reports as a run error even when every
+  // test passed. Teardown drops this database with FORCE, so the server
+  // terminating an idle client here is the expected end of its life, not a
+  // failure the suite needs to hear about.
+  pool.on("error", () => undefined);
 
   // Applied in filename order, exactly as deployment applies them. Discover
   // the migration set rather than maintaining a second hand-written list: the
@@ -582,17 +589,14 @@ async function connect(port: number, database: string): Promise<TestDatabase> {
   );
 
   const apply = async (): Promise<void> => {
-    await pool.query(
-      `DROP TABLE IF EXISTS conversation_messages, review_conversations, knowledge_items,
-         review_summaries, review_dispatch_jobs, api_rate_windows, api_idempotency, api_keys, auth_sessions,
-         provider_connections, memberships, users, model_budget_reservations,
-         model_credential_admissions, model_interactions, premerge_check_results,
-         publication_intents, publication_decisions, verification_attempts,
-         verification_invocations, review_findings, verifications, candidate_findings,
-         review_run_transitions, review_runs, review_requests,
-         pull_request_revisions, pull_requests, repositories, organizations,
-         webhook_jobs, webhook_deliveries CASCADE`,
-    );
+    // Drop the whole schema rather than a hand-written table list. The list
+    // was the same maintenance trap the migration discovery above already
+    // fixed once: Phase 4 added tables it never learned about, so a reset left
+    // them behind and the next migration run failed on "already exists". The
+    // schema is this database's entire contents, so recreating it is exactly
+    // "no tables", whatever the migrations have grown to create.
+    await pool.query("DROP SCHEMA public CASCADE");
+    await pool.query("CREATE SCHEMA public");
     for (const migration of migrations) {
       await pool.query(migration);
     }
@@ -615,6 +619,7 @@ async function connect(port: number, database: string): Promise<TestDatabase> {
         database: MAINTENANCE_DATABASE,
         max: 1,
       });
+      admin.on("error", () => undefined);
       try {
         await admin.query(`DROP DATABASE IF EXISTS "${database}" WITH (FORCE)`);
       } catch {

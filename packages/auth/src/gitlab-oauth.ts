@@ -45,7 +45,7 @@ export class GitlabOAuthService {
     this.#now = options.now ?? (() => new Date());
     this.#stateTtlMillis = options.stateTtlMillis ?? 10 * 60_000;
     if (options.clientId.trim().length === 0 || options.clientSecrets.active.length === 0) throw new ValidationError("GitLab OAuth client credentials are required");
-    if (options.stateSecrets.verificationCandidates().some((secret) => secret.length === 0)) throw new ValidationError("GitLab OAuth state secrets must not be empty");
+    if (options.stateSecrets.configuredValues().some((secret) => secret.length === 0)) throw new ValidationError("GitLab OAuth state secrets must not be empty");
     if (!Number.isSafeInteger(this.#stateTtlMillis) || this.#stateTtlMillis <= 0) throw new ValidationError("GitLab OAuth state TTL must be a positive integer");
   }
 

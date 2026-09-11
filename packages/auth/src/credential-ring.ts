@@ -42,6 +42,18 @@ export class CredentialRing<T> {
     ];
   }
 
+  /**
+   * Every configured value, live or expired.
+   *
+   * Configuration validation asks this rather than `verificationCandidates`:
+   * whether a secret is well-formed does not depend on what time it is, and a
+   * ring holding an empty value is misconfigured even while that value sits
+   * outside its grace window.
+   */
+  public configuredValues(): readonly T[] {
+    return [this.#active, ...this.#previous.map((entry) => entry.value)];
+  }
+
   public toString(): string {
     return "[REDACTED credential ring]";
   }
