@@ -1,4 +1,7 @@
-import type { FindingLifecycleState, FindingSeverity } from "@acalys/contracts/domain";
+import type {
+  FindingLifecycleState,
+  FindingSeverity,
+} from "@acalys/contracts/domain";
 import type { PgClient, PgPool } from "./webhook/postgres-inbox.js";
 
 export interface DashboardSecurityFilters {
@@ -54,13 +57,34 @@ function count(value: string | number | null | undefined): number {
 export class DashboardSecurityStore {
   public constructor(private readonly pool: PgPool) {}
 
-  public async snapshot(input: DashboardSecurityFilters): Promise<DashboardSecuritySnapshot> {
-    if (!Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 1000) throw new Error("DASHBOARD_SECURITY_LIMIT_INVALID");
-    const params = [input.organizationId, input.repositoryIds, input.severities, input.lifecycle, input.limit] as const;
+  public async snapshot(
+    input: DashboardSecurityFilters,
+  ): Promise<DashboardSecuritySnapshot> {
+    if (
+      !Number.isSafeInteger(input.limit) ||
+      input.limit < 1 ||
+      input.limit > 1000
+    )
+      throw new Error("DASHBOARD_SECURITY_LIMIT_INVALID");
+    const params = [
+      input.organizationId,
+      input.repositoryIds,
+      input.severities,
+      input.lifecycle,
+      input.limit,
+    ] as const;
     return this.#readTransaction(async (client) => {
       const summary = await client.query<{
-        total: string; active: string; critical_high_active: string; verified: string; published: string;
-        resolved: string; dismissed: string; stale: string; superseded: string; repositories: string;
+        total: string;
+        active: string;
+        critical_high_active: string;
+        verified: string;
+        published: string;
+        resolved: string;
+        dismissed: string;
+        stale: string;
+        superseded: string;
+        repositories: string;
       }>(
         `SELECT count(*)::text AS total,
                 count(*) FILTER (WHERE f.state IN ('verified','published','stale'))::text AS active,
@@ -80,11 +104,24 @@ export class DashboardSecurityStore {
         params.slice(0, 4),
       );
       const rows = await client.query<{
-        id: string; repository_id: string; repository_name: string; review_run_id: string;
-        pull_request_id: string | null; pull_request_number: number | null; pull_request_title: string | null;
-        author: string | null; pull_request_state: "open" | "closed" | "merged" | null;
-        severity: FindingSeverity; state: FindingLifecycleState; title: string; explanation: string; path: string;
-        start_line: number; end_line: number; created_at: Date; updated_at: Date;
+        id: string;
+        repository_id: string;
+        repository_name: string;
+        review_run_id: string;
+        pull_request_id: string | null;
+        pull_request_number: number | null;
+        pull_request_title: string | null;
+        author: string | null;
+        pull_request_state: "open" | "closed" | "merged" | null;
+        severity: FindingSeverity;
+        state: FindingLifecycleState;
+        title: string;
+        explanation: string;
+        path: string;
+        start_line: number;
+        end_line: number;
+        created_at: Date;
+        updated_at: Date;
       }>(
         `SELECT f.id, f.repository_id, r.name AS repository_name, f.review_run_id,
                 req.pull_request_id, pr.number AS pull_request_number, pr.title AS pull_request_title,
@@ -108,23 +145,44 @@ export class DashboardSecurityStore {
       const first = summary.rows[0];
       return {
         summary: {
-          total: count(first?.total), active: count(first?.active), criticalHighActive: count(first?.critical_high_active),
-          verified: count(first?.verified), published: count(first?.published), resolved: count(first?.resolved),
-          dismissed: count(first?.dismissed), stale: count(first?.stale), superseded: count(first?.superseded),
+          total: count(first?.total),
+          active: count(first?.active),
+          criticalHighActive: count(first?.critical_high_active),
+          verified: count(first?.verified),
+          published: count(first?.published),
+          resolved: count(first?.resolved),
+          dismissed: count(first?.dismissed),
+          stale: count(first?.stale),
+          superseded: count(first?.superseded),
           repositoriesWithFindings: count(first?.repositories),
         },
         items: rows.rows.map((row) => ({
-          id: row.id, repositoryId: row.repository_id, repositoryName: row.repository_name, reviewRunId: row.review_run_id,
-          pullRequestId: row.pull_request_id, pullRequestNumber: row.pull_request_number, pullRequestTitle: row.pull_request_title,
-          author: row.author, pullRequestState: row.pull_request_state, severity: row.severity, lifecycle: row.state,
-          title: row.title, explanation: row.explanation, path: row.path, startLine: row.start_line, endLine: row.end_line,
-          createdAt: row.created_at, updatedAt: row.updated_at,
+          id: row.id,
+          repositoryId: row.repository_id,
+          repositoryName: row.repository_name,
+          reviewRunId: row.review_run_id,
+          pullRequestId: row.pull_request_id,
+          pullRequestNumber: row.pull_request_number,
+          pullRequestTitle: row.pull_request_title,
+          author: row.author,
+          pullRequestState: row.pull_request_state,
+          severity: row.severity,
+          lifecycle: row.state,
+          title: row.title,
+          explanation: row.explanation,
+          path: row.path,
+          startLine: row.start_line,
+          endLine: row.end_line,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
         })),
       };
     });
   }
 
-  async #readTransaction<T>(work: (client: PgClient) => Promise<T>): Promise<T> {
+  async #readTransaction<T>(
+    work: (client: PgClient) => Promise<T>,
+  ): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -132,8 +190,14 @@ export class DashboardSecurityStore {
       await client.query("COMMIT");
       return value;
     } catch (error) {
-      try { await client.query("ROLLBACK"); } catch { /* preserve original */ }
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* preserve original */
+      }
       throw error;
-    } finally { client.release(); }
+    } finally {
+      client.release();
+    }
   }
 }

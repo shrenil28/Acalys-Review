@@ -30,11 +30,18 @@ describe("CredentialRing", () => {
   it("keeps active and previous credentials out of ordinary serialization and inspection", () => {
     const ring = new CredentialRing(
       "active-secret-marker",
-      [{ value: "previous-secret-marker", validUntil: new Date(NOW.getTime() + 60_000) }],
+      [
+        {
+          value: "previous-secret-marker",
+          validUntil: new Date(NOW.getTime() + 60_000),
+        },
+      ],
       () => NOW,
     );
 
-    const observable = [String(ring), JSON.stringify(ring), inspect(ring)].join("\n");
+    const observable = [String(ring), JSON.stringify(ring), inspect(ring)].join(
+      "\n",
+    );
     expect(observable).not.toContain("active-secret-marker");
     expect(observable).not.toContain("previous-secret-marker");
     expect(observable).toContain("REDACTED");
@@ -80,7 +87,12 @@ describe("GithubOAuthService", () => {
       clientSecrets,
       stateSecrets: new CredentialRing(
         "new-state-secret",
-        [{ value: "old-state-secret", validUntil: new Date(NOW.getTime() + 60_000) }],
+        [
+          {
+            value: "old-state-secret",
+            validUntil: new Date(NOW.getTime() + 60_000),
+          },
+        ],
         () => NOW,
       ),
       callbackUrl: "https://app.example.test/oauth/github/callback",
@@ -93,7 +105,9 @@ describe("GithubOAuthService", () => {
       nonce: "browser-nonce",
       returnTo: "/repositories",
     });
-    expect(rotating.installationUrl(state)).toContain("/apps/acalys-review/installations/new");
+    expect(rotating.installationUrl(state)).toContain(
+      "/apps/acalys-review/installations/new",
+    );
   });
 
   it("rejects backslash-based cross-origin return paths", () => {
@@ -141,7 +155,9 @@ describe("GithubOAuthService", () => {
       nonce: "browser-a",
       returnTo: "/",
     });
-    expect(() => oauth.verifyState(state, "browser-b")).toThrow(UnauthorizedError);
+    expect(() => oauth.verifyState(state, "browser-b")).toThrow(
+      UnauthorizedError,
+    );
   });
 
   it("requests email scope and returns only provider-verified GitHub emails", async () => {
@@ -155,20 +171,45 @@ describe("GithubOAuthService", () => {
       fetchImpl: (async (input: URL | Request | string) => {
         const url = String(input);
         requests.push(url);
-        if (url.includes("access_token")) return new Response(JSON.stringify({ access_token: "token" }), { status: 200 });
-        if (url.includes("/user/emails")) return new Response(JSON.stringify([
-          { email: "Verified@Example.test", verified: true },
-          { email: "unverified@example.test", verified: false },
-          { email: "verified@example.test", verified: true },
-        ]), { status: 200 });
-        return new Response(JSON.stringify({ id: 42, login: "octocat", name: "Octo", email: "public@example.test" }), { status: 200 });
+        if (url.includes("access_token"))
+          return new Response(JSON.stringify({ access_token: "token" }), {
+            status: 200,
+          });
+        if (url.includes("/user/emails"))
+          return new Response(
+            JSON.stringify([
+              { email: "Verified@Example.test", verified: true },
+              { email: "unverified@example.test", verified: false },
+              { email: "verified@example.test", verified: true },
+            ]),
+            { status: 200 },
+          );
+        return new Response(
+          JSON.stringify({
+            id: 42,
+            login: "octocat",
+            name: "Octo",
+            email: "public@example.test",
+          }),
+          { status: 200 },
+        );
       }) as typeof fetch,
     });
-    const authorization = oauth.createAuthorization({ organizationId: ORG, nonce: "browser-nonce", returnTo: "/" });
-    expect(new URL(authorization.url).searchParams.get("scope")).toBe("user:email");
+    const authorization = oauth.createAuthorization({
+      organizationId: ORG,
+      nonce: "browser-nonce",
+      returnTo: "/",
+    });
+    expect(new URL(authorization.url).searchParams.get("scope")).toBe(
+      "user:email",
+    );
     const exchanged = await oauth.exchangeCode("code");
-    expect(exchanged.identity.verifiedEmails).toEqual(["verified@example.test"]);
-    expect(exchanged.identity.verifiedEmails).not.toContain("unverified@example.test");
+    expect(exchanged.identity.verifiedEmails).toEqual([
+      "verified@example.test",
+    ]);
+    expect(exchanged.identity.verifiedEmails).not.toContain(
+      "unverified@example.test",
+    );
     expect(requests.some((url) => url.includes("/user/emails"))).toBe(true);
   });
 
@@ -197,24 +238,57 @@ describe("GitlabOAuthService", () => {
       now: () => NOW,
       fetchImpl: (async (input: URL | Request | string) => {
         const url = String(input);
-        if (url.endsWith("/oauth/token")) return new Response(JSON.stringify({ access_token: "gitlab-token" }), { status: 200 });
-        if (url.endsWith("/api/v4/user/emails")) return new Response(JSON.stringify([
-          { id: 1, email: "Confirmed@Example.test", confirmed_at: "2026-09-01T00:00:00Z" },
-          { id: 2, email: "pending@example.test", confirmed_at: null },
-        ]), { status: 200 });
-        return new Response(JSON.stringify({ id: 84, username: "gitlab-user", name: "GitLab User", email: "profile@example.test" }), { status: 200 });
+        if (url.endsWith("/oauth/token"))
+          return new Response(
+            JSON.stringify({ access_token: "gitlab-token" }),
+            { status: 200 },
+          );
+        if (url.endsWith("/api/v4/user/emails"))
+          return new Response(
+            JSON.stringify([
+              {
+                id: 1,
+                email: "Confirmed@Example.test",
+                confirmed_at: "2026-09-01T00:00:00Z",
+              },
+              { id: 2, email: "pending@example.test", confirmed_at: null },
+            ]),
+            { status: 200 },
+          );
+        return new Response(
+          JSON.stringify({
+            id: 84,
+            username: "gitlab-user",
+            name: "GitLab User",
+            email: "profile@example.test",
+          }),
+          { status: 200 },
+        );
       }) as typeof fetch,
     });
-    const authorization = oauth.createAuthorization({ organizationId: ORG, nonce: "gitlab-browser", returnTo: "/repositories" });
+    const authorization = oauth.createAuthorization({
+      organizationId: ORG,
+      nonce: "gitlab-browser",
+      returnTo: "/repositories",
+    });
     const url = new URL(authorization.url);
     expect(url.origin).toBe("https://gitlab.com");
     expect(url.searchParams.get("scope")).toBe("read_user");
     expect(url.searchParams.get("gl_auth_type")).toBe("login");
-    expect(oauth.verifyState(authorization.state, "gitlab-browser").organizationId).toBe(ORG);
-    expect(() => oauth.verifyState(authorization.state, "other-browser")).toThrow(UnauthorizedError);
+    expect(
+      oauth.verifyState(authorization.state, "gitlab-browser").organizationId,
+    ).toBe(ORG);
+    expect(() =>
+      oauth.verifyState(authorization.state, "other-browser"),
+    ).toThrow(UnauthorizedError);
     const exchanged = await oauth.exchangeCode("code");
-    expect(exchanged.identity).toMatchObject({ providerUserId: "84", username: "gitlab-user" });
-    expect(exchanged.identity.verifiedEmails).toEqual(["confirmed@example.test"]);
+    expect(exchanged.identity).toMatchObject({
+      providerUserId: "84",
+      username: "gitlab-user",
+    });
+    expect(exchanged.identity.verifiedEmails).toEqual([
+      "confirmed@example.test",
+    ]);
   });
 });
 
@@ -233,7 +307,10 @@ describe("AuthService credential boundaries", () => {
     const store = asStore({
       async createSession(input: NonNullable<typeof created>) {
         created = input;
-        return { createdAt: NOW, expiresAt: new Date(NOW.getTime() + input.ttlMillis) };
+        return {
+          createdAt: NOW,
+          expiresAt: new Date(NOW.getTime() + input.ttlMillis),
+        };
       },
       async authenticateSessionByHash(hash: string) {
         authenticatedHash = hash;
@@ -256,7 +333,12 @@ describe("AuthService credential boundaries", () => {
 
     const principal = await auth.authenticateSession(issued.token);
     expect(authenticatedHash).toBe(sha256(issued.token));
-    expect(principal).toMatchObject({ kind: "session", userId: USER, organizationId: ORG, role: "member" });
+    expect(principal).toMatchObject({
+      kind: "session",
+      userId: USER,
+      organizationId: ORG,
+      role: "member",
+    });
   });
 
   it("does not record last-used through a separate touch after failed authentication", async () => {
@@ -269,7 +351,9 @@ describe("AuthService credential boundaries", () => {
     });
     const auth = new AuthService({ store, now: () => NOW });
 
-    await expect(auth.authenticateSession("acalys_session_missing")).rejects.toThrow(UnauthorizedError);
+    await expect(
+      auth.authenticateSession("acalys_session_missing"),
+    ).rejects.toThrow(UnauthorizedError);
     expect(attempts).toBe(1);
   });
 
@@ -330,9 +414,11 @@ describe("AuthService credential boundaries", () => {
     ).rejects.toThrow(ValidationError);
   });
 
-
   it("keeps credential liveness and rotation independent from the API replica clock", async () => {
-    const calls: Array<{ readonly method: string; readonly args: readonly unknown[] }> = [];
+    const calls: Array<{
+      readonly method: string;
+      readonly args: readonly unknown[];
+    }> = [];
     const databaseExpiry = new Date("2026-09-09T12:00:00.000Z");
     const store = asStore({
       async createSession(...args: readonly unknown[]) {
@@ -361,7 +447,11 @@ describe("AuthService credential boundaries", () => {
       },
     });
     const wildlyFastReplicaClock = new Date("2099-01-01T00:00:00.000Z");
-    const auth = new AuthService({ store, now: () => wildlyFastReplicaClock, sessionTtlMillis: 60_000 });
+    const auth = new AuthService({
+      store,
+      now: () => wildlyFastReplicaClock,
+      sessionTtlMillis: 60_000,
+    });
 
     const issued = await auth.issueSession(USER, ORG);
     expect(issued.expiresAt).toEqual(databaseExpiry);
@@ -370,10 +460,22 @@ describe("AuthService credential boundaries", () => {
     expect(rotated.expiresAt).toEqual(databaseExpiry);
     await auth.revokeSession(SESSION, ORG);
 
-    expect(calls.find((call) => call.method === "authenticateSessionByHash")?.args).toHaveLength(1);
-    expect(calls.find((call) => call.method === "rotateSessionByHash")?.args).toHaveLength(1);
-    expect(calls.find((call) => call.method === "revokeSession")?.args).toEqual([SESSION, ORG]);
-    expect((calls.find((call) => call.method === "createSession")?.args[0] as { ttlMillis: number }).ttlMillis).toBe(60_000);
+    expect(
+      calls.find((call) => call.method === "authenticateSessionByHash")?.args,
+    ).toHaveLength(1);
+    expect(
+      calls.find((call) => call.method === "rotateSessionByHash")?.args,
+    ).toHaveLength(1);
+    expect(calls.find((call) => call.method === "revokeSession")?.args).toEqual(
+      [SESSION, ORG],
+    );
+    expect(
+      (
+        calls.find((call) => call.method === "createSession")?.args[0] as {
+          ttlMillis: number;
+        }
+      ).ttlMillis,
+    ).toBe(60_000);
   });
 
   it("lets the database reject expired or membership-less API-key issuance", async () => {
@@ -382,7 +484,10 @@ describe("AuthService credential boundaries", () => {
         return "invalid_expiry";
       },
     });
-    const auth = new AuthService({ store: expiredStore, now: () => new Date("2000-01-01T00:00:00.000Z") });
+    const auth = new AuthService({
+      store: expiredStore,
+      now: () => new Date("2000-01-01T00:00:00.000Z"),
+    });
     await expect(
       auth.issueApiKey({
         organizationId: ORG,
@@ -397,7 +502,10 @@ describe("AuthService credential boundaries", () => {
         return "membership_missing";
       },
     });
-    const membershipAuth = new AuthService({ store: noMembershipStore, now: () => NOW });
+    const membershipAuth = new AuthService({
+      store: noMembershipStore,
+      now: () => NOW,
+    });
     await expect(
       membershipAuth.issueApiKey({
         organizationId: ORG,
@@ -423,7 +531,10 @@ describe("AuthService credential boundaries", () => {
         };
       },
     });
-    const auth = new AuthService({ store, now: () => new Date("2099-01-01T00:00:00.000Z") });
+    const auth = new AuthService({
+      store,
+      now: () => new Date("2099-01-01T00:00:00.000Z"),
+    });
 
     const established = await auth.establishGithubSession({
       organizationId: ORG,
@@ -442,7 +553,9 @@ describe("AuthService credential boundaries", () => {
       displayName: "Ada",
       role: "member",
     });
-    expect(commitInput?.["tokenHash"]).toBe(sha256(established.credential.token));
+    expect(commitInput?.["tokenHash"]).toBe(
+      sha256(established.credential.token),
+    );
     expect(commitInput).not.toHaveProperty("now");
   });
 });

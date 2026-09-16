@@ -20,7 +20,19 @@ export const dashboardRepositoryActivitySchema = z.object({
   reviewRunId: dashboardIdSchema,
   pullRequestNumber: z.number().int().positive().nullable(),
   pullRequestTitle: z.string().max(1000).nullable(),
-  state: z.enum(["queued","preparing","analyzing","reviewing","verifying","reconciling","publishing","completed","failed","cancelled","superseded"]),
+  state: z.enum([
+    "queued",
+    "preparing",
+    "analyzing",
+    "reviewing",
+    "verifying",
+    "reconciling",
+    "publishing",
+    "completed",
+    "failed",
+    "cancelled",
+    "superseded",
+  ]),
   trigger: z.string().min(1).max(100),
   createdAt: iso,
   completedAt: iso.nullable(),
@@ -39,5 +51,9 @@ export const dashboardRepositoryOverviewSchema = z.object({
   recentActivity: z.array(dashboardRepositoryActivitySchema).max(100),
 });
 
-export type DashboardRepositoryMetric = z.infer<typeof dashboardRepositoryMetricSchema>;
-export type DashboardRepositoryOverview = z.infer<typeof dashboardRepositoryOverviewSchema>;
+export type DashboardRepositoryMetric = z.infer<
+  typeof dashboardRepositoryMetricSchema
+>;
+export type DashboardRepositoryOverview = z.infer<
+  typeof dashboardRepositoryOverviewSchema
+>;

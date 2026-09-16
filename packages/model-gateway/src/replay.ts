@@ -1,16 +1,48 @@
 import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  open,
-  readFile,
-  rename,
-  unlink,
-} from "node:fs/promises";
+import { mkdir, open, readFile, rename, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { canonicalJson } from "@acalys/contracts/domain";
+import { z } from "zod";
 
+import { MODEL_UNKNOWN_REASONS } from "./types.js";
 import type { ModelProvider, ProviderOutcome } from "./types.js";
+
+const providerOutcomeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("ok"),
+    text: z.string(),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cachedInputTokens: z.number().int().nonnegative(),
+    cacheCreationInputTokens: z.number().int().nonnegative().optional(),
+    providerRequestId: z.string().optional(),
+  }),
+  z.object({
+    kind: z.literal("failed"),
+    retryable: z.boolean(),
+    reason: z.enum(["rate_limited", "provider_rejected"]),
+    detail: z.string(),
+  }),
+  z.object({
+    kind: z.literal("unknown"),
+    reason: z.enum(MODEL_UNKNOWN_REASONS),
+    detail: z.string(),
+  }),
+]);
+
+const cassetteDocumentSchema = z.object({
+  version: z.literal(1),
+  entries: z.array(
+    z.object({
+      version: z.literal(1),
+      requestDigest: z.string().min(1),
+      provider: z.enum(["openai", "anthropic"]),
+      modelId: z.string().min(1),
+      outcome: providerOutcomeSchema,
+    }),
+  ),
+});
 
 export interface CassetteEntry {
   readonly version: 1;
@@ -32,18 +64,24 @@ export class MemoryCassetteStore implements CassetteStore {
     for (const entry of entries) this.#entries.set(entry.requestDigest, entry);
   }
 
-  public async read(requestDigest: string): Promise<CassetteEntry | undefined> {
-    return this.#entries.get(requestDigest);
+  public read(requestDigest: string): Promise<CassetteEntry | undefined> {
+    return Promise.resolve(this.#entries.get(requestDigest));
   }
 
-  public async write(entry: CassetteEntry): Promise<void> {
+  public write(entry: CassetteEntry): Promise<void> {
     const previous = this.#entries.get(entry.requestDigest);
-    if (previous !== undefined && canonicalJson(previous) !== canonicalJson(entry)) {
-      throw new Error(
-        `cassette digest ${entry.requestDigest} already identifies different provider output`,
+    if (
+      previous !== undefined &&
+      canonicalJson(previous) !== canonicalJson(entry)
+    ) {
+      return Promise.reject(
+        new Error(
+          `cassette digest ${entry.requestDigest} already identifies different provider output`,
+        ),
       );
     }
     this.#entries.set(entry.requestDigest, entry);
+    return Promise.resolve();
   }
 
   public entries(): readonly CassetteEntry[] {
@@ -66,21 +104,22 @@ export class JsonCassetteStore implements CassetteStore {
   readonly #path: string;
   readonly #lockTimeoutMs: number;
 
-  public constructor(path: string, options: { readonly lockTimeoutMs?: number } = {}) {
+  public constructor(
+    path: string,
+    options: { readonly lockTimeoutMs?: number } = {},
+  ) {
     this.#path = path;
     this.#lockTimeoutMs = options.lockTimeoutMs ?? 5_000;
   }
 
   async #load(): Promise<Map<string, CassetteEntry>> {
     try {
-      const parsed = JSON.parse(await readFile(this.#path, "utf8")) as {
-        readonly version?: unknown;
-        readonly entries?: readonly CassetteEntry[];
-      };
-      if (parsed.version !== 1 || !Array.isArray(parsed.entries)) {
-        throw new Error("cassette document has an unsupported shape");
-      }
-      return new Map(parsed.entries.map((entry) => [entry.requestDigest, entry]));
+      const parsed = cassetteDocumentSchema.parse(
+        JSON.parse(await readFile(this.#path, "utf8")) as unknown,
+      );
+      return new Map(
+        parsed.entries.map((entry) => [entry.requestDigest, entry]),
+      );
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
       throw error;
@@ -119,7 +158,10 @@ export class JsonCassetteStore implements CassetteStore {
       // cassette entry another evaluator committed after this process started.
       const entries = await this.#load();
       const previous = entries.get(entry.requestDigest);
-      if (previous !== undefined && canonicalJson(previous) !== canonicalJson(entry)) {
+      if (
+        previous !== undefined &&
+        canonicalJson(previous) !== canonicalJson(entry)
+      ) {
         throw new Error(
           `cassette digest ${entry.requestDigest} already identifies different provider output`,
         );

@@ -31,6 +31,7 @@
 
 import type {
   PgClient,
+  CandidateFindingRow,
   PolicyDecisionStore,
   PreMergeStore,
   ReviewIngestionStore,
@@ -110,9 +111,7 @@ export interface OrchestratorOptions {
   readonly analyzer: (
     input: AnalysisInput,
     context: RunContext,
-  ) =>
-    | readonly import("@acalys/database").CandidateFindingRow[]
-    | Promise<readonly import("@acalys/database").CandidateFindingRow[]>;
+  ) => readonly CandidateFindingRow[] | Promise<readonly CandidateFindingRow[]>;
   /** Required independent verification boundary; there is no silent stub fallback. */
   readonly verifier: CandidateVerifier;
   readonly config?: FunnelConfig | undefined;
@@ -135,16 +134,23 @@ export interface RunContext {
    */
   readonly provider: "github" | "gitlab";
   readonly pullRequestId: string;
-  readonly reviewPolicy?: { readonly policy: DashboardEffectiveReviewPolicy; readonly fingerprint: string } | undefined;
+  readonly reviewPolicy?:
+    | {
+        readonly policy: DashboardEffectiveReviewPolicy;
+        readonly fingerprint: string;
+      }
+    | undefined;
   /** Immutable PR subject from ReviewRequest; absent for non-PR/generic orchestration. */
-  readonly reviewSubject?: {
-    readonly number?: number | undefined;
-    readonly title: string;
-    readonly description?: string | undefined;
-    readonly headRef: string;
-    readonly repositoryOwner: string;
-    readonly repositoryName: string;
-  } | undefined;
+  readonly reviewSubject?:
+    | {
+        readonly number?: number | undefined;
+        readonly title: string;
+        readonly description?: string | undefined;
+        readonly headRef: string;
+        readonly repositoryOwner: string;
+        readonly repositoryName: string;
+      }
+    | undefined;
 }
 
 /**

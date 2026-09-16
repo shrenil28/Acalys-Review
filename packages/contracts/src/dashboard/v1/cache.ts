@@ -21,8 +21,14 @@ export const dashboardReviewCachesResponseSchema = z.object({
 });
 
 export const dashboardDeleteReviewCachesBodySchema = z.object({
-  ids: z.array(dashboardIdSchema).min(1).max(100)
-    .refine((ids) => new Set(ids).size === ids.length, "Cache ids must be unique"),
+  ids: z
+    .array(dashboardIdSchema)
+    .min(1)
+    .max(100)
+    .refine(
+      (ids) => new Set(ids).size === ids.length,
+      "Cache ids must be unique",
+    ),
 });
 
 export const dashboardDeleteReviewCachesResponseSchema = z.object({

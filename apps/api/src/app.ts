@@ -2,7 +2,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import express, { type Express, type Request, type Response } from "express";
 
-import { requireScope, type ApiScope, type AuthService, type Principal } from "@acalys/auth";
+import {
+  requireScope,
+  type ApiScope,
+  type AuthService,
+  type Principal,
+} from "@acalys/auth";
 import {
   API_ROUTES,
   DEFAULT_PAGE_SIZE,
@@ -21,8 +26,8 @@ import {
   TEXT_LIMITS,
 } from "@acalys/contracts/domain";
 import {
-  ApiMutationStore,
-  ApiStore,
+  type ApiMutationStore,
+  type ApiStore,
   type ApiTenantScope,
 } from "@acalys/database";
 import {
@@ -30,7 +35,10 @@ import {
   InvalidPaginationCursor,
   type PaginationCursorBinding,
 } from "./pagination-cursor.js";
-import { createDashboardRouter, type DashboardRouterOptions } from "./dashboard-router.js";
+import {
+  createDashboardRouter,
+  type DashboardRouterOptions,
+} from "./dashboard-router.js";
 
 export interface ApiRequestLogFields {
   readonly correlationId: string;
@@ -65,6 +73,8 @@ export interface ApiAppOptions {
   readonly monotonicNow?: (() => number) | undefined;
   /** Browser/admin surface is separate from the frozen 14-route product API. */
   readonly dashboard?: DashboardRouterOptions | undefined;
+  /** Checks dependencies required to serve authenticated product requests. */
+  readonly readiness?: (() => Promise<void>) | undefined;
 }
 
 interface RequestContext {
@@ -72,6 +82,33 @@ interface RequestContext {
   readonly scope: ApiTenantScope;
   readonly correlationId: string;
 }
+
+type RouteManifest = typeof API_ROUTES;
+type SchemaOutput<T> = T extends { readonly _output: infer Output }
+  ? Output
+  : undefined;
+type RoutePart<
+  Name extends RouteName,
+  Part extends "params" | "query" | "body",
+> = Part extends keyof RouteManifest[Name]
+  ? SchemaOutput<RouteManifest[Name][Part]>
+  : undefined;
+type RouteResult = { readonly status: number; readonly body: unknown };
+type RouteHandler<Name extends RouteName> = (
+  context: RequestContext,
+  params: RoutePart<Name, "params">,
+  query: RoutePart<Name, "query">,
+  body: RoutePart<Name, "body">,
+  request: Request,
+) => Promise<RouteResult>;
+type RouteHandlers = { readonly [Name in RouteName]: RouteHandler<Name> };
+type ValidatedRouteHandler = (
+  context: RequestContext,
+  params: unknown,
+  query: unknown,
+  body: unknown,
+  request: Request,
+) => Promise<RouteResult>;
 
 const ROUTE_SCOPE: Readonly<Record<RouteName, ApiScope>> = {
   listRepositories: "repositories:read",
@@ -95,7 +132,10 @@ function digest(value: unknown): string {
 }
 
 function queryObject(request: Request): Record<string, unknown> {
-  const out: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  const out: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
   for (const [key, value] of Object.entries(request.query)) {
     // Express represents duplicate or structured query parameters as arrays or
     // objects. Never drop those values before contract validation: doing so can
@@ -104,10 +144,13 @@ function queryObject(request: Request): Record<string, unknown> {
     // on the wire; any structured representation therefore fails closed before
     // a tenant-scoped handler can run.
     if (typeof value !== "string") {
-      throw new RequestValidationFailure([{
-        path: bounded(key, TEXT_LIMITS.identifier),
-        message: "Query parameter must appear exactly once as a scalar string",
-      }]);
+      throw new RequestValidationFailure([
+        {
+          path: bounded(key, TEXT_LIMITS.identifier),
+          message:
+            "Query parameter must appear exactly once as a scalar string",
+        },
+      ]);
     }
     out[key] = value;
   }
@@ -120,7 +163,8 @@ interface ApiErrorBody {
   readonly code: string;
   readonly message: string;
   readonly retryability: ApiRetryability;
-  readonly fields?: readonly { readonly path: string; readonly message: string }[] | undefined;
+  readonly fields?:
+    readonly { readonly path: string; readonly message: string }[] | undefined;
 }
 
 const INTERNAL_ERROR_BODY: ApiErrorBody = {
@@ -131,7 +175,10 @@ const INTERNAL_ERROR_BODY: ApiErrorBody = {
 
 class RequestValidationFailure extends Error {
   constructor(
-    readonly fields: readonly { readonly path: string; readonly message: string }[],
+    readonly fields: readonly {
+      readonly path: string;
+      readonly message: string;
+    }[],
   ) {
     super("Request validation failed");
     this.name = "RequestValidationFailure";
@@ -176,7 +223,11 @@ function validatedErrorBody(body: ApiErrorBody): ApiErrorBody {
   return parsed.success ? parsed.data : INTERNAL_ERROR_BODY;
 }
 
-function sendErrorBody(response: Response, status: number, body: ApiErrorBody): void {
+function sendErrorBody(
+  response: Response,
+  status: number,
+  body: ApiErrorBody,
+): void {
   response.status(status).json(validatedErrorBody(body));
 }
 
@@ -222,7 +273,10 @@ function statusForAcalysError(code: string): number {
   }
 }
 
-function mapError(error: unknown): { readonly status: number; readonly body: ApiErrorBody } {
+function mapError(error: unknown): {
+  readonly status: number;
+  readonly body: ApiErrorBody;
+} {
   try {
     if (error instanceof IdempotencyKeyRequired) {
       return {
@@ -235,7 +289,8 @@ function mapError(error: unknown): { readonly status: number; readonly body: Api
     }
     if (isAcalysError(error)) {
       const code = error.code;
-      const message = PUBLIC_ACALYS_ERROR_MESSAGE[code] ?? INTERNAL_ERROR_BODY.message;
+      const message =
+        PUBLIC_ACALYS_ERROR_MESSAGE[code] ?? INTERNAL_ERROR_BODY.message;
       const body = errorBody(
         code in PUBLIC_ACALYS_ERROR_MESSAGE ? code : INTERNAL_ERROR_BODY.code,
         message,
@@ -249,35 +304,60 @@ function mapError(error: unknown): { readonly status: number; readonly body: Api
   return { status: 500, body: INTERNAL_ERROR_BODY };
 }
 
-function safeValidationFields(issues: readonly { readonly path: readonly PropertyKey[]; readonly message: string }[]) {
+function safeValidationFields(
+  issues: readonly {
+    readonly path: readonly PropertyKey[];
+    readonly message: string;
+  }[],
+) {
   return issues.slice(0, 100).map((issue) => ({
     path: bounded(issue.path.map(String).join("."), TEXT_LIMITS.identifier),
     message: bounded(issue.message, TEXT_LIMITS.summary),
   }));
 }
 
-function parsePart(schema: RouteDefinition["params"] | RouteDefinition["query"] | RouteDefinition["body"], value: unknown): unknown {
+function parsePart(schema: RouteDefinition["params"], value: unknown): unknown {
   if (schema === undefined) return undefined;
   const parsed = schema.safeParse(value);
   if (parsed.success) return parsed.data;
   throw new RequestValidationFailure(safeValidationFields(parsed.error.issues));
 }
 
-async function authenticate(options: ApiAppOptions, request: Request, routeName: RouteName, correlationId: string): Promise<RequestContext> {
-  const principal = await options.auth.authenticateBearer(request.header("authorization"));
+function rejectionError(reason: unknown): Error {
+  return reason instanceof Error
+    ? reason
+    : new Error("Asynchronous operation failed");
+}
+
+async function authenticate(
+  options: ApiAppOptions,
+  request: Request,
+  routeName: RouteName,
+  correlationId: string,
+): Promise<RequestContext> {
+  const principal = await options.auth.authenticateBearer(
+    request.header("authorization"),
+  );
   requireScope(principal, ROUTE_SCOPE[routeName]);
   const allowed = await options.consumeRate({
     organizationId: principal.organizationId,
     principalId: principal.id,
   });
   if (!allowed) throw new RateLimitExceeded();
-  return { principal, scope: { organizationId: principal.organizationId }, correlationId };
+  return {
+    principal,
+    scope: { organizationId: principal.organizationId },
+    correlationId,
+  };
 }
-
 
 function correlationId(request: Request): string {
   const supplied = request.header("x-correlation-id");
-  if (supplied !== undefined && supplied.length >= 1 && supplied.length <= TEXT_LIMITS.identifier) {
+  if (
+    supplied !== undefined &&
+    supplied.length >= 1 &&
+    supplied.length <= TEXT_LIMITS.identifier
+  ) {
     return supplied;
   }
   return randomUUID();
@@ -355,7 +435,13 @@ function sendMappedError(response: Response, error: unknown): void {
       return;
     }
     if (error instanceof RateLimitExceeded) {
-      sendError(response, 429, "RATE_LIMITED", "Rate limit exceeded", "retryable");
+      sendError(
+        response,
+        429,
+        "RATE_LIMITED",
+        "Rate limit exceeded",
+        "retryable",
+      );
       return;
     }
   } catch {
@@ -365,7 +451,9 @@ function sendMappedError(response: Response, error: unknown): void {
   sendErrorBody(response, mapped.status, mapped.body);
 }
 
-function bodyParserFailure(error: unknown): "malformed" | "too_large" | undefined {
+function bodyParserFailure(
+  error: unknown,
+): "malformed" | "too_large" | undefined {
   try {
     if (!(error instanceof Error)) return undefined;
     const type = (error as { readonly type?: unknown }).type;
@@ -393,7 +481,10 @@ function parseLastEventId(raw: string | undefined): number {
   return parsed;
 }
 
-async function writeSseFrame(response: Response, frame: string): Promise<boolean> {
+async function writeSseFrame(
+  response: Response,
+  frame: string,
+): Promise<boolean> {
   if (response.destroyed || response.writableEnded) return false;
   if (response.write(frame)) return true;
 
@@ -426,7 +517,9 @@ interface HeartbeatSchedule {
 
 function sseTiming(name: string, value: number, maximum: number): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > maximum) {
-    throw new RangeError(`${name} must be an integer between 1 and ${String(maximum)} milliseconds`);
+    throw new RangeError(
+      `${name} must be an integer between 1 and ${String(maximum)} milliseconds`,
+    );
   }
   return value;
 }
@@ -457,8 +550,7 @@ function createHeartbeatSchedule(
 }
 
 type HeartbeatAwaitResult<T> =
-  | { readonly kind: "value"; readonly value: T }
-  | { readonly kind: "closed" };
+  { readonly kind: "value"; readonly value: T } | { readonly kind: "closed" };
 
 /**
  * Waits for an operation while keeping an already-open SSE stream alive.
@@ -502,7 +594,12 @@ function awaitWithHeartbeats<T>(
     };
 
     const maybeFinishOperation = (): void => {
-      if (settled || operationResult === undefined || heartbeatWrite !== undefined) return;
+      if (
+        settled ||
+        operationResult === undefined ||
+        heartbeatWrite !== undefined
+      )
+        return;
       // The keepalive is owed by elapsed idle time, not by whoever won the
       // race to resolve. The armed timer and the idle clock are different
       // sources: Node may run a `setTimeout(n)` fractionally before `n`
@@ -535,7 +632,8 @@ function awaitWithHeartbeats<T>(
       }
       settled = true;
       cleanup();
-      if (operationResult.kind === "error") reject(operationResult.error);
+      if (operationResult.kind === "error")
+        reject(rejectionError(operationResult.error));
       else resolve(operationResult);
     };
 
@@ -547,7 +645,7 @@ function awaitWithHeartbeats<T>(
       } catch (error) {
         settled = true;
         cleanup();
-        reject(error);
+        reject(rejectionError(error));
         return;
       }
       timer = setTimeout(() => {
@@ -613,9 +711,13 @@ function page(
   decode: (binding: PaginationCursorBinding, cursor: string) => string,
 ): { readonly limit: number; readonly cursor?: string } {
   const parsed = (query ?? {}) as { limit?: number; cursor?: string };
-  if (parsed.cursor === undefined) return { limit: parsed.limit ?? DEFAULT_PAGE_SIZE };
+  if (parsed.cursor === undefined)
+    return { limit: parsed.limit ?? DEFAULT_PAGE_SIZE };
   try {
-    return { limit: parsed.limit ?? DEFAULT_PAGE_SIZE, cursor: decode(binding, parsed.cursor) };
+    return {
+      limit: parsed.limit ?? DEFAULT_PAGE_SIZE,
+      cursor: decode(binding, parsed.cursor),
+    };
   } catch (error) {
     if (error instanceof InvalidPaginationCursor) {
       throw new RequestValidationFailure([
@@ -626,7 +728,12 @@ function page(
   }
 }
 
-function publicPage<T extends { readonly items: readonly unknown[]; readonly nextCursor?: string | undefined }>(
+function publicPage<
+  T extends {
+    readonly items: readonly unknown[];
+    readonly nextCursor?: string | undefined;
+  },
+>(
   value: T,
   binding: PaginationCursorBinding,
   encode: (binding: PaginationCursorBinding, rowId: string) => string,
@@ -661,17 +768,55 @@ export function createApiApp(options: ApiAppOptions): Express {
   );
   const monotonicNow = options.monotonicNow ?? (() => performance.now());
   const cursorCodec = createPaginationCursorCodec(options.cursorSecrets);
+  const decodeCursor = (
+    binding: PaginationCursorBinding,
+    cursor: string,
+  ): string => cursorCodec.decode(binding, cursor);
+  const encodeCursor = (
+    binding: PaginationCursorBinding,
+    rowId: string,
+  ): string => cursorCodec.encode(binding, rowId);
 
-  const mutationIdentity = (context: RequestContext, routeName: RouteName, request: Request, semanticInput: unknown) => {
-    const key=request.header("idempotency-key");
-    if(key===undefined||key.length<8||key.length>200)throw new IdempotencyKeyRequired();
-    return { organizationId:context.scope.organizationId, principalId:context.principal.id, routeName, key, requestDigest:digest({route:routeName,input:semanticInput}) };
+  const mutationIdentity = (
+    context: RequestContext,
+    routeName: RouteName,
+    request: Request,
+    semanticInput: unknown,
+  ) => {
+    const key = request.header("idempotency-key");
+    if (key === undefined || key.length < 8 || key.length > 200)
+      throw new IdempotencyKeyRequired();
+    return {
+      organizationId: context.scope.organizationId,
+      principalId: context.principal.id,
+      routeName,
+      key,
+      requestDigest: digest({ route: routeName, input: semanticInput }),
+    };
   };
-  const mutationResult = (outcome: Awaited<ReturnType<ApiMutationStore["cancelReview"]>>): {status:number;body:unknown} => {
-    switch(outcome.kind){
-      case "result": case "replay": return {status:outcome.status,body:outcome.body};
-      case "conflict": return {status:409,body:errorBody("IDEMPOTENCY_KEY_CONFLICT","Idempotency key was already used for a different request")};
-      case "in_progress": return {status:409,body:errorBody("IDEMPOTENCY_IN_PROGRESS","An operation with this idempotency key is still in progress")};
+  const mutationResult = (
+    outcome: Awaited<ReturnType<ApiMutationStore["cancelReview"]>>,
+  ): { status: number; body: unknown } => {
+    switch (outcome.kind) {
+      case "result":
+      case "replay":
+        return { status: outcome.status, body: outcome.body };
+      case "conflict":
+        return {
+          status: 409,
+          body: errorBody(
+            "IDEMPOTENCY_KEY_CONFLICT",
+            "Idempotency key was already used for a different request",
+          ),
+        };
+      case "in_progress":
+        return {
+          status: 409,
+          body: errorBody(
+            "IDEMPOTENCY_IN_PROGRESS",
+            "An operation with this idempotency key is still in progress",
+          ),
+        };
     }
   };
 
@@ -684,14 +829,26 @@ export function createApiApp(options: ApiAppOptions): Express {
     }
   >();
   app.disable("x-powered-by");
+  app.use((_request, response, next) => {
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("X-Frame-Options", "DENY");
+    response.setHeader("Referrer-Policy", "no-referrer");
+    next();
+  });
   if (options.dashboard !== undefined) {
     const dashboardOrigin = new URL(options.dashboard.webOrigin).origin;
     app.use((request, response, next) => {
       const origin = request.header("origin");
-      if (origin === undefined) { next(); return; }
+      if (origin === undefined) {
+        next();
+        return;
+      }
       if (origin !== dashboardOrigin) {
         if (request.method === "OPTIONS") {
-          response.status(403).json({ code: "CORS_ORIGIN_REJECTED", message: "Browser origin is not allowed" });
+          response.status(403).json({
+            code: "CORS_ORIGIN_REJECTED",
+            message: "Browser origin is not allowed",
+          });
           return;
         }
         next();
@@ -700,11 +857,20 @@ export function createApiApp(options: ApiAppOptions): Express {
       response.setHeader("access-control-allow-origin", dashboardOrigin);
       response.setHeader("access-control-allow-credentials", "true");
       response.setHeader("vary", "Origin");
-      response.setHeader("access-control-allow-methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-      response.setHeader("access-control-allow-headers", "Authorization,Content-Type,Idempotency-Key,Last-Event-ID,X-Correlation-ID,If-Match-Revision");
+      response.setHeader(
+        "access-control-allow-methods",
+        "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+      );
+      response.setHeader(
+        "access-control-allow-headers",
+        "Authorization,Content-Type,Idempotency-Key,Last-Event-ID,X-Correlation-ID,If-Match-Revision",
+      );
       response.setHeader("access-control-expose-headers", "X-Correlation-ID");
       response.setHeader("access-control-max-age", "600");
-      if (request.method === "OPTIONS") { response.status(204).end(); return; }
+      if (request.method === "OPTIONS") {
+        response.status(204).end();
+        return;
+      }
       next();
     });
   }
@@ -713,110 +879,287 @@ export function createApiApp(options: ApiAppOptions): Express {
     response.setHeader("x-correlation-id", requestCorrelationId);
     requestLogs.set(request, {
       correlationId: requestCorrelationId,
-      log: attachRequestLog(options, request, response, "unknown", requestCorrelationId),
+      log: attachRequestLog(
+        options,
+        request,
+        response,
+        "unknown",
+        requestCorrelationId,
+      ),
     });
     next();
   });
-  app.use(express.json({ limit: "1mb" }));
-  app.use((error: unknown, _request: Request, response: Response, next: (error?: unknown) => void) => {
-    const failure = bodyParserFailure(error);
-    if (failure === "malformed") {
-      sendError(response, 400, "VALIDATION_ERROR", "Request body is not valid JSON");
-      return;
-    }
-    if (failure === "too_large") {
-      sendError(response, 413, "VALIDATION_ERROR", "Request body is too large");
-      return;
-    }
-    next(error);
+  app.get("/healthz", (_request, response) => {
+    response.status(200).json({ status: "ok" });
   });
+  app.get("/readyz", async (_request, response) => {
+    try {
+      await options.readiness?.();
+      response.status(200).json({ status: "ready" });
+    } catch {
+      response.status(503).json({ status: "unavailable" });
+    }
+  });
+  app.use(express.json({ limit: "1mb" }));
+  app.use(
+    (
+      error: unknown,
+      _request: Request,
+      response: Response,
+      next: (error?: unknown) => void,
+    ) => {
+      const failure = bodyParserFailure(error);
+      if (failure === "malformed") {
+        sendError(
+          response,
+          400,
+          "VALIDATION_ERROR",
+          "Request body is not valid JSON",
+        );
+        return;
+      }
+      if (failure === "too_large") {
+        sendError(
+          response,
+          413,
+          "VALIDATION_ERROR",
+          "Request body is too large",
+        );
+        return;
+      }
+      next(error);
+    },
+  );
 
-  const handlers: Record<RouteName, (context: RequestContext, params: any, query: any, body: any, request: Request) => Promise<{ status: number; body: unknown }>> = {
+  const handlers: RouteHandlers = {
     async listRepositories(context, _params, query) {
-      const binding: PaginationCursorBinding = { organizationId: context.scope.organizationId, collection: "repositories" };
-      const p = page(query, binding, cursorCodec.decode);
-      const found = await options.api.listRepositories(context.scope, p.limit, p.cursor);
-      return { status: 200, body: publicPage(found, binding, cursorCodec.encode) };
+      const binding: PaginationCursorBinding = {
+        organizationId: context.scope.organizationId,
+        collection: "repositories",
+      };
+      const p = page(query, binding, decodeCursor);
+      const found = await options.api.listRepositories(
+        context.scope,
+        p.limit,
+        p.cursor,
+      );
+      return { status: 200, body: publicPage(found, binding, encodeCursor) };
     },
     async getRepository(context, params) {
       const found = await options.api.getRepository(context.scope, params.id);
-      return found === undefined ? { status: 404, body: errorBody("NOT_FOUND", "Repository not found") } : { status: 200, body: found };
-    },
-    async listPullRequests(context, params, query) {
-      const binding: PaginationCursorBinding = { organizationId: context.scope.organizationId, collection: "pull_requests", resource: params.repositoryId };
-      const p = page(query, binding, cursorCodec.decode);
-      const found = await options.api.listPullRequests(context.scope, params.repositoryId, p.limit, p.cursor);
       return found === undefined
         ? { status: 404, body: errorBody("NOT_FOUND", "Repository not found") }
-        : { status: 200, body: publicPage(found, binding, cursorCodec.encode) };
+        : { status: 200, body: found };
+    },
+    async listPullRequests(context, params, query) {
+      const binding: PaginationCursorBinding = {
+        organizationId: context.scope.organizationId,
+        collection: "pull_requests",
+        resource: params.repositoryId,
+      };
+      const p = page(query, binding, decodeCursor);
+      const found = await options.api.listPullRequests(
+        context.scope,
+        params.repositoryId,
+        p.limit,
+        p.cursor,
+      );
+      return found === undefined
+        ? { status: 404, body: errorBody("NOT_FOUND", "Repository not found") }
+        : { status: 200, body: publicPage(found, binding, encodeCursor) };
     },
     async createReview(context, _params, _query, body, request) {
-      if(body.pullRequestId===undefined)return{status:409,body:errorBody("REVIEW_TARGET_NOT_AVAILABLE","This API checkpoint requires pullRequestId")};
-      if(body.depth!==undefined||body.categories!==undefined||body.reviewDrafts!==undefined)return{status:409,body:errorBody("REVIEW_OVERRIDES_NOT_AVAILABLE","Review overrides are not enabled by the current execution runtime")};
-      const identity=mutationIdentity(context,"createReview",request,body);
-      return mutationResult(await options.mutations.createReview({identity,repositoryId:body.repositoryId,pullRequestId:body.pullRequestId,requestedBy:{kind:context.principal.kind,id:context.principal.id},correlationId:context.correlationId}));
+      if (body.pullRequestId === undefined)
+        return {
+          status: 409,
+          body: errorBody(
+            "REVIEW_TARGET_NOT_AVAILABLE",
+            "This API checkpoint requires pullRequestId",
+          ),
+        };
+      if (
+        body.depth !== undefined ||
+        body.categories !== undefined ||
+        body.reviewDrafts !== undefined
+      )
+        return {
+          status: 409,
+          body: errorBody(
+            "REVIEW_OVERRIDES_NOT_AVAILABLE",
+            "Review overrides are not enabled by the current execution runtime",
+          ),
+        };
+      const identity = mutationIdentity(context, "createReview", request, body);
+      return mutationResult(
+        await options.mutations.createReview({
+          identity,
+          repositoryId: body.repositoryId,
+          pullRequestId: body.pullRequestId,
+          requestedBy: {
+            kind: context.principal.kind,
+            id: context.principal.id,
+          },
+          correlationId: context.correlationId,
+        }),
+      );
     },
     async getReview(context, params) {
-      const found = await options.api.getReview(context.scope, params.id); return found === undefined ? { status: 404, body: errorBody("NOT_FOUND", "Review not found") } : { status: 200, body: found };
+      const found = await options.api.getReview(context.scope, params.id);
+      return found === undefined
+        ? { status: 404, body: errorBody("NOT_FOUND", "Review not found") }
+        : { status: 200, body: found };
     },
     async cancelReview(context, params, _query, body, request) {
-      const identity=mutationIdentity(context,"cancelReview",request,{params,body});
-      return mutationResult(await options.mutations.cancelReview({identity,reviewRunId:params.id,...(body?.reason===undefined?{}:{reason:body.reason})}));
+      const identity = mutationIdentity(context, "cancelReview", request, {
+        params,
+        body,
+      });
+      return mutationResult(
+        await options.mutations.cancelReview({
+          identity,
+          reviewRunId: params.id,
+          ...(body?.reason === undefined ? {} : { reason: body.reason }),
+        }),
+      );
     },
-    async getReviewSummary(context, params) { const found = await options.api.getReviewSummary(context.scope, params.id); return found === undefined ? { status: 404, body: errorBody("NOT_FOUND", "Review summary not found") } : { status: 200, body: found }; },
+    async getReviewSummary(context, params) {
+      const found = await options.api.getReviewSummary(
+        context.scope,
+        params.id,
+      );
+      return found === undefined
+        ? {
+            status: 404,
+            body: errorBody("NOT_FOUND", "Review summary not found"),
+          }
+        : { status: 200, body: found };
+    },
     async listReviewFindings(context, params, query) {
-      const binding: PaginationCursorBinding = { organizationId: context.scope.organizationId, collection: "findings", resource: params.id, query: findingFilterBinding(query) };
-      const p = page(query, binding, cursorCodec.decode);
-      const found = await options.api.listReviewFindings(context.scope, params.id, p.limit, p.cursor, query ?? {});
-      return found===undefined
-        ? {status:404,body:errorBody("NOT_FOUND","Review not found")}
-        : {status:200,body:publicPage(found,binding,cursorCodec.encode)};
+      const binding: PaginationCursorBinding = {
+        organizationId: context.scope.organizationId,
+        collection: "findings",
+        resource: params.id,
+        query: findingFilterBinding(query),
+      };
+      const p = page(query, binding, decodeCursor);
+      const found = await options.api.listReviewFindings(
+        context.scope,
+        params.id,
+        p.limit,
+        p.cursor,
+        query ?? {},
+      );
+      return found === undefined
+        ? { status: 404, body: errorBody("NOT_FOUND", "Review not found") }
+        : { status: 200, body: publicPage(found, binding, encodeCursor) };
     },
     async listReviewChecks(context, params) {
-      const found=await options.api.listReviewChecks(context.scope, params.id);
-      if(found===undefined)return{status:404,body:errorBody("NOT_FOUND","Review not found")};
+      const found = await options.api.listReviewChecks(
+        context.scope,
+        params.id,
+      );
+      if (found === undefined)
+        return {
+          status: 404,
+          body: errorBody("NOT_FOUND", "Review not found"),
+        };
       // This frozen route intentionally has no cursor query. Refuse any
       // persistence adapter that tries to surface an unusable continuation.
-      if(found.nextCursor!==undefined)throw new Error("NON_PAGEABLE_CHECK_CURSOR_VIOLATION");
-      return{status:200,body:{items:found.items}};
+      if (found.nextCursor !== undefined)
+        throw new Error("NON_PAGEABLE_CHECK_CURSOR_VIOLATION");
+      return { status: 200, body: { items: found.items } };
     },
-    async getFinding(context, params) { const found=await options.api.getFinding(context.scope, params.id); return found===undefined?{status:404,body:errorBody("NOT_FOUND","Finding not found")}:{status:200,body:found}; },
+    async getFinding(context, params) {
+      const found = await options.api.getFinding(context.scope, params.id);
+      return found === undefined
+        ? { status: 404, body: errorBody("NOT_FOUND", "Finding not found") }
+        : { status: 200, body: found };
+    },
     async dismissFinding(context, params, _query, body, request) {
-      const identity=mutationIdentity(context,"dismissFinding",request,{params,body});
-      return mutationResult(await options.mutations.dismissFinding({identity,findingId:params.id,reason:body.reason}));
+      const identity = mutationIdentity(context, "dismissFinding", request, {
+        params,
+        body,
+      });
+      return mutationResult(
+        await options.mutations.dismissFinding({
+          identity,
+          findingId: params.id,
+          reason: body.reason,
+        }),
+      );
     },
     async listConversations(context, params, query) {
-      const binding: PaginationCursorBinding = { organizationId: context.scope.organizationId, collection: "conversations", resource: params.repositoryId };
-      const p=page(query,binding,cursorCodec.decode);
-      const found=await options.api.listConversations(context.scope,params.repositoryId,p.limit,p.cursor);
-      return found===undefined
-        ? {status:404,body:errorBody("NOT_FOUND","Repository not found")}
-        : {status:200,body:publicPage(found,binding,cursorCodec.encode)};
+      const binding: PaginationCursorBinding = {
+        organizationId: context.scope.organizationId,
+        collection: "conversations",
+        resource: params.repositoryId,
+      };
+      const p = page(query, binding, decodeCursor);
+      const found = await options.api.listConversations(
+        context.scope,
+        params.repositoryId,
+        p.limit,
+        p.cursor,
+      );
+      return found === undefined
+        ? { status: 404, body: errorBody("NOT_FOUND", "Repository not found") }
+        : { status: 200, body: publicPage(found, binding, encodeCursor) };
     },
     async resolveConversation(context, params, _query, _body, request) {
-      const identity=mutationIdentity(context,"resolveConversation",request,{params});
-      return mutationResult(await options.mutations.resolveConversation({identity,conversationId:params.id}));
+      const identity = mutationIdentity(
+        context,
+        "resolveConversation",
+        request,
+        { params },
+      );
+      return mutationResult(
+        await options.mutations.resolveConversation({
+          identity,
+          conversationId: params.id,
+        }),
+      );
     },
     async listKnowledge(context, _params, query) {
-      const binding: PaginationCursorBinding = { organizationId: context.scope.organizationId, collection: "knowledge" };
-      const p=page(query,binding,cursorCodec.decode);
-      const found=await options.api.listKnowledge(context.scope,p.limit,p.cursor);
-      return{status:200,body:publicPage(found,binding,cursorCodec.encode)};
+      const binding: PaginationCursorBinding = {
+        organizationId: context.scope.organizationId,
+        collection: "knowledge",
+      };
+      const p = page(query, binding, decodeCursor);
+      const found = await options.api.listKnowledge(
+        context.scope,
+        p.limit,
+        p.cursor,
+      );
+      return { status: 200, body: publicPage(found, binding, encodeCursor) };
     },
   };
 
-  for (const [name, route] of Object.entries(API_ROUTES) as [RouteName, RouteDefinition][]) {
-    const method = route.method.toLowerCase() as "get" | "post" | "patch" | "delete";
+  for (const [name, route] of Object.entries(API_ROUTES) as [
+    RouteName,
+    RouteDefinition,
+  ][]) {
+    const method = route.method.toLowerCase() as
+      "get" | "post" | "patch" | "delete";
     app[method](`/api/v1${route.path}`, async (request, response) => {
       const requestLog = requestLogs.get(request);
       if (requestLog === undefined) {
-        sendError(response, 500, "INTERNAL_ERROR", "The request could not be completed");
+        sendError(
+          response,
+          500,
+          "INTERNAL_ERROR",
+          "The request could not be completed",
+        );
         return;
       }
       requestLog.log.setRouteName(name);
 
       try {
-        const context = await authenticate(options, request, name, requestLog.correlationId);
+        const context = await authenticate(
+          options,
+          request,
+          name,
+          requestLog.correlationId,
+        );
         requestLog.log.setContext(context);
         const params = parsePart(route.params, request.params);
         const query = parsePart(route.query, queryObject(request));
@@ -825,14 +1168,18 @@ export function createApiApp(options: ApiAppOptions): Express {
         // object, so an absent body is an empty one. A route that actually
         // requires a field still fails validation on that field.
         const body = parsePart(route.body, request.body ?? {});
-        const result = await handlers[name](context, params, query, body, request);
+        // All four values crossed their route-specific Zod boundary above. The
+        // manifest key and handler key are the same, so this is the single
+        // erased dispatch boundary; individual handlers remain fully typed.
+        const handler = handlers[name] as ValidatedRouteHandler;
+        const result = await handler(context, params, query, body, request);
         if (result.status >= 200 && result.status < 300) {
           const checked = route.response.safeParse(result.body);
           if (!checked.success) throw new Error("RESPONSE_CONTRACT_VIOLATION");
           response.status(route.successStatus).json(checked.data);
           return;
         }
-        const declaredErrorStatuses = route.errorStatuses as readonly number[];
+        const declaredErrorStatuses = route.errorStatuses;
         if (!declaredErrorStatuses.includes(result.status)) {
           sendErrorBody(response, 500, INTERNAL_ERROR_BODY);
           return;
@@ -853,14 +1200,22 @@ export function createApiApp(options: ApiAppOptions): Express {
     app.use("/dashboard/v1", createDashboardRouter(options.dashboard));
   } else {
     app.use("/dashboard/v1", (_request, response) => {
-      response.status(503).json({ code: "DASHBOARD_NOT_CONFIGURED", message: "Dashboard administration is not configured" });
+      response.status(503).json({
+        code: "DASHBOARD_NOT_CONFIGURED",
+        message: "Dashboard administration is not configured",
+      });
     });
   }
 
   app.get(`/api/v1${REVIEW_EVENTS_STREAM.path}`, async (request, response) => {
     const requestLog = requestLogs.get(request);
     if (requestLog === undefined) {
-      sendError(response, 500, "INTERNAL_ERROR", "The request could not be completed");
+      sendError(
+        response,
+        500,
+        "INTERNAL_ERROR",
+        "The request could not be completed",
+      );
       return;
     }
     requestLog.log.setRouteName("reviewEvents");
@@ -870,9 +1225,16 @@ export function createApiApp(options: ApiAppOptions): Express {
     let after: number;
     let events: Awaited<ReturnType<ApiStore["reviewEvents"]>>;
     try {
-      context = await authenticate(options, request, "getReview", requestLog.correlationId);
+      context = await authenticate(
+        options,
+        request,
+        "getReview",
+        requestLog.correlationId,
+      );
       requestLog.log.setContext(context);
-      const params = parsePart(REVIEW_EVENTS_STREAM.params, request.params) as { id: string };
+      const params = parsePart(REVIEW_EVENTS_STREAM.params, request.params) as {
+        id: string;
+      };
       id = params.id;
       after = parseLastEventId(request.header("last-event-id"));
       events = await options.api.reviewEvents(context.scope, id, after, 100);
@@ -900,12 +1262,22 @@ export function createApiApp(options: ApiAppOptions): Express {
           if (!Number.isSafeInteger(event.id) || event.id <= after) {
             throw new Error("SSE_EVENT_SEQUENCE_VIOLATION");
           }
-          const raw = event.data as { readonly to?: unknown; readonly at?: unknown };
-          const projected = toReviewProgressEvent(id, raw.to as Parameters<typeof toReviewProgressEvent>[1], raw.at as Parameters<typeof toReviewProgressEvent>[2]);
-          const checked = reviewProgressEventSchema.parse(projected);
-          const terminal = ["completed", "failed", "cancelled", "superseded"].includes(
-            checked.state,
+          const raw = event.data as {
+            readonly to?: unknown;
+            readonly at?: unknown;
+          };
+          const projected = toReviewProgressEvent(
+            id,
+            raw.to as Parameters<typeof toReviewProgressEvent>[1],
+            raw.at as Parameters<typeof toReviewProgressEvent>[2],
           );
+          const checked = reviewProgressEventSchema.parse(projected);
+          const terminal = [
+            "completed",
+            "failed",
+            "cancelled",
+            "superseded",
+          ].includes(checked.state);
           const frame =
             `id: ${String(event.id)}\n` +
             `event: ${terminal ? REVIEW_PROGRESS_DONE_EVENT_NAME : REVIEW_PROGRESS_EVENT_NAME}\n` +
@@ -951,13 +1323,20 @@ export function createApiApp(options: ApiAppOptions): Express {
     sendError(response, 404, "NOT_FOUND", "API route not found");
   });
 
-  app.use((error: unknown, _request: Request, response: Response, _next: (error?: unknown) => void) => {
-    if (response.headersSent) {
-      response.destroy();
-      return;
-    }
-    sendMappedError(response, error);
-  });
+  app.use(
+    (
+      error: unknown,
+      _request: Request,
+      response: Response,
+      _next: (error?: unknown) => void,
+    ) => {
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      sendMappedError(response, error);
+    },
+  );
 
   return app;
 }

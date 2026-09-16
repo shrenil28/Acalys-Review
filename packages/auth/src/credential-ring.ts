@@ -37,7 +37,10 @@ export class CredentialRing<T> {
     return [
       this.#active,
       ...this.#previous
-        .filter((entry) => entry.validUntil === undefined || entry.validUntil.getTime() > at)
+        .filter(
+          (entry) =>
+            entry.validUntil === undefined || entry.validUntil.getTime() > at,
+        )
         .map((entry) => entry.value),
     ];
   }

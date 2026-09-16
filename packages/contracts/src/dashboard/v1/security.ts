@@ -1,5 +1,8 @@
 import { z } from "zod";
-import { findingLifecycleStateSchema, findingSeveritySchema } from "../../domain/finding/index.js";
+import {
+  findingLifecycleStateSchema,
+  findingSeveritySchema,
+} from "../../domain/finding/index.js";
 import { dashboardIdSchema } from "./resources.js";
 
 const iso = z.string().datetime({ offset: true });
@@ -49,6 +52,12 @@ export const dashboardSecurityFindingsResponseSchema = z.object({
   items: z.array(dashboardSecurityFindingSchema).max(1000),
 });
 
-export type DashboardSecurityFindingsQuery = z.infer<typeof dashboardSecurityFindingsQuerySchema>;
-export type DashboardSecurityFinding = z.infer<typeof dashboardSecurityFindingSchema>;
-export type DashboardSecurityFindingsResponse = z.infer<typeof dashboardSecurityFindingsResponseSchema>;
+export type DashboardSecurityFindingsQuery = z.infer<
+  typeof dashboardSecurityFindingsQuerySchema
+>;
+export type DashboardSecurityFinding = z.infer<
+  typeof dashboardSecurityFindingSchema
+>;
+export type DashboardSecurityFindingsResponse = z.infer<
+  typeof dashboardSecurityFindingsResponseSchema
+>;

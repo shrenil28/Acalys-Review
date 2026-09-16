@@ -28,7 +28,12 @@ const PREFLIGHTS = [
 
 function reportPath() {
   const flag = process.argv.find((arg) => arg.startsWith("--report="));
-  return resolve(ROOT, flag === undefined ? ".phase4-acceptance-report.json" : flag.slice("--report=".length));
+  return resolve(
+    ROOT,
+    flag === undefined
+      ? ".phase4-acceptance-report.json"
+      : flag.slice("--report=".length),
+  );
 }
 
 function runStep(name, command, args, env = process.env) {
@@ -83,12 +88,17 @@ for (const script of PREFLIGHTS) {
   }
 }
 
-const phase3 = runStep("frozen Phase 3 preflight", "node", ["scripts/accept-phase3.mjs", "--preflight-only"]);
+const phase3 = runStep("frozen Phase 3 preflight", "node", [
+  "scripts/accept-phase3.mjs",
+  "--preflight-only",
+]);
 report.inheritedPhase3Preflight = phase3;
 if (phase3.exitCode !== 0) {
   report.finishedAt = new Date().toISOString();
   writeReport(report);
-  console.error("Phase 4 acceptance stopped: inherited Phase 3 preflight failed.");
+  console.error(
+    "Phase 4 acceptance stopped: inherited Phase 3 preflight failed.",
+  );
   process.exit(1);
 }
 report.sourcePreflightPassed = true;
@@ -96,41 +106,63 @@ report.sourcePreflightPassed = true;
 if (preflightOnly) {
   report.finishedAt = new Date().toISOString();
   writeReport(report);
-  console.log("Phase 4 source preflight PASSED. Dependency/Postgres/browser acceptance was not requested.");
+  console.log(
+    "Phase 4 source preflight PASSED. Dependency/Postgres/browser acceptance was not requested.",
+  );
   process.exit(0);
 }
 
 const requirements = [
   ["vitest", existsSync(resolve(ROOT, "node_modules/vitest/vitest.mjs"))],
-  ["dependencyCruiser", existsSync(resolve(ROOT, "node_modules/.bin/depcruise"))],
+  [
+    "dependencyCruiser",
+    existsSync(resolve(ROOT, "node_modules/.bin/depcruise")),
+  ],
   ["typescript", existsSync(resolve(ROOT, "node_modules/.bin/tsc"))],
   ["eslint", existsSync(resolve(ROOT, "node_modules/.bin/eslint"))],
   ["prettier", existsSync(resolve(ROOT, "node_modules/.bin/prettier"))],
 ];
 for (const [name, present] of requirements) report.environment[name] = present;
-const docker = spawnSync("docker", ["ps", "-q"], { cwd: ROOT, encoding: "utf8", timeout: 20_000 });
+const docker = spawnSync("docker", ["ps", "-q"], {
+  cwd: ROOT,
+  encoding: "utf8",
+  timeout: 20_000,
+});
 report.environment.dockerPostgresRuntime = docker.status === 0;
 
-const missing = Object.entries(report.environment).filter(([, present]) => present !== true).map(([name]) => name);
+const missing = Object.entries(report.environment)
+  .filter(([, present]) => present !== true)
+  .map(([name]) => name);
 if (missing.length > 0) {
   report.blockedBy = missing;
   report.finishedAt = new Date().toISOString();
   writeReport(report);
-  console.error(`Phase 4 executable acceptance BLOCKED: missing ${missing.join(", ")}. No blocked gate is counted as passing.`);
+  console.error(
+    `Phase 4 executable acceptance BLOCKED: missing ${missing.join(", ")}. No blocked gate is counted as passing.`,
+  );
   process.exit(2);
 }
 
 const strictEnv = { ...process.env, ACALYS_REQUIRE_POSTGRES: "1" };
-const verify = runStep("protected repository verify pipeline with required Postgres", "npm", ["run", "verify"], strictEnv);
+const verify = runStep(
+  "protected repository verify pipeline with required Postgres",
+  "npm",
+  ["run", "verify"],
+  strictEnv,
+);
 report.execution.push(verify);
 if (verify.exitCode !== 0) {
   report.finishedAt = new Date().toISOString();
   writeReport(report);
-  console.error("Phase 4 executable acceptance FAILED in the protected verify pipeline.");
+  console.error(
+    "Phase 4 executable acceptance FAILED in the protected verify pipeline.",
+  );
   process.exit(1);
 }
 
 report.executableAcceptancePassed = true;
 report.finishedAt = new Date().toISOString();
 writeReport(report);
-console.log("PHASE 4 SOURCE/INTEGRATION ACCEPTANCE PASSED. Browser/CDP release validation remains a separate required witness.");
+console.log(
+  "PHASE 4 SOURCE/INTEGRATION ACCEPTANCE PASSED. Browser/CDP release validation remains a separate required witness.",
+);

@@ -1,135 +1,151 @@
 # Acalys Review
 
-A cloud code-review platform: a GitHub/GitLab app that reviews pull requests with
-AI-backed agents, verifies its findings against evidence, and publishes them back to the
-provider — with a dashboard over the whole thing.
+Acalys Review is a multi-tenant GitHub/GitLab code-review platform. It accepts signed
+provider webhooks, schedules asynchronous reviews, runs evidence-backed AI review
+agents, verifies findings, publishes results, and exposes an authenticated dashboard.
 
-The build is phased. **Phase 0 (in progress) establishes the canonical contracts** every
-later subsystem speaks; the reviewer, webhooks, workers, and persistence come after. The
-full specification lives in [P0.txt](P0.txt).
+The repository currently implements Phases 0–4: canonical contracts, persistence and
+queueing, provider ingestion, the review pipeline, and the live dashboard/admin surface.
+Future roadmap items are intentionally outside this release boundary.
 
----
+## Production acceptance
 
-## Layout
-
-```
-acalys/
-├── apps/
-│   └── web/                 Dashboard (Vite + React 18 + TypeScript + Tailwind)
-├── packages/
-│   └── contracts/           @acalys/contracts — the canonical domain language
-├── tsconfig.base.json       Compiler baseline for packages authored in Phase 0+
-└── .dependency-cruiser.cjs  Architectural boundary enforcement
-```
-
-Planned, each landing with the phase that needs it: `apps/{api,webhook-gateway,
-review-worker,tool-worker,sandbox-worker,scheduler}` and `packages/{api-client,database,
-auth,config,queue,telemetry,providers,repository,code-intelligence,tools,evidence,
-knowledge,review-engine,verification,premerge,model-gateway}`.
-
-Empty stubs are deliberately **not** scaffolded ahead of time — the workspace globs
-(`apps/*`, `packages/*`) already exist, so nothing gets bolted on later.
-
-## Running it
+Node.js 22 and PostgreSQL 16 are the supported baseline. Docker is required by the full
+acceptance suite because integration tests use a real disposable PostgreSQL instance.
 
 ```bash
-npm install
-npm run dev        # dashboard at http://localhost:5173
-npm run verify     # typecheck + lint + dependency boundaries + tests
+npm ci
+ACALYS_REQUIRE_POSTGRES=1 npm run accept:phase4
 ```
 
-Individual gates:
+The acceptance command is fail-closed and covers types, lint, formatting, dependency
+boundaries, generated schemas, clean production builds, export conformance, source
+invariants, and the complete PostgreSQL-backed test suite. CI runs the same command on
+the repository's `master` branch and uploads diagnostics on failure.
+
+Useful individual gates:
 
 ```bash
 npm run typecheck
 npm run lint
-npm run depcruise    # architectural boundaries
-npm run test
-npm run build
+npm run format:check
+npm run depcruise
+npm run test:ci
+npm run build:clean
 ```
 
----
+## Configuration
 
-## The architecture in one diagram
+Copy `.env.example` to `.env` and replace every placeholder. Production secrets must be
+provided by the deployment platform's secret manager, never committed. Startup fails
+when required configuration is absent or malformed.
 
-Everything below follows from a single rule: **provider-specific representations
-terminate at an adapter, and the platform speaks only canonical contracts.**
+Important settings include:
 
-```
-GitHub PR ──┐
-GitLab MR ──┼──> Provider Adapter ──> ReviewTarget ──> Review Platform ──> Agent Runtime
-local tree ─┘                        (canonical)
-```
+- `DATABASE_URL` and `ACALYS_API_CURSOR_SECRET`
+- GitHub App and/or GitLab OAuth credentials
+- `GITHUB_WEBHOOK_SECRET` (and optionally
+  `ACALYS_GITHUB_WEBHOOK_PREVIOUS_SECRETS` during rotation)
+- model-provider, replay, and worker-polling settings
+- `ACALYS_INTEGRATION_CREDENTIAL_KEYS_JSON` when encrypted integration credentials are enabled
+- the OAuth callback/web origins and `VITE_ACALYS_API_URL`
 
-Never the reverse. `@acalys/contracts` imports no provider SDK, no ORM, and no model SDK,
-and dependency-cruiser fails the build if that ever changes.
+See [.env.example](.env.example) for the complete implemented surface.
 
-### Three contract layers
+## Database migrations
 
-```
-                     contracts/src/domain/
-        canonical · provider-neutral · persistence-neutral
-                             │
-              ┌──────────────┴──────────────┐
-              ▼                             ▼
-      contracts/src/api/              contracts/src/internal/
-      public DTOs (v1)                commands + events
-              │                             │
-              ▼                             ▼
-      @acalys/api-client              apps/{api,workers}
-              │
-              ▼
-          apps/web
+Build and apply migrations before starting a new release:
+
+```bash
+npm run build --workspace=@acalys/database
+npm run build --workspace=@acalys/api
+DATABASE_URL=postgresql://... npm run migrate --workspace=@acalys/api
 ```
 
-The web app sees product concepts — Review, Finding, Summary, Conversation, Pre-Merge
-Check, Repository, Pull Request, progress. It never sees a worker attempt, a queue lock,
-a sandbox lease, or a raw model response. DTOs are projected _from_ domain types rather
-than hand-written beside them, so the two cannot drift.
+Migrations are applied in filename order under a PostgreSQL advisory lock. Applied
+versions and SHA-256 checksums are recorded in `acalys_schema_migrations`; changing an
+already-applied migration is rejected.
 
-### Async by construction
+For a new installation, create the first organization and owner after migrating. The
+owner provider id must match the immutable GitHub/GitLab user id returned by OAuth:
 
-Long-running work never blocks an HTTP request:
-
+```bash
+DATABASE_URL=postgresql://... \
+ACALYS_BOOTSTRAP_ORGANIZATION_ID=00000000-0000-7000-8000-000000000001 \
+ACALYS_BOOTSTRAP_ORGANIZATION_SLUG=example \
+ACALYS_BOOTSTRAP_ORGANIZATION_NAME=Example \
+ACALYS_BOOTSTRAP_OWNER_PROVIDER=github \
+ACALYS_BOOTSTRAP_OWNER_PROVIDER_USER_ID=123456 \
+npm run bootstrap --workspace=@acalys/api
 ```
-POST /api/v1/reviews  →  202 { reviewRunId, state: "queued" }
-                              │
-                         queue → review-worker → tools / agents / sandbox
-                              │
-UI follows: GET /api/v1/reviews/:id  ·  GET /api/v1/reviews/:id/events (SSE)
+
+## Running services
+
+After `npm run build:clean`, start each implemented process independently:
+
+```bash
+npm run start --workspace=@acalys/api
+npm run start --workspace=@acalys/webhook-gateway
+npm run start --workspace=@acalys/review-worker
+npm run preview --workspace=apps/web
 ```
 
-Workers scale horizontally without any change to the frontend API.
+The API and webhook gateway expose `/healthz` for liveness and `/readyz` for dependency
+readiness. They use bounded request/shutdown timeouts and drain connections on SIGTERM or
+SIGINT. The worker is an asynchronous process and exits non-zero on startup failure.
 
----
+For a local production-shaped stack:
 
-## Phase 0 status
+```bash
+cp .env.example .env
+# Replace all placeholder secrets and provider credentials.
+docker compose up --build
+```
 
-Landed (Checkpoint A):
+The Compose stack runs PostgreSQL, applies migrations once, then starts the API, webhook
+gateway, review worker, and the nginx-served production dashboard. The web container is
+published at `http://localhost:8082`, the API at `http://localhost:8080`, and webhooks at
+`http://localhost:8081`.
 
-| Area       | Contents                                                                                                                     |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Primitives | `Brand`, `assertNever`, `JsonValue`, `canonicalJson`, `Timestamp`, `Checksum`, `RepositoryPath`, size limits, namespaced ids |
-| Identity   | 21 branded ids, UUIDv7 factories, per-type schemas                                                                           |
-| Ports      | `Clock` (+`SystemClock`/`FixedClock`), `IdGenerator`, `ContentHasher`                                                        |
-| Errors     | 12-class taxonomy with retryability and leak-free serialization                                                              |
-| Domain     | tenancy, provider, repository, git refs, actors                                                                              |
-| Tooling    | npm workspaces, ESLint 9, Prettier, Vitest, dependency-cruiser, CI                                                           |
+## Architecture
 
-Remaining: review lifecycle and state machines (B) · evidence, findings, verification (C)
-· API/internal layers, config resolution, events (D) · JSON Schema generation, fixtures,
-docs, persistence plan (E).
+Provider-specific representations terminate at adapters. All internal services exchange
+canonical contracts from `@acalys/contracts`:
 
-### Conventions worth knowing
+```text
+GitHub PR / GitLab MR
+        │
+        ▼
+webhook-gateway → PostgreSQL inbox/queue → review-worker → verification/publication
+                                              │
+                                              ▼
+                                  API → authenticated web dashboard
+```
 
-- **Timestamps** are RFC 3339 UTC with exactly three fractional digits
-  (`2026-08-15T15:30:12.421Z`). Nothing else validates — the fixed width is what makes
-  lexicographic order equal chronological order and keeps hashes byte-stable.
-- **Ids** are UUIDv7 and branded. A `RepositoryId` will not compile where a `ReviewRunId`
-  belongs.
-- **Hashing** goes through `canonicalJson()`; raw `JSON.stringify` is lint-blocked in the
-  contracts package because its key order is insertion order.
-- **Optional means absent.** `undefined` for a missing value, `null` only where "explicitly
-  cleared" is semantically distinct.
-- **Schemas are the source of truth**; TypeScript types are inferred from them, never
-  written in parallel.
+Long-running review work never blocks an HTTP request. Tenant identity is carried through
+database and queue boundaries, provider credentials are encrypted at rest, webhook
+signatures are verified before persistence, and publication is idempotent.
+
+## Repository layout
+
+```text
+apps/api                 authenticated HTTP API and OAuth callbacks
+apps/webhook-gateway     signed provider-webhook ingress
+apps/review-worker       review orchestration worker
+apps/web                 React/Vite dashboard
+packages/contracts       canonical domain, API, and internal contracts
+packages/database        PostgreSQL repositories and migrations
+packages/providers       GitHub/GitLab adapters
+packages/review-engine   review pipeline and agent orchestration
+packages/model-gateway   model routing, limits, and replay protection
+```
+
+Architectural boundaries are enforced by dependency-cruiser and TypeScript project
+references. Generated JSON schemas are checked into source and verified for drift.
+
+## Release note
+
+Phase 4 is merged into the local `master` history. Before declaring an externally
+deployed release, the accepted commit must be pushed to the protected remote `master`
+branch and deployment-specific secrets, TLS, backups, monitoring, and alerting must be
+configured in the target environment.

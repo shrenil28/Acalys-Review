@@ -26,7 +26,11 @@ import type {
   WebhookInbox,
 } from "@acalys/database";
 
-import { ingestDelivery, type PipelineOutcome, type PipelinePolicyResolver } from "./pipeline.js";
+import {
+  ingestDelivery,
+  type PipelineOutcome,
+  type PipelinePolicyResolver,
+} from "./pipeline.js";
 
 export type WorkerOutcomeKind =
   | PipelineOutcome["kind"]
@@ -37,7 +41,8 @@ export type WorkerOutcomeKind =
 export type ReviewExecutionOutcome =
   | {
       readonly kind: "settled";
-      readonly state: "publishing" | "completed" | "failed" | "cancelled" | "superseded";
+      readonly state:
+        "publishing" | "completed" | "failed" | "cancelled" | "superseded";
     }
   | { readonly kind: "deferred"; readonly state: string }
   | { readonly kind: "retryable_failure"; readonly errorCode: string }
@@ -212,6 +217,7 @@ export function createWorker(options: WorkerOptions): RunningWorker {
             return;
           }
         }
+        return;
       }
 
       case "ignored":

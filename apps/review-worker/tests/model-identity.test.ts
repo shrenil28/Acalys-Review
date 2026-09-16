@@ -41,9 +41,14 @@ describe("model analyzer input identity", () => {
   it("changes when resolved instructions or merge base changes", () => {
     const first = modelAnalyzerInputDigest(base);
     expect(
-      modelAnalyzerInputDigest({ ...base, instructionFactsDigest: "j".repeat(64) }),
+      modelAnalyzerInputDigest({
+        ...base,
+        instructionFactsDigest: "j".repeat(64),
+      }),
     ).not.toBe(first);
-    expect(modelAnalyzerInputDigest({ ...base, mergeBaseSha: "other" })).not.toBe(first);
+    expect(
+      modelAnalyzerInputDigest({ ...base, mergeBaseSha: "other" }),
+    ).not.toBe(first);
   });
   it("changes when base-side content changes while the SHAs stay the same", () => {
     const withBase = {
@@ -69,5 +74,4 @@ describe("model analyzer input identity", () => {
       modelAnalyzerInputDigest(withBase),
     );
   });
-
 });

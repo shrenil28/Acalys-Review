@@ -12,7 +12,8 @@ const suitePath = join(ROOT, suite);
 function preflight() {
   const problems = [];
   for (const path of [mutationPath, apiStorePath, appPath, suitePath]) {
-    if (!existsSync(path)) problems.push(`${path.slice(ROOT.length + 1)} is missing`);
+    if (!existsSync(path))
+      problems.push(`${path.slice(ROOT.length + 1)} is missing`);
   }
   if (problems.length > 0) return problems;
 
@@ -22,22 +23,42 @@ function preflight() {
   const tests = readFileSync(suitePath, "utf8");
 
   if (!mutation.includes("SELECT clock_timestamp() AS mutation_at")) {
-    problems.push("ApiMutationStore must acquire its mutation timestamp from Postgres");
+    problems.push(
+      "ApiMutationStore must acquire its mutation timestamp from Postgres",
+    );
   }
   if (mutation.includes("readonly now: Date")) {
-    problems.push("IdempotencyIdentity must not carry a replica-supplied clock");
+    problems.push(
+      "IdempotencyIdentity must not carry a replica-supplied clock",
+    );
   }
   if (!mutation.includes("const result = await work(client, mutationAt);")) {
-    problems.push("the same database timestamp must be passed through the idempotent mutation work");
+    problems.push(
+      "the same database timestamp must be passed through the idempotent mutation work",
+    );
   }
-  if (!mutation.includes("created_at)\n         VALUES ($1,$2,$3,$4,$5,'in_progress',$6)")) {
-    problems.push("idempotency creation must persist the shared mutation timestamp");
+  if (
+    !mutation.includes(
+      "created_at)\n         VALUES ($1,$2,$3,$4,$5,'in_progress',$6)",
+    )
+  ) {
+    problems.push(
+      "idempotency creation must persist the shared mutation timestamp",
+    );
   }
   if (!mutation.includes("completed_at=$8")) {
-    problems.push("idempotency completion must persist the shared mutation timestamp");
+    problems.push(
+      "idempotency completion must persist the shared mutation timestamp",
+    );
   }
-  if (!mutation.includes("completed_at=GREATEST($3::timestamptz, created_at, COALESCE(started_at, created_at))")) {
-    problems.push("review cancellation must never move completion behind durable run history");
+  if (
+    !mutation.includes(
+      "completed_at=GREATEST($3::timestamptz, created_at, COALESCE(started_at, created_at))",
+    )
+  ) {
+    problems.push(
+      "review cancellation must never move completion behind durable run history",
+    );
   }
   if (!mutation.includes("updated_at=GREATEST(updated_at, $4::timestamptz)")) {
     problems.push("finding dismissal must keep updated_at monotonic");
@@ -45,14 +66,28 @@ function preflight() {
   if (!mutation.includes("updated_at=GREATEST(updated_at, $3::timestamptz)")) {
     problems.push("conversation resolution must keep updated_at monotonic");
   }
-  if (app.includes("requestDigest:digest({route:routeName,input:semanticInput}), now:")) {
-    problems.push("the API process must not attach its local clock to mutation identity");
+  if (
+    app.includes(
+      "requestDigest:digest({route:routeName,input:semanticInput}), now:",
+    )
+  ) {
+    problems.push(
+      "the API process must not attach its local clock to mutation identity",
+    );
   }
   if (apiStore.includes("input.now]")) {
-    problems.push("legacy ApiStore idempotency helpers must not write caller-supplied time");
+    problems.push(
+      "legacy ApiStore idempotency helpers must not write caller-supplied time",
+    );
   }
-  if (!apiStore.includes("GREATEST(clock_timestamp(), created_at, COALESCE(started_at, created_at))")) {
-    problems.push("legacy cancellation helper must also be database-clock/monotonic");
+  if (
+    !apiStore.includes(
+      "GREATEST(clock_timestamp(), created_at, COALESCE(started_at, created_at))",
+    )
+  ) {
+    problems.push(
+      "legacy cancellation helper must also be database-clock/monotonic",
+    );
   }
 
   for (const witness of [
@@ -61,7 +96,8 @@ function preflight() {
     "converges concurrent same-key replicas on one database-timestamped response",
     "never completes an idempotency record before its own database-created timestamp",
   ]) {
-    if (!tests.includes(witness)) problems.push(`missing Postgres witness: ${witness}`);
+    if (!tests.includes(witness))
+      problems.push(`missing Postgres witness: ${witness}`);
   }
   return problems;
 }

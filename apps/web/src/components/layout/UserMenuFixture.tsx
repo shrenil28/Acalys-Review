@@ -38,7 +38,7 @@ export function UserMenu({ collapsed }: { collapsed?: boolean } = {}) {
   const dashboardSession = useDashboardSession();
   const dataConfig = resolveDataConfig();
   const liveUser = dataConfig.kind === "api" && dashboardSession !== null
-    ? { name: dashboardSession.user.displayName ?? dashboardSession.user.email ?? dashboardSession.user.providerUserId, role: dashboardSession.role === "read_only" ? "Read only" : dashboardSession.role[0]!.toUpperCase() + dashboardSession.role.slice(1), avatarUrl: "", workspace: dashboardSession.organization.name }
+    ? { name: dashboardSession.user.displayName ?? dashboardSession.user.email ?? dashboardSession.user.providerUserId, role: dashboardSession.role === "read_only" ? "Read only" : dashboardSession.role[0].toUpperCase() + dashboardSession.role.slice(1), avatarUrl: "", workspace: dashboardSession.organization.name }
     : { name: currentUser.name, role: currentUser.role, avatarUrl: currentUser.avatarUrl, workspace: workspaces[0].name };
   const [theme, setTheme] = useState<Theme>(
     () => (localStorage.getItem("cr:theme") as Theme) ?? "dark",

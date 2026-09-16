@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES } from "@acalys/database";
-import { createPreloadedAnalysisCache, decodeAnalysisCachePayload } from "../src/analysis-cache.js";
+import {
+  createPreloadedAnalysisCache,
+  decodeAnalysisCachePayload,
+} from "../src/analysis-cache.js";
 
 const FP = "a".repeat(64);
 const EMPTY = { findings: [], suppressions: [], degradations: [] } as const;
@@ -11,9 +14,34 @@ describe("durable analysis cache decoding", () => {
   });
 
   it("treats malformed and oversized payloads as cache misses", () => {
-    expect(decodeAnalysisCachePayload({ findings: "nope", suppressions: [], degradations: [] })).toBeUndefined();
-    expect(decodeAnalysisCachePayload({ findings: [], suppressions: [{ reason: "bogus", ruleId: "r", clusterId: "c", detail: "d" }], degradations: [] })).toBeUndefined();
-    expect(decodeAnalysisCachePayload({ findings: [], suppressions: [], degradations: [{ clusterId: "c", reason: "x".repeat(REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES + 1) }] })).toBeUndefined();
+    expect(
+      decodeAnalysisCachePayload({
+        findings: "nope",
+        suppressions: [],
+        degradations: [],
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeAnalysisCachePayload({
+        findings: [],
+        suppressions: [
+          { reason: "bogus", ruleId: "r", clusterId: "c", detail: "d" },
+        ],
+        degradations: [],
+      }),
+    ).toBeUndefined();
+    expect(
+      decodeAnalysisCachePayload({
+        findings: [],
+        suppressions: [],
+        degradations: [
+          {
+            clusterId: "c",
+            reason: "x".repeat(REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES + 1),
+          },
+        ],
+      }),
+    ).toBeUndefined();
   });
 
   it("ignores malformed fingerprints and tracks only real hits/writes", () => {

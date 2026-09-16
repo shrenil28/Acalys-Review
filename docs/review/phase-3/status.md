@@ -153,7 +153,7 @@ Checkpoint 3.3 closes remaining source-level gaps in Phase 3A/3C without widenin
 - `scripts/probe-phase3-architecture.mjs` adds the required Phase-3C planted-violation harness for:
   - `api-must-not-import-review-worker`;
   - `database-driver-only-in-database-package`.
-  `--preflight-only` verifies both named dependency-cruiser rules exist without mutating a source archive. Execution requires an installed dependency-cruiser binary and a Git worktree, plants one forbidden edge at a time, requires the named rule to appear in the rejection, and restores the target in `finally`.
+    `--preflight-only` verifies both named dependency-cruiser rules exist without mutating a source archive. Execution requires an installed dependency-cruiser binary and a Git worktree, plants one forbidden edge at a time, requires the named rule to appear in the rejection, and restores the target in `finally`.
 - The Phase-3 response-validation mutation anchor was updated after the API boundary refactor; `scripts/mutate-phase3.mjs --preflight-only` is again clean for all four frozen acceptance mutants.
 
 ### Checkpoint 3.3 static/runtime evidence — 2026-09-09
@@ -714,7 +714,7 @@ Checkpoint 3.11 closes a liveness hole in the already-frozen review-progress SSE
 
 - SSE idle cadence now uses `performance.now()` from `node:perf_hooks`, not wall-clock `Date.now()`. Durable transition chronology remains database-owned; the monotonic process clock is used only for transport liveness scheduling.
 - Heartbeat and poll intervals are validated at application construction. Both must be positive safe integers and are capped at 60 seconds, so a bad internal configuration fails startup instead of silently creating an effectively unbounded keepalive gap or hot poll loop.
-- Product frames call `heartbeat.markActivity()`. A real review-progress event therefore resets the idle deadline and is not immediately followed by a redundant heartbeat merely because the last *heartbeat* was old.
+- Product frames call `heartbeat.markActivity()`. A real review-progress event therefore resets the idle deadline and is not immediately followed by a redundant heartbeat merely because the last _heartbeat_ was old.
 - `awaitWithHeartbeats` keeps heartbeats flowing while either the ordinary poll delay **or the durable `reviewEvents()` query itself** is pending. A slow database poll can no longer suppress transport keepalives after headers are already committed.
 - Heartbeat writes continue to use the existing backpressure-aware `writeSseFrame` path. Operation completion waits until an already-started heartbeat write has drained, so a product frame cannot race/interleave with a keepalive write.
 - Disconnect/error tears down heartbeat timers/listeners immediately. A rejected pending database operation is still observed by the attached rejection handler, preventing an ignored-promise rejection after the client has gone away.
@@ -878,7 +878,7 @@ Checkpoint 3.13 closes an outbound-contract gap left after Checkpoint 3.6 harden
 
 1. missing idempotency key still produces the boundary-owned `400 IDEMPOTENCY_KEY_REQUIRED` response;
 2. a schema-valid declared `409` handler error is serialized unchanged;
-3-6. `createReview`, `cancelReview`, `dismissFinding`, and `resolveConversation` each return a schema-valid secret-bearing `418` from the mutation-store test double and must instead produce the generic `500` without reflecting the secret marker.
+   3-6. `createReview`, `cancelReview`, `dismissFinding`, and `resolveConversation` each return a schema-valid secret-bearing `418` from the mutation-store test double and must instead produce the generic `500` without reflecting the secret marker.
 
 `scripts/probe-phase3-handler-status.mjs` is fail-closed. `--preflight-only` requires manifest-derived error-status enforcement, the boundary-owned idempotency path, the declared-status witness, the undeclared-status witness, and all **4 / 4** mutating-route anchors. Full mode requires installed Vitest and exits non-zero when dependencies are absent.
 

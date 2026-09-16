@@ -116,7 +116,10 @@ export class ReviewAnalysisCacheStore {
          JOIN bounded AS b ON b.id = c.id
         ORDER BY c.last_used_at DESC, c.id`,
       [
-        input.organizationId, input.repositoryId, REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES, limit,
+        input.organizationId,
+        input.repositoryId,
+        REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES,
+        limit,
         REVIEW_ANALYSIS_CACHE_MAX_PRELOAD_BYTES,
       ],
     );
@@ -132,7 +135,11 @@ export class ReviewAnalysisCacheStore {
     if (input.fingerprints.length > REVIEW_ANALYSIS_CACHE_MAX_WRITE_ENTRIES) {
       throw new Error("Review analysis cache touch batch is too large");
     }
-    if (input.fingerprints.some((fingerprint) => !/^[0-9a-f]{64}$/u.test(fingerprint))) {
+    if (
+      input.fingerprints.some(
+        (fingerprint) => !/^[0-9a-f]{64}$/u.test(fingerprint),
+      )
+    ) {
       throw new Error("Review analysis cache fingerprint is invalid");
     }
     await this.pool.query(
@@ -159,12 +166,20 @@ export class ReviewAnalysisCacheStore {
     if (input.entries.length > REVIEW_ANALYSIS_CACHE_MAX_WRITE_ENTRIES) {
       throw new Error("Review analysis cache write batch is too large");
     }
-    const fingerprints = new Set(input.entries.map((entry) => entry.fingerprint));
+    const fingerprints = new Set(
+      input.entries.map((entry) => entry.fingerprint),
+    );
     if (fingerprints.size !== input.entries.length) {
-      throw new Error("Review analysis cache write batch contains duplicate fingerprints");
+      throw new Error(
+        "Review analysis cache write batch contains duplicate fingerprints",
+      );
     }
     const ttlMillis = input.ttlMillis ?? REVIEW_ANALYSIS_CACHE_TTL_MILLIS;
-    if (!Number.isSafeInteger(ttlMillis) || ttlMillis < 60_000 || ttlMillis > REVIEW_ANALYSIS_CACHE_TTL_MILLIS) {
+    if (
+      !Number.isSafeInteger(ttlMillis) ||
+      ttlMillis < 60_000 ||
+      ttlMillis > REVIEW_ANALYSIS_CACHE_TTL_MILLIS
+    ) {
       throw new Error("Review analysis cache TTL is invalid");
     }
     await this.#transaction(async (client) => {
@@ -174,11 +189,18 @@ export class ReviewAnalysisCacheStore {
         }
         const serialized = JSON.stringify(entry.payload);
         if (serialized === undefined) {
-          throw new Error("Review analysis cache payload is not JSON-serializable");
+          throw new Error(
+            "Review analysis cache payload is not JSON-serializable",
+          );
         }
         const payloadBytes = Buffer.byteLength(serialized, "utf8");
-        if (payloadBytes < 1 || payloadBytes > REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES) {
-          throw new Error("Review analysis cache payload exceeds the per-entry size limit");
+        if (
+          payloadBytes < 1 ||
+          payloadBytes > REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES
+        ) {
+          throw new Error(
+            "Review analysis cache payload exceeds the per-entry size limit",
+          );
         }
         const persisted = await client.query(
           `WITH database_clock AS MATERIALIZED (SELECT clock_timestamp() AS at),
@@ -197,18 +219,27 @@ export class ReviewAnalysisCacheStore {
                  last_used_at = EXCLUDED.last_used_at,
                  expires_at = EXCLUDED.expires_at`,
           [
-            randomUUID(), input.organizationId, input.repositoryId, entry.fingerprint, serialized, ttlMillis,
+            randomUUID(),
+            input.organizationId,
+            input.repositoryId,
+            entry.fingerprint,
+            serialized,
+            ttlMillis,
             REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES,
           ],
         );
         if ((persisted.rowCount ?? 0) !== 1) {
-          throw new Error("Review analysis cache canonical payload exceeds the per-entry size limit");
+          throw new Error(
+            "Review analysis cache canonical payload exceeds the per-entry size limit",
+          );
         }
       }
     });
   }
 
-  public async listMetadata(organizationId: string): Promise<readonly ReviewAnalysisCacheMetadata[]> {
+  public async listMetadata(
+    organizationId: string,
+  ): Promise<readonly ReviewAnalysisCacheMetadata[]> {
     const result = await this.pool.query<RawMetadataRow>(
       `SELECT c.id, c.repository_id, c.fingerprint, c.payload_bytes,
               c.created_at, c.updated_at, c.last_used_at, c.expires_at,
@@ -280,7 +311,11 @@ export class ReviewAnalysisCacheStore {
       await client.query("COMMIT");
       return value;
     } catch (error) {
-      try { await client.query("ROLLBACK"); } catch { /* preserve original */ }
+      try {
+        await client.query("ROLLBACK");
+      } catch {
+        /* preserve original */
+      }
       throw error;
     } finally {
       client.release();

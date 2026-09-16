@@ -5,8 +5,11 @@ name: CI
 # could not have caught first.
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,6 +18,7 @@ concurrency:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -26,71 +30,20 @@ jobs:
       - name: Install
         run: npm ci
 
-      # Contracts must build before anything imports them through package
-      # exports, which resolve to dist/.
-      - name: Build contracts
-        run: npm run build --workspace @acalys/contracts
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Format check
-        run: npm run format:check
-
-      # The architectural boundaries: provider SDKs must not be reachable from
-      # canonical contracts, the UI must not reach worker internals, and no
-      # backend package may depend on the frontend (§59, §84).
-      - name: Dependency boundaries
-        run: npm run depcruise
-
-      # Every workspace dependency must be a declared project reference.
-      # `apps/review-worker` depended on two packages it did not reference for
-      # four checkpoints; warm builds hid it because the dependency's `dist/`
-      # was already on disk. Milliseconds, and it names the missing reference
-      # instead of printing a wall of TS2307.
-      - name: Project references
-        run: node scripts/assert-project-references.mjs
-
-      # And the same closure proven for real, from sources alone. Every `dist/`
-      # and `.tsbuildinfo` is removed first, because the gate that preceded this
-      # one reported PASS on a tree whose clean build fails.
-      - name: Clean build
-        run: npm run build:clean
-
-      # Fail closed, twice over. Three separate bugs in this project shared one
-      # shape: the suite reported success while the property was never
-      # exercised. So a missing Docker must fail the run rather than skip the
-      # integration suites — AND the run must prove that nothing was skipped.
-      #
-      # `test:ci`, not `test`. The bare script has no skip assertion, so a
-      # `describe.skip` reaching CI would have passed here silently, which is
-      # the exact failure `assert-no-skipped-tests.mjs` was written to end.
-      - name: Tests
-        run: npm run test:ci
+      # The authoritative Phase 4 runner executes all source probes and the
+      # protected repository verify chain, and refuses to skip Postgres tests.
+      - name: Phase 4 acceptance
+        run: npm run accept:phase4
         env:
           ACALYS_REQUIRE_POSTGRES: "1"
 
-      # Generated JSON Schema must match the Zod source of truth (§101).
-      # Enabled from Checkpoint E, when generation lands.
-      - name: Schema drift
-        run: npm run schemas:check
-
-      # The dev alias and the published export are one public surface.
-      #
-      # apps/web resolves `@acalys/contracts/api/v1` to source so the dev server
-      # does not depend on a build; everything else resolves the export map.
-      # Two resolution paths for one specifier is where a surface silently
-      # forks — both green, and not the same API. Runs after the clean build,
-      # because it compares against `dist/`.
-      - name: Public surface conformance
-        run: node scripts/assert-export-conformance.mjs
-
-      # apps/web is inherited verbatim; this proves the monorepo move did not
-      # disturb it. Kept beside the clean build above rather than folded into
-      # it: this one is a Vite bundle, and a bundler failure and a project-graph
-      # failure are different problems.
-      - name: Web app builds
-        run: npm run build --workspace apps/web
+      - name: Upload acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4-acceptance
+          path: |
+            .phase4-acceptance-report.json
+            .vitest-report.json
+            .diagnostics/
+          if-no-files-found: ignore

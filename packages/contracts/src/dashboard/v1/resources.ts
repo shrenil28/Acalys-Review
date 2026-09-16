@@ -1,6 +1,11 @@
 import { z } from "zod";
 
-export const dashboardRoleSchema = z.enum(["owner", "admin", "member", "read_only"]);
+export const dashboardRoleSchema = z.enum([
+  "owner",
+  "admin",
+  "member",
+  "read_only",
+]);
 export const dashboardScopeSchema = z.enum([
   "repositories:read",
   "reviews:read",
@@ -40,10 +45,17 @@ export const dashboardAuthConfigSchema = z.object({
   githubEnabled: z.boolean(),
   gitlabEnabled: z.boolean(),
 });
-export const dashboardExchangeBodySchema = z.object({ exchange: z.string().min(32).max(512) });
-export const dashboardExchangeResponseSchema = z.object({ token: z.string().min(32), expiresAt: iso });
+export const dashboardExchangeBodySchema = z.object({
+  exchange: z.string().min(32).max(512),
+});
+export const dashboardExchangeResponseSchema = z.object({
+  token: z.string().min(32),
+  expiresAt: iso,
+});
 export const dashboardRotateResponseSchema = dashboardExchangeResponseSchema;
-export const dashboardLogoutResponseSchema = z.object({ revoked: z.literal(true) });
+export const dashboardLogoutResponseSchema = z.object({
+  revoked: z.literal(true),
+});
 
 export const dashboardMemberSchema = z.object({
   id,
@@ -57,8 +69,12 @@ export const dashboardMemberSchema = z.object({
   createdAt: iso,
   updatedAt: iso,
 });
-export const dashboardMembersResponseSchema = z.object({ items: z.array(dashboardMemberSchema).max(500) });
-export const dashboardUpdateMemberBodySchema = z.object({ role: dashboardRoleSchema });
+export const dashboardMembersResponseSchema = z.object({
+  items: z.array(dashboardMemberSchema).max(500),
+});
+export const dashboardUpdateMemberBodySchema = z.object({
+  role: dashboardRoleSchema,
+});
 
 export const dashboardInvitationSchema = z.object({
   id,
@@ -75,12 +91,16 @@ export const dashboardCreateInvitationBodySchema = z.object({
   email: z.string().trim().email().max(320),
   role: dashboardRoleSchema.default("member"),
 });
-export const dashboardInvitationTokenSchema = z.string().regex(/^acalys_invite_[A-Za-z0-9_-]{40,100}$/u);
+export const dashboardInvitationTokenSchema = z
+  .string()
+  .regex(/^acalys_invite_[A-Za-z0-9_-]{40,100}$/u);
 export const dashboardIssuedInvitationSchema = z.object({
   invitation: dashboardInvitationSchema,
   token: dashboardInvitationTokenSchema,
 });
-export const dashboardCancelInvitationResponseSchema = z.object({ cancelled: z.literal(true) });
+export const dashboardCancelInvitationResponseSchema = z.object({
+  cancelled: z.literal(true),
+});
 export const dashboardRemoveMemberResponseSchema = z.object({
   removed: z.literal(true),
   revokedSessions: z.number().int().nonnegative(),
@@ -99,16 +119,27 @@ export const dashboardApiKeySchema = z.object({
   expiresAt: iso.nullable(),
   lastUsedAt: iso.nullable(),
 });
-export const dashboardApiKeysResponseSchema = z.object({ items: z.array(dashboardApiKeySchema).max(500) });
+export const dashboardApiKeysResponseSchema = z.object({
+  items: z.array(dashboardApiKeySchema).max(500),
+});
 export const dashboardCreateApiKeyBodySchema = z.object({
   name: z.string().trim().min(1).max(200),
-  scopes: z.array(dashboardScopeSchema).min(1).max(32).refine((value) => new Set(value).size === value.length),
+  scopes: z
+    .array(dashboardScopeSchema)
+    .min(1)
+    .max(32)
+    .refine((value) => new Set(value).size === value.length),
   ownerKind: z.enum(["organization", "user"]).default("user"),
   role: dashboardRoleSchema.optional(),
   expiresAt: iso.optional(),
 });
-export const dashboardIssuedApiKeySchema = z.object({ key: dashboardApiKeySchema, token: z.string().min(32) });
-export const dashboardRevokeApiKeyResponseSchema = z.object({ revoked: z.literal(true) });
+export const dashboardIssuedApiKeySchema = z.object({
+  key: dashboardApiKeySchema,
+  token: z.string().min(32),
+});
+export const dashboardRevokeApiKeyResponseSchema = z.object({
+  revoked: z.literal(true),
+});
 
 export const dashboardProviderConnectionSchema = z.object({
   id,
@@ -119,7 +150,9 @@ export const dashboardProviderConnectionSchema = z.object({
   createdAt: iso,
   updatedAt: iso,
 });
-export const dashboardProviderConnectionsResponseSchema = z.object({ items: z.array(dashboardProviderConnectionSchema).max(100) });
+export const dashboardProviderConnectionsResponseSchema = z.object({
+  items: z.array(dashboardProviderConnectionSchema).max(100),
+});
 
 export type DashboardRole = z.infer<typeof dashboardRoleSchema>;
 export type DashboardScope = z.infer<typeof dashboardScopeSchema>;
@@ -127,10 +160,21 @@ export type DashboardSession = z.infer<typeof dashboardSessionSchema>;
 export type DashboardMember = z.infer<typeof dashboardMemberSchema>;
 export type DashboardInvitation = z.infer<typeof dashboardInvitationSchema>;
 export type DashboardApiKey = z.infer<typeof dashboardApiKeySchema>;
-export type DashboardProviderConnection = z.infer<typeof dashboardProviderConnectionSchema>;
+export type DashboardProviderConnection = z.infer<
+  typeof dashboardProviderConnectionSchema
+>;
 
-export const dashboardIntegrationKeySchema = z.enum(["linear", "circleci", "mcp", "jira"]);
-export const dashboardIntegrationStatusSchema = z.enum(["connected", "disconnected", "error"]);
+export const dashboardIntegrationKeySchema = z.enum([
+  "linear",
+  "circleci",
+  "mcp",
+  "jira",
+]);
+export const dashboardIntegrationStatusSchema = z.enum([
+  "connected",
+  "disconnected",
+  "error",
+]);
 export const dashboardIntegrationSchema = z.object({
   id,
   key: dashboardIntegrationKeySchema,
@@ -148,7 +192,9 @@ export const dashboardIntegrationsResponseSchema = z.object({
 export const dashboardCircleCiConnectBodySchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
   token: z.string().trim().min(1).max(8_192),
-  projectSlugs: z.record(dashboardIdSchema, z.string().trim().min(1).max(500)).default({}),
+  projectSlugs: z
+    .record(dashboardIdSchema, z.string().trim().min(1).max(500))
+    .default({}),
 });
 export const dashboardCircleCiSettingsBodySchema = z.object({
   expectedRevision: z.number().int().positive(),
@@ -156,7 +202,14 @@ export const dashboardCircleCiSettingsBodySchema = z.object({
 });
 export const dashboardLinearSettingsBodySchema = z.object({
   expectedRevision: z.number().int().positive(),
-  teamKeys: z.array(z.string().trim().regex(/^[A-Z][A-Z0-9]{0,20}$/)).max(50)
+  teamKeys: z
+    .array(
+      z
+        .string()
+        .trim()
+        .regex(/^[A-Z][A-Z0-9]{0,20}$/),
+    )
+    .max(50)
     .refine((value) => new Set(value).size === value.length),
 });
 export const dashboardDisconnectIntegrationBodySchema = z.object({
@@ -172,7 +225,9 @@ export const dashboardMcpServerInputSchema = z.object({
   guidance: z.string().max(10_000).default(""),
   auth: dashboardMcpAuthMethodSchema,
   apiKey: z.string().max(8_192).optional(),
-  headers: z.record(z.string().min(1).max(200), z.string().max(4_096)).default({}),
+  headers: z
+    .record(z.string().min(1).max(200), z.string().max(4_096))
+    .default({}),
 });
 export const dashboardMcpCreateServerBodySchema = z.object({
   expectedRevision: z.number().int().nonnegative(),
@@ -203,4 +258,6 @@ export const dashboardIntegrationMutationResponseSchema = z.object({
 });
 
 export type DashboardIntegration = z.infer<typeof dashboardIntegrationSchema>;
-export type DashboardIntegrationKey = z.infer<typeof dashboardIntegrationKeySchema>;
+export type DashboardIntegrationKey = z.infer<
+  typeof dashboardIntegrationKeySchema
+>;

@@ -56,8 +56,16 @@ export type ReviewDispatchGuardAcquisition =
   | { readonly kind: "settled" };
 
 export type ReviewDispatchReplay =
-  | { readonly kind: "replayed"; readonly reviewRunId: string; readonly attempt: number }
-  | { readonly kind: "existing"; readonly reviewRunId: string; readonly attempt: number };
+  | {
+      readonly kind: "replayed";
+      readonly reviewRunId: string;
+      readonly attempt: number;
+    }
+  | {
+      readonly kind: "existing";
+      readonly reviewRunId: string;
+      readonly attempt: number;
+    };
 
 export class StaleReviewDispatchClaim extends Error {
   public constructor() {
@@ -69,7 +77,9 @@ export class StaleReviewDispatchClaim extends Error {
 export class ReviewDispatchStore {
   public constructor(private readonly pool: PgPool) {}
 
-  private async inTransaction<T>(work: (client: PgClient) => Promise<T>): Promise<T> {
+  private async inTransaction<T>(
+    work: (client: PgClient) => Promise<T>,
+  ): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -102,7 +112,12 @@ export class ReviewDispatchStore {
        SELECT $1,$2,$3,$4,db_time.at,db_time.at,db_time.at
          FROM db_time
        ON CONFLICT (review_run_id) DO NOTHING`,
-      [input.reviewRunId, input.organizationId, input.revisionId, input.pullRequestId],
+      [
+        input.reviewRunId,
+        input.organizationId,
+        input.revisionId,
+        input.pullRequestId,
+      ],
     );
   }
 
@@ -120,7 +135,10 @@ export class ReviewDispatchStore {
    * All lease timestamps come from Postgres so horizontally scaled workers cannot
    * disagree because their process clocks differ.
    */
-  public async claim(limit: number, leaseMillis: number): Promise<readonly ReviewDispatchClaim[]> {
+  public async claim(
+    limit: number,
+    leaseMillis: number,
+  ): Promise<readonly ReviewDispatchClaim[]> {
     requirePositiveInteger("limit", limit);
     requirePositiveInteger("leaseMillis", leaseMillis);
 
@@ -289,14 +307,28 @@ export class ReviewDispatchStore {
         [reviewRunId],
       );
       const row = current.rows[0];
-      if (row === undefined || Number(row.claim_generation) !== generation || row.dead_lettered_at !== null) {
-        await client.query(`SELECT pg_advisory_unlock(hashtextextended($1,0))`, [lockKey]);
+      if (
+        row === undefined ||
+        Number(row.claim_generation) !== generation ||
+        row.dead_lettered_at !== null
+      ) {
+        await client.query(
+          `SELECT pg_advisory_unlock(hashtextextended($1,0))`,
+          [lockKey],
+        );
         ownsLock = false;
         client.release();
         return { kind: "stale" };
       }
-      if (!ACTIVE_DISPATCH_STATES.includes(row.state as (typeof ACTIVE_DISPATCH_STATES)[number])) {
-        await client.query(`SELECT pg_advisory_unlock(hashtextextended($1,0))`, [lockKey]);
+      if (
+        !ACTIVE_DISPATCH_STATES.includes(
+          row.state as (typeof ACTIVE_DISPATCH_STATES)[number],
+        )
+      ) {
+        await client.query(
+          `SELECT pg_advisory_unlock(hashtextextended($1,0))`,
+          [lockKey],
+        );
         ownsLock = false;
         client.release();
         return { kind: "settled" };
@@ -305,7 +337,10 @@ export class ReviewDispatchStore {
         !(row.lease_expires_at instanceof Date) ||
         row.lease_expires_at.getTime() <= row.database_now.getTime()
       ) {
-        await client.query(`SELECT pg_advisory_unlock(hashtextextended($1,0))`, [lockKey]);
+        await client.query(
+          `SELECT pg_advisory_unlock(hashtextextended($1,0))`,
+          [lockKey],
+        );
         ownsLock = false;
         client.release();
         return { kind: "stale" };
@@ -335,7 +370,10 @@ export class ReviewDispatchStore {
           if (released) return;
           released = true;
           try {
-            await client.query(`SELECT pg_advisory_unlock(hashtextextended($1,0))`, [lockKey]);
+            await client.query(
+              `SELECT pg_advisory_unlock(hashtextextended($1,0))`,
+              [lockKey],
+            );
           } finally {
             ownsLock = false;
             client.release();
@@ -355,7 +393,10 @@ export class ReviewDispatchStore {
     }
   }
 
-  public async complete(reviewRunId: string, generation: number): Promise<void> {
+  public async complete(
+    reviewRunId: string,
+    generation: number,
+  ): Promise<void> {
     const result = await this.pool.query(
       `DELETE FROM review_dispatch_jobs
         WHERE review_run_id=$1 AND claim_generation=$2 AND dead_lettered_at IS NULL`,
@@ -365,7 +406,11 @@ export class ReviewDispatchStore {
   }
 
   /** Coordination deferral does not burn the execution-attempt budget. */
-  public async defer(reviewRunId: string, generation: number, delayMillis: number): Promise<void> {
+  public async defer(
+    reviewRunId: string,
+    generation: number,
+    delayMillis: number,
+  ): Promise<void> {
     requireNonNegativeInteger("delayMillis", delayMillis);
     const result = await this.pool.query(
       `WITH db_time AS MATERIALIZED (SELECT clock_timestamp() AS at)
@@ -395,8 +440,13 @@ export class ReviewDispatchStore {
       // Production callers hold the session advisory execution guard while this
       // transaction settles the claim, so cancellation cannot enter concurrently.
       // Within durable rows, keep the order run first, dispatch row second.
-      await client.query(`SELECT id FROM review_runs WHERE id=$1 FOR UPDATE`, [reviewRunId]);
-      const current = await client.query<{ attempts: number; max_attempts: number }>(
+      await client.query(`SELECT id FROM review_runs WHERE id=$1 FOR UPDATE`, [
+        reviewRunId,
+      ]);
+      const current = await client.query<{
+        attempts: number;
+        max_attempts: number;
+      }>(
         `SELECT attempts,max_attempts
            FROM review_dispatch_jobs
           WHERE review_run_id=$1 AND claim_generation=$2 AND dead_lettered_at IS NULL
@@ -406,7 +456,12 @@ export class ReviewDispatchStore {
       const row = current.rows[0];
       if (row === undefined) throw new StaleReviewDispatchClaim();
       if (row.attempts >= row.max_attempts) {
-        await this.deadLetterWithClient(client, reviewRunId, generation, errorCode);
+        await this.deadLetterWithClient(
+          client,
+          reviewRunId,
+          generation,
+          errorCode,
+        );
         return;
       }
 
@@ -470,9 +525,10 @@ export class ReviewDispatchStore {
       const row = source.rows[0];
       if (row === undefined) throw new StaleReviewDispatchClaim();
 
-      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, [
-        `acalys:api-review-dispatch-replay:${row.request_id}`,
-      ]);
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        [`acalys:api-review-dispatch-replay:${row.request_id}`],
+      );
 
       const latest = await client.query<{ id: string; attempt: number }>(
         `SELECT id,attempt
@@ -485,7 +541,11 @@ export class ReviewDispatchStore {
       );
       const newest = latest.rows[0];
       if (newest !== undefined && newest.attempt > row.attempt) {
-        return { kind: "existing", reviewRunId: newest.id, attempt: newest.attempt };
+        return {
+          kind: "existing",
+          reviewRunId: newest.id,
+          attempt: newest.attempt,
+        };
       }
 
       const newRunId = randomUUID();
@@ -511,7 +571,9 @@ export class ReviewDispatchStore {
       );
       const createdAt = inserted.rows[0]?.created_at;
       if (!(createdAt instanceof Date)) {
-        throw new Error("Dead-letter replay did not return a database timestamp");
+        throw new Error(
+          "Dead-letter replay did not return a database timestamp",
+        );
       }
 
       await client.query(
@@ -519,7 +581,13 @@ export class ReviewDispatchStore {
           (review_run_id,organization_id,revision_id,pull_request_id,
            available_at,created_at,updated_at)
          VALUES($1,$2,$3,$4,$5,$5,$5)`,
-        [newRunId, row.organization_id, row.revision_id, row.pull_request_id, createdAt],
+        [
+          newRunId,
+          row.organization_id,
+          row.revision_id,
+          row.pull_request_id,
+          createdAt,
+        ],
       );
       return { kind: "replayed", reviewRunId: newRunId, attempt: newAttempt };
     });
@@ -564,7 +632,9 @@ export class ReviewDispatchStore {
     const state = run.rows[0]?.state;
     if (
       state !== undefined &&
-      ACTIVE_DISPATCH_STATES.includes(state as (typeof ACTIVE_DISPATCH_STATES)[number])
+      ACTIVE_DISPATCH_STATES.includes(
+        state as (typeof ACTIVE_DISPATCH_STATES)[number],
+      )
     ) {
       const updated = await client.query<{ completed_at: Date }>(
         `UPDATE review_runs

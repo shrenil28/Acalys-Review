@@ -9,7 +9,6 @@ import {
   JsonCassetteStore,
   OpenAIAdapter,
   StaticModelRouter,
-  type CredentialPolicy,
   type ModelProvider,
   type ModelProviderAdapter,
   type ModelRoute,
@@ -39,7 +38,11 @@ const routeSchema = z.object({
   inputMicroUsdPerMillion: z.number().int().nonnegative(),
   outputMicroUsdPerMillion: z.number().int().nonnegative(),
   cachedInputMicroUsdPerMillion: z.number().int().nonnegative().optional(),
-  cacheCreationInputMicroUsdPerMillion: z.number().int().nonnegative().optional(),
+  cacheCreationInputMicroUsdPerMillion: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional(),
 });
 const credentialSchema = z.object({
   credentialId: z.string().min(1),
@@ -73,35 +76,49 @@ const modelConfigSchema = z.object({
   }),
 });
 
-
 const integrationKeyringSchema = z.object({
   activeGeneration: z.number().int().positive(),
   keys: z.record(z.string(), z.string().min(1)),
 });
 
-function integrationCredentialCipher(): IntegrationCredentialCipher | undefined {
+function integrationCredentialCipher():
+  IntegrationCredentialCipher | undefined {
   const raw = process.env["ACALYS_INTEGRATION_CREDENTIAL_KEYS_JSON"];
   if (raw === undefined || raw.trim() === "") return undefined;
   let parsedJson: unknown;
-  try { parsedJson = JSON.parse(raw) as unknown; }
-  catch { throw new Error("ACALYS_INTEGRATION_CREDENTIAL_KEYS_JSON is not valid JSON"); }
+  try {
+    parsedJson = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(
+      "ACALYS_INTEGRATION_CREDENTIAL_KEYS_JSON is not valid JSON",
+    );
+  }
   const parsed = integrationKeyringSchema.safeParse(parsedJson);
   if (!parsed.success) {
-    throw new Error("ACALYS_INTEGRATION_CREDENTIAL_KEYS_JSON does not match the required keyring schema");
+    throw new Error(
+      "ACALYS_INTEGRATION_CREDENTIAL_KEYS_JSON does not match the required keyring schema",
+    );
   }
   const keys = new Map<number, Buffer>();
   for (const [generationText, encoded] of Object.entries(parsed.data.keys)) {
     const generation = Number(generationText);
     if (!Number.isSafeInteger(generation) || generation < 1) {
-      throw new Error("Integration credential key generations must be positive integers");
+      throw new Error(
+        "Integration credential key generations must be positive integers",
+      );
     }
     const key = Buffer.from(encoded, "base64url");
     if (key.byteLength !== 32) {
-      throw new Error(`Integration credential key generation ${generationText} must decode to 32 bytes`);
+      throw new Error(
+        `Integration credential key generation ${generationText} must decode to 32 bytes`,
+      );
     }
     keys.set(generation, key);
   }
-  return new IntegrationCredentialCipher({ activeGeneration: parsed.data.activeGeneration, keys });
+  return new IntegrationCredentialCipher({
+    activeGeneration: parsed.data.activeGeneration,
+    keys,
+  });
 }
 
 function required(name: string): string {
@@ -133,7 +150,9 @@ function modelConfiguration(): z.infer<typeof modelConfigSchema> {
   }
   const parsed = modelConfigSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new Error("ACALYS_MODEL_CONFIG_JSON does not match the required model runtime schema");
+    throw new Error(
+      "ACALYS_MODEL_CONFIG_JSON does not match the required model runtime schema",
+    );
   }
   if (parsed.data.retries.maxDelayMs < parsed.data.retries.baseDelayMs) {
     throw new Error("model retry maxDelayMs must be >= baseDelayMs");
@@ -155,7 +174,9 @@ function modelAdapters(
     adapters.set("anthropic", new AnthropicAdapter(anthropicKey));
   }
 
-  const selected = new Set(Object.values(routes).map((route) => route.provider));
+  const selected = new Set(
+    Object.values(routes).map((route) => route.provider),
+  );
   for (const provider of selected) {
     if (replayMode !== "replay" && !adapters.has(provider)) {
       throw new Error(
@@ -171,7 +192,10 @@ async function main(): Promise<void> {
   let shuttingDown = false;
 
   try {
-    const appKey = GithubAppPrivateKey.fromPem(required("GITHUB_APP_PRIVATE_KEY_PEM"));
+    await pool.query("SELECT 1");
+    const appKey = GithubAppPrivateKey.fromPem(
+      required("GITHUB_APP_PRIVATE_KEY_PEM"),
+    );
     const signer = new AppJwtSigner({
       appClientId: required("GITHUB_APP_CLIENT_ID"),
       privateKey: appKey,
@@ -186,30 +210,50 @@ async function main(): Promise<void> {
     });
 
     const config = modelConfiguration();
-    const routes = config.routes as Readonly<Record<ModelTaskClass, ModelRoute>>;
+    const routes = config.routes as Readonly<
+      Record<ModelTaskClass, ModelRoute>
+    >;
     const replayModeRaw = process.env["ACALYS_MODEL_REPLAY_MODE"] ?? "off";
     const replayMode = z.enum(["off", "record", "replay"]).parse(replayModeRaw);
     const cassettePath = process.env["ACALYS_MODEL_CASSETTE_PATH"];
-    if (replayMode !== "off" && (cassettePath === undefined || cassettePath.trim() === "")) {
-      throw new Error("ACALYS_MODEL_CASSETTE_PATH is required in record/replay mode");
+    if (
+      replayMode !== "off" &&
+      (cassettePath === undefined || cassettePath.trim() === "")
+    ) {
+      throw new Error(
+        "ACALYS_MODEL_CASSETTE_PATH is required in record/replay mode",
+      );
     }
 
-    const batchSize = optionalPositiveInteger("ACALYS_REVIEW_WORKER_BATCH_SIZE");
-    const leaseMillis = optionalPositiveInteger("ACALYS_REVIEW_WORKER_LEASE_MS");
-    const pollIntervalMillis = optionalPositiveInteger("ACALYS_REVIEW_WORKER_POLL_MS");
+    const batchSize = optionalPositiveInteger(
+      "ACALYS_REVIEW_WORKER_BATCH_SIZE",
+    );
+    const leaseMillis = optionalPositiveInteger(
+      "ACALYS_REVIEW_WORKER_LEASE_MS",
+    );
+    const pollIntervalMillis = optionalPositiveInteger(
+      "ACALYS_REVIEW_WORKER_POLL_MS",
+    );
     const retryBackoffMillis = optionalPositiveInteger(
       "ACALYS_REVIEW_WORKER_RETRY_BACKOFF_MS",
     );
 
     const integrationCipher = integrationCredentialCipher();
-    const providerContext = integrationCipher === undefined
-      ? undefined
-      : new ReviewProviderContextResolver({
-          integrations: new DashboardIntegrationStore(pool, integrationCipher),
-          ...(process.env["ACALYS_LINEAR_OAUTH_CLIENT_ID"]?.trim()
-            ? { linearClientId: process.env["ACALYS_LINEAR_OAUTH_CLIENT_ID"]!.trim() }
-            : {}),
-        });
+    const providerContext =
+      integrationCipher === undefined
+        ? undefined
+        : new ReviewProviderContextResolver({
+            integrations: new DashboardIntegrationStore(
+              pool,
+              integrationCipher,
+            ),
+            ...(process.env["ACALYS_LINEAR_OAUTH_CLIENT_ID"]?.trim()
+              ? {
+                  linearClientId:
+                    process.env["ACALYS_LINEAR_OAUTH_CLIENT_ID"].trim(),
+                }
+              : {}),
+          });
 
     const runtime = createProductionReviewRuntime({
       pool,
@@ -219,7 +263,7 @@ async function main(): Promise<void> {
         router: new StaticModelRouter(config.routingPolicyVersion, routes),
         adapters: modelAdapters(routes, replayMode),
         budget: config.budget,
-        credentials: config.credentials as Readonly<Record<ModelProvider, CredentialPolicy>>,
+        credentials: config.credentials,
         retries: config.retries,
         replayMode,
         ...(cassettePath === undefined || cassettePath.trim() === ""
@@ -241,7 +285,13 @@ async function main(): Promise<void> {
         ...(retryBackoffMillis === undefined ? {} : { retryBackoffMillis }),
         observer: {
           onOutcome(event) {
-            console.info(JSON.stringify({ level: "info", event: "review-worker.outcome", ...event }));
+            console.info(
+              JSON.stringify({
+                level: "info",
+                event: "review-worker.outcome",
+                ...event,
+              }),
+            );
           },
           onError(error) {
             console.error(
@@ -259,8 +309,17 @@ async function main(): Promise<void> {
     const stop = async (signal: string): Promise<void> => {
       if (shuttingDown) return;
       shuttingDown = true;
-      console.info(JSON.stringify({ level: "info", event: "review-worker.shutdown", signal }));
-      await Promise.all([runtime.worker.stop(), runtime.apiDispatchWorker.stop()]);
+      console.info(
+        JSON.stringify({
+          level: "info",
+          event: "review-worker.shutdown",
+          signal,
+        }),
+      );
+      await Promise.all([
+        runtime.worker.stop(),
+        runtime.apiDispatchWorker.stop(),
+      ]);
       await pool.end();
     };
 
@@ -274,7 +333,9 @@ async function main(): Promise<void> {
 
     runtime.worker.start();
     runtime.apiDispatchWorker.start();
-    console.info(JSON.stringify({ level: "info", event: "review-worker.started" }));
+    console.info(
+      JSON.stringify({ level: "info", event: "review-worker.started" }),
+    );
   } catch (error) {
     await pool.end().catch(() => undefined);
     throw error;

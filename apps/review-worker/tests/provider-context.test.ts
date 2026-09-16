@@ -23,7 +23,10 @@ function integration(
   credentialVersion = 3,
 ): DashboardIntegrationRow {
   return {
-    id: key === "linear" ? "33333333-3333-4333-8333-333333333333" : "44444444-4444-4444-8444-444444444444",
+    id:
+      key === "linear"
+        ? "33333333-3333-4333-8333-333333333333"
+        : "44444444-4444-4444-8444-444444444444",
     organizationId,
     key,
     status: "connected",
@@ -36,7 +39,9 @@ function integration(
   };
 }
 
-function subject(overrides: Partial<ReviewProviderSubject> = {}): ReviewProviderSubject {
+function subject(
+  overrides: Partial<ReviewProviderSubject> = {},
+): ReviewProviderSubject {
   return {
     repositoryId,
     repositoryOwner: "acalys",
@@ -51,8 +56,15 @@ function subject(overrides: Partial<ReviewProviderSubject> = {}): ReviewProvider
 }
 
 class FakeStore implements ProviderIntegrationStore {
-  readonly credentials = new Map<DashboardIntegrationKey, StoredIntegrationCredential<object>>();
-  rotations: Array<{ key: DashboardIntegrationKey; version: number; credential: object }> = [];
+  readonly credentials = new Map<
+    DashboardIntegrationKey,
+    StoredIntegrationCredential<object>
+  >();
+  rotations: Array<{
+    key: DashboardIntegrationKey;
+    version: number;
+    credential: object;
+  }> = [];
   rotationOutcome: CredentialRotationOutcome = {
     kind: "stale_generation",
   };
@@ -64,9 +76,11 @@ class FakeStore implements ProviderIntegrationStore {
     key: DashboardIntegrationKey,
   ): Promise<StoredIntegrationCredential<TCredential> | undefined> {
     if (this.#rotated && key === "linear") {
-      return this.rereadAfterRotation as StoredIntegrationCredential<TCredential> | undefined;
+      return this.rereadAfterRotation as
+        StoredIntegrationCredential<TCredential> | undefined;
     }
-    return this.credentials.get(key) as StoredIntegrationCredential<TCredential> | undefined;
+    return this.credentials.get(key) as
+      StoredIntegrationCredential<TCredential> | undefined;
   }
 
   async rotateCredentialIfCurrent(input: {
@@ -106,7 +120,9 @@ describe("review provider context", () => {
     const requested: string[] = [];
     const fetchImpl: typeof fetch = async (input, init) => {
       expect(String(input)).toBe("https://api.linear.app/graphql");
-      const body = JSON.parse(String(init?.body)) as { variables: { id: string } };
+      const body = JSON.parse(String(init?.body)) as {
+        variables: { id: string };
+      };
       requested.push(body.variables.id);
       return json({
         data: {
@@ -121,35 +137,51 @@ describe("review provider context", () => {
       });
     };
 
-    const resolved = await new ReviewProviderContextResolver({ integrations: store, fetch: fetchImpl, now: () => now })
-      .resolve({ organizationId, subject: subject() });
+    const resolved = await new ReviewProviderContextResolver({
+      integrations: store,
+      fetch: fetchImpl,
+      now: () => now,
+    }).resolve({ organizationId, subject: subject() });
 
     expect(requested).toEqual(["ENG-123"]);
     expect(resolved.blocks).toHaveLength(1);
-    expect(resolved.blocks[0]).toMatchObject({ source: "linear", status: "complete" });
+    expect(resolved.blocks[0]).toMatchObject({
+      source: "linear",
+      status: "complete",
+    });
     expect(resolved.digest).toMatch(/^[a-f0-9]{64}$/u);
   });
 
   it("rejects CircleCI evidence from a stale head even when it belongs to the same branch", async () => {
     const store = new FakeStore();
     store.credentials.set("circleci", {
-      integration: integration("circleci", { projectSlugs: { [repositoryId]: "gh/acalys/review" } }),
+      integration: integration("circleci", {
+        projectSlugs: { [repositoryId]: "gh/acalys/review" },
+      }),
       credential: { token: "circle-token" },
     });
     let calls = 0;
     const fetchImpl: typeof fetch = async () => {
       calls += 1;
       return json({
-        items: [{
-          id: "pipeline-old",
-          number: 10,
-          vcs: { revision: "old-sha", review_id: "42", branch: "feature/provider-context" },
-        }],
+        items: [
+          {
+            id: "pipeline-old",
+            number: 10,
+            vcs: {
+              revision: "old-sha",
+              review_id: "42",
+              branch: "feature/provider-context",
+            },
+          },
+        ],
       });
     };
 
-    const resolved = await new ReviewProviderContextResolver({ integrations: store, fetch: fetchImpl })
-      .resolve({ organizationId, subject: subject() });
+    const resolved = await new ReviewProviderContextResolver({
+      integrations: store,
+      fetch: fetchImpl,
+    }).resolve({ organizationId, subject: subject() });
 
     expect(calls).toBe(1);
     expect(resolved.blocks).toEqual([
@@ -160,7 +192,9 @@ describe("review provider context", () => {
   it("accepts CircleCI workflows only for the exact admitted head and review id", async () => {
     const store = new FakeStore();
     store.credentials.set("circleci", {
-      integration: integration("circleci", { projectSlugs: { [repositoryId]: "gh/acalys/review" } }),
+      integration: integration("circleci", {
+        projectSlugs: { [repositoryId]: "gh/acalys/review" },
+      }),
       credential: { token: "circle-token" },
     });
     const urls: string[] = [];
@@ -171,15 +205,23 @@ describe("review provider context", () => {
         return json({
           items: [
             { id: "wrong-pr", vcs: { revision: "abc123", review_id: "41" } },
-            { id: "right", number: 12, vcs: { revision: "abc123", review_id: "42" } },
+            {
+              id: "right",
+              number: 12,
+              vcs: { revision: "abc123", review_id: "42" },
+            },
           ],
         });
       }
-      return json({ items: [{ id: "workflow-1", name: "test", status: "success" }] });
+      return json({
+        items: [{ id: "workflow-1", name: "test", status: "success" }],
+      });
     };
 
-    const resolved = await new ReviewProviderContextResolver({ integrations: store, fetch: fetchImpl })
-      .resolve({ organizationId, subject: subject() });
+    const resolved = await new ReviewProviderContextResolver({
+      integrations: store,
+      fetch: fetchImpl,
+    }).resolve({ organizationId, subject: subject() });
 
     expect(urls).toHaveLength(2);
     expect(urls[1]).toContain("/pipeline/right/workflow");

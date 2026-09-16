@@ -7,6 +7,7 @@ generated
 .vite
 package-lock.json
 .claude/worktrees/**
+acalys-review-phase4-final-source/**
 
 # Canonical one-line machine evidence emitted by the frozen L.5 runner.
 docs/review/phase-1/l5-report.json

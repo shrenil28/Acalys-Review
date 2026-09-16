@@ -259,9 +259,11 @@ function LiveIntegrations() {
 
   const saveCircleMappings = async () => {
     if (circleci === undefined) return;
-    const projectSlugs = Object.fromEntries(
-      Object.entries(circleMappings).map(([id, slug]) => [id, slug.trim()]).filter(([, slug]) => slug !== ""),
-    );
+    const projectSlugs: Record<string, string> = {};
+    for (const [id, slug] of Object.entries(circleMappings)) {
+      const normalized = slug.trim();
+      if (normalized !== "") projectSlugs[id] = normalized;
+    }
     setBusy("circle-save");
     const result = await updateCircleCiIntegration({ expectedRevision: circleci.revision, projectSlugs });
     setBusy(null);
@@ -277,9 +279,11 @@ function LiveIntegrations() {
 
   const connectCircle = async () => {
     if (circleToken.trim() === "") return;
-    const projectSlugs = Object.fromEntries(
-      Object.entries(circleMappings).map(([id, slug]) => [id, slug.trim()]).filter(([, slug]) => slug !== ""),
-    );
+    const projectSlugs: Record<string, string> = {};
+    for (const [id, slug] of Object.entries(circleMappings)) {
+      const normalized = slug.trim();
+      if (normalized !== "") projectSlugs[id] = normalized;
+    }
     setBusy("circle-connect");
     const result = await connectCircleCi({
       expectedRevision: circleci?.revision ?? 0,

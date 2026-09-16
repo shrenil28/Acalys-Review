@@ -36,7 +36,7 @@ function LiveUserMenu({ collapsed }: { collapsed?: boolean }) {
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem("cr:theme") as Theme) ?? "dark");
   if (session === null) return null;
   const name = session.user.displayName ?? session.user.email ?? session.user.providerUserId;
-  const role = session.role === "read_only" ? "Read only" : session.role[0]!.toUpperCase() + session.role.slice(1);
+  const role = session.role === "read_only" ? "Read only" : session.role[0].toUpperCase() + session.role.slice(1);
 
   return (
     <div className={cn(collapsed ? "p-2" : "border-t border-line p-2")}>

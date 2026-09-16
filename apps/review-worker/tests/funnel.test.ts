@@ -235,7 +235,12 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     };
 
     // queued → preparing → analyzing, driven by the real orchestrator.
-    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
+    const options = {
+      ...stores(),
+      analyzer: analyze,
+      verifier: verifier(),
+      config,
+    };
     await advance(context, options); // queued  → preparing
     await advance(context, options); // preparing → analyzing
     await database.pool.query(
@@ -471,7 +476,12 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
   // ── 6 ──────────────────────────────────────────────────────────────────
   it("crashing after the attempts, before promotion, converges", async () => {
     const context = await seedRun();
-    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
+    const options = {
+      ...stores(),
+      analyzer: analyze,
+      verifier: verifier(),
+      config,
+    };
 
     // Drive only as far as `reconciling`: attempts are durable, nothing is
     // promoted, and the worker dies.
@@ -504,7 +514,12 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
     // transition itself. A crash inside it must leave none of them, or
     // `state = publishing` could exist with findings nobody decided about.
     const context = await seedRun();
-    const options = { ...stores(), analyzer: analyze, verifier: verifier(), config };
+    const options = {
+      ...stores(),
+      analyzer: analyze,
+      verifier: verifier(),
+      config,
+    };
 
     for (let step = 0; step < 6; step += 1) {
       const run = await stores().ingestion.getRun(context.runId);
@@ -846,7 +861,8 @@ describeWithPostgres("The trust funnel, in durable rows", () => {
       60_000,
     );
     expect(recoveryClaim.kind).toBe("claimed");
-    if (recoveryClaim.kind !== "claimed") throw new Error("expected recovery claim");
+    if (recoveryClaim.kind !== "claimed")
+      throw new Error("expected recovery claim");
     await stores().verifications.recordAttempt({
       invocationId: recoveryClaim.claim.invocationId,
       claimToken: recoveryClaim.claim.claimToken,

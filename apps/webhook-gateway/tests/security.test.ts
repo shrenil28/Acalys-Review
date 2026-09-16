@@ -298,6 +298,21 @@ describe("Security headers", () => {
     expect(response.headers["x-powered-by"]).toBeUndefined();
   });
 
+  it("separates process liveness from durable dependency readiness", async () => {
+    const unavailable = createGatewayApp({
+      github: {
+        secret: STRONG_SECRET,
+        sourceEndpointId: "e",
+        inbox: new NullInbox(),
+      },
+      readiness: () => Promise.reject(new Error("database unavailable")),
+    });
+    await request(unavailable).get("/healthz").expect(200, { status: "ok" });
+    await request(unavailable)
+      .get("/readyz")
+      .expect(503, { status: "unavailable" });
+  });
+
   it("applies headers to error responses too", async () => {
     const response = await request(app)
       .post("/webhooks/github")

@@ -22,6 +22,8 @@ export default tseslint.config(
       "**/*.tsbuildinfo",
       // Agent worktrees are independent checkout state, not root sources.
       ".claude/worktrees/**",
+      // Local merge archive; the canonical source is the repository root.
+      "acalys-review-phase4-final-source/**",
       // Screenshot tooling, not product code.
       //
       // Every one of these opens `http://127.0.0.1:9222/json/list` — the Chrome
@@ -40,6 +42,7 @@ export default tseslint.config(
       // TypeScript project, so the type-aware rules have no program to resolve
       // them against; they are exercised by being run in CI rather than typed.
       "scripts/*.mjs",
+      "deploy/*.mjs",
       // Test fixtures that exist to be SPAWNED as separate OS processes — the
       // only way to prove a cross-process limit holds. Same reason as above:
       // outside any TypeScript project, and exercised by being executed.
@@ -165,6 +168,13 @@ export default tseslint.config(
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",
       "@typescript-eslint/no-unsafe-argument": "off",
+      // Async test doubles implement Promise-returning production ports. An
+      // `await` added only to satisfy lint would make those doubles less clear.
+      "@typescript-eslint/require-await": "off",
+      "@typescript-eslint/no-base-to-string": "off",
+      "@typescript-eslint/no-unnecessary-type-assertion": "off",
+      "@typescript-eslint/unbound-method": "off",
+      "@typescript-eslint/only-throw-error": "off",
     },
   },
 

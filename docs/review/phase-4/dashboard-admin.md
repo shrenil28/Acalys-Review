@@ -8,21 +8,21 @@ This contract is intentionally separate from the frozen Phase-3 public product A
 
 The frozen Checkpoint-4.3 dashboard surface contains 13 routes:
 
-| Method | Route | Purpose |
-|---|---|---|
-| GET | `/dashboard/v1/auth/config` | Live organization identity + whether GitHub sign-in is configured. |
-| GET | `/dashboard/v1/auth/github/start` | Issue OAuth state/nonce and redirect to GitHub. |
-| GET | `/dashboard/v1/auth/github/callback` | Verify state/nonce, provider identity and provisioned membership; issue one-time exchange handle. |
-| POST | `/dashboard/v1/auth/exchange` | Redeem the one-time exchange and issue the real browser session. |
-| GET | `/dashboard/v1/session` | Project current live user/organization/membership state. |
-| POST | `/dashboard/v1/session/rotate` | Rotate the current bearer session. |
-| POST | `/dashboard/v1/session/logout` | Revoke the current bearer session. |
-| GET | `/dashboard/v1/members` | List live organization members. |
-| PATCH | `/dashboard/v1/members/:id` | Owner/admin role management with last-owner protection. |
-| GET | `/dashboard/v1/api-keys` | List visible active API keys without hashes/secrets. |
-| POST | `/dashboard/v1/api-keys` | Create a membership-authorized scoped key; full token returned once. |
-| DELETE | `/dashboard/v1/api-keys/:id` | Tenant-safe, actor-authorized revocation. |
-| GET | `/dashboard/v1/provider-connections` | Read live provider connection registrations already persisted by the backend. |
+| Method | Route                                | Purpose                                                                                           |
+| ------ | ------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| GET    | `/dashboard/v1/auth/config`          | Live organization identity + whether GitHub sign-in is configured.                                |
+| GET    | `/dashboard/v1/auth/github/start`    | Issue OAuth state/nonce and redirect to GitHub.                                                   |
+| GET    | `/dashboard/v1/auth/github/callback` | Verify state/nonce, provider identity and provisioned membership; issue one-time exchange handle. |
+| POST   | `/dashboard/v1/auth/exchange`        | Redeem the one-time exchange and issue the real browser session.                                  |
+| GET    | `/dashboard/v1/session`              | Project current live user/organization/membership state.                                          |
+| POST   | `/dashboard/v1/session/rotate`       | Rotate the current bearer session.                                                                |
+| POST   | `/dashboard/v1/session/logout`       | Revoke the current bearer session.                                                                |
+| GET    | `/dashboard/v1/members`              | List live organization members.                                                                   |
+| PATCH  | `/dashboard/v1/members/:id`          | Owner/admin role management with last-owner protection.                                           |
+| GET    | `/dashboard/v1/api-keys`             | List visible active API keys without hashes/secrets.                                              |
+| POST   | `/dashboard/v1/api-keys`             | Create a membership-authorized scoped key; full token returned once.                              |
+| DELETE | `/dashboard/v1/api-keys/:id`         | Tenant-safe, actor-authorized revocation.                                                         |
+| GET    | `/dashboard/v1/provider-connections` | Read live provider connection registrations already persisted by the backend.                     |
 
 The dashboard router validates request bodies and UUID parameters before persistence and marks every dashboard response `Cache-Control: no-store`, `Pragma: no-cache`, and `X-Content-Type-Options: nosniff`.
 

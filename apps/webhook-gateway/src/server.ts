@@ -77,6 +77,7 @@ export function startGateway(options: StartOptions): Promise<RunningServer> {
         options.onShutdown?.(reason);
 
         const forced = setTimeout(() => {
+          server.closeAllConnections();
           resolveStop();
         }, drainMillis);
         // Does not hold the event loop open on its own.

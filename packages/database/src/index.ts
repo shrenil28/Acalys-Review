@@ -130,10 +130,14 @@ export {
   type IdempotencyAcquire,
 } from "./api-store.js";
 
+export { createPostgresPool, type CloseablePgPool } from "./pool.js";
+
 export {
-  createPostgresPool,
-  type CloseablePgPool,
-} from "./pool.js";
+  defaultMigrationDirectory,
+  runMigrations,
+  type AppliedMigration,
+  type MigrationResult,
+} from "./migrations.js";
 
 export {
   ReviewDispatchStore,
@@ -144,7 +148,11 @@ export {
   type ReviewDispatchReplay,
 } from "./review/api-dispatch-store.js";
 
-export { ApiMutationStore, type IdempotencyIdentity, type IdempotentMutationOutcome } from "./api-mutation-store.js";
+export {
+  ApiMutationStore,
+  type IdempotencyIdentity,
+  type IdempotentMutationOutcome,
+} from "./api-mutation-store.js";
 
 export {
   DashboardAdminStore,

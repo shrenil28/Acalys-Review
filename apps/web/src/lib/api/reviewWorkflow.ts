@@ -75,7 +75,7 @@ async function mapWithConcurrency<T, R>(
     while (next < values.length) {
       const index = next;
       next += 1;
-      results[index] = await mapper(values[index]!);
+      results[index] = await mapper(values[index]);
     }
   });
   await Promise.all(workers);
@@ -176,7 +176,7 @@ export function useLivePullRequests(refreshToken = 0): LiveState<readonly LivePu
       setState(
         result.kind === "ok"
           ? { status: "ready", source: "api", value: result.value }
-          : { status: "failed", failure: result as LiveFailure },
+          : { status: "failed", failure: result },
       );
     }).catch((error: unknown) => {
       if (!active) return;
@@ -457,7 +457,7 @@ export async function followReviewProgress(
 
 export function useReviewRun(
   pullRequest: LivePullRequest | undefined,
-  initialReviewRunId?: string | undefined,
+  initialReviewRunId?: string  ,
 ): {
   readonly baseUrl?: string | undefined;
   readonly run?: ReviewRunDto | undefined;
@@ -497,7 +497,7 @@ export function useReviewRun(
     void loadReviewRun(baseUrl, initialReviewRunId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.kind !== "ok") {
-        setFailure(result as LiveFailure);
+        setFailure(result);
         setOperation("idle");
         return;
       }
@@ -524,7 +524,7 @@ export function useReviewRun(
     }).then((result) => {
       if (controller.signal.aborted) return;
       if (result.kind !== "ok") {
-        setFailure(result as LiveFailure);
+        setFailure(result);
         return;
       }
       void loadReviewRun(baseUrl, run.id, controller.signal).then((latest) => {
@@ -532,7 +532,7 @@ export function useReviewRun(
         if (latest.kind === "ok") {
           setRun(latest.value);
           setArtifactEpoch((value) => value + 1);
-        } else setFailure(latest as LiveFailure);
+        } else setFailure(latest);
       });
     });
     return () => controller.abort();
@@ -549,7 +549,7 @@ export function useReviewRun(
         setFailure(undefined);
         setOperation("ready");
       } else {
-        setFailure(result as LiveFailure);
+        setFailure(result);
         setOperation("idle");
       }
     });
@@ -568,7 +568,7 @@ export function useReviewRun(
         setStreamReconnects(0);
         setOperation(result.value.settled ? "loading_results" : "following");
       } else {
-        setFailure(result as LiveFailure);
+        setFailure(result);
         setOperation("idle");
       }
     });
@@ -581,7 +581,7 @@ export function useReviewRun(
       if (result.kind === "ok") {
         setRun(result.value);
         setArtifactEpoch((value) => value + 1);
-      } else setFailure(result as LiveFailure);
+      } else setFailure(result);
     });
   };
 

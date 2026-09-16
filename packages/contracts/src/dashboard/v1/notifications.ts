@@ -9,14 +9,20 @@ export const dashboardNotificationValuesSchema = z.object({
   productUpdates: z.boolean(),
 });
 
-export const dashboardNotificationPreferencesSchema = dashboardNotificationValuesSchema.extend({
-  revision: z.number().int().nonnegative(),
-  updatedAt: iso.nullable(),
-});
+export const dashboardNotificationPreferencesSchema =
+  dashboardNotificationValuesSchema.extend({
+    revision: z.number().int().nonnegative(),
+    updatedAt: iso.nullable(),
+  });
 
-export const dashboardUpdateNotificationPreferencesBodySchema = dashboardNotificationValuesSchema.extend({
-  expectedRevision: z.number().int().nonnegative(),
-});
+export const dashboardUpdateNotificationPreferencesBodySchema =
+  dashboardNotificationValuesSchema.extend({
+    expectedRevision: z.number().int().nonnegative(),
+  });
 
-export type DashboardNotificationValues = z.infer<typeof dashboardNotificationValuesSchema>;
-export type DashboardNotificationPreferences = z.infer<typeof dashboardNotificationPreferencesSchema>;
+export type DashboardNotificationValues = z.infer<
+  typeof dashboardNotificationValuesSchema
+>;
+export type DashboardNotificationPreferences = z.infer<
+  typeof dashboardNotificationPreferencesSchema
+>;

@@ -158,7 +158,11 @@ describeWithPostgres("Verification persistence converges", () => {
   const claimFor = async (invocationId: string): Promise<VerificationClaim> => {
     const held = claims.get(invocationId);
     if (held !== undefined) return held;
-    const ownership = await scheduler().claim(invocationId, "test-worker", 60_000);
+    const ownership = await scheduler().claim(
+      invocationId,
+      "test-worker",
+      60_000,
+    );
     if (ownership.kind !== "claimed") {
       throw new Error(`expected a verification claim, got ${ownership.kind}`);
     }
@@ -335,7 +339,9 @@ describeWithPostgres("Verification persistence converges", () => {
     // A genuine redelivery — byte-identical result — still converges. Without
     // this the check would have made at-least-once delivery unusable, which is
     // the failure mode a stricter invariant usually introduces.
-    const replayed = await store().recordAttempt(await attempt(ids, invocation));
+    const replayed = await store().recordAttempt(
+      await attempt(ids, invocation),
+    );
     expect(replayed.inserted).toBe(false);
     expect(await store().attemptsFor(ids.candidateId)).toHaveLength(1);
   }, 60_000);
@@ -435,15 +441,19 @@ describeWithPostgres("Verification persistence converges", () => {
     const ids = await seed();
     for (const decision of ["rejected", "inconclusive"] as const) {
       const stored = await store().recordAttempt(
-        await attempt(ids, await schedule(ids, decision === "rejected" ? 1 : 2), {
-          outcome: {
-            status: "completed",
-            decision,
-            reasons: ["insufficient_evidence"],
-            confidence: 0.3,
-            severity: "medium",
+        await attempt(
+          ids,
+          await schedule(ids, decision === "rejected" ? 1 : 2),
+          {
+            outcome: {
+              status: "completed",
+              decision,
+              reasons: ["insufficient_evidence"],
+              confidence: 0.3,
+              severity: "medium",
+            },
           },
-        }),
+        ),
       );
 
       await expect(

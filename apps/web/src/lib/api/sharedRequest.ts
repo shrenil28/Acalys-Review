@@ -50,6 +50,9 @@ export class SharedRequestPool {
 
     if (entry === undefined) {
       const controller = new AbortController();
+      // Assigned before the promise chain can run; the closure updates this
+      // exact cache entry when it settles.
+      // eslint-disable-next-line prefer-const
       let created!: Entry<T>;
       let retain = false;
       const promise = Promise.resolve()
@@ -70,7 +73,7 @@ export class SharedRequestPool {
         expiresAt: Number.POSITIVE_INFINITY,
       };
       entry = created;
-      this.#entries.set(key, created as Entry<unknown>);
+      this.#entries.set(key, created);
     }
 
     entry.refs += 1;
@@ -80,9 +83,9 @@ export class SharedRequestPool {
       release: () => {
         if (released) return;
         released = true;
-        entry!.refs -= 1;
-        if (entry!.refs === 0 && !entry!.settled) {
-          entry!.controller.abort();
+        entry.refs -= 1;
+        if (entry.refs === 0 && !entry.settled) {
+          entry.controller.abort();
           if (this.#entries.get(key) === entry) this.#entries.delete(key);
         }
       },

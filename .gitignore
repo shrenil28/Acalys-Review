@@ -39,3 +39,9 @@ probe-transcript-*.json
 # Local Phase 3 acceptance evidence
 .phase3-acceptance-report.json
 .phase4-acceptance-report.json
+
+# Local source archive used during the Phase 4 merge. It is not part of the
+# runnable workspace and repository-wide tools must never traverse it.
+acalys-review-phase4-final-source/
+
+kodus-ai-main/

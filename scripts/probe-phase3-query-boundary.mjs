@@ -23,19 +23,30 @@ function preflight() {
   const app = readFileSync(join(ROOT, appPath), "utf8");
   const tests = readFileSync(join(ROOT, suite), "utf8");
   if (!app.includes('if (typeof value !== "string")')) {
-    problems.push("query boundary does not fail closed on structured/duplicate values");
+    problems.push(
+      "query boundary does not fail closed on structured/duplicate values",
+    );
   }
-  if (!app.includes("Query parameter must appear exactly once as a scalar string")) {
-    problems.push("query boundary is missing the duplicate/structured validation failure");
+  if (
+    !app.includes("Query parameter must appear exactly once as a scalar string")
+  ) {
+    problems.push(
+      "query boundary is missing the duplicate/structured validation failure",
+    );
   }
   if (/if \(typeof value === "string"\) out\[key\] = value;/u.test(app)) {
     problems.push("old query-value dropping path is still present");
   }
-  if (!tests.includes("rejects duplicate scalar query values before the %s handler")) {
+  if (
+    !tests.includes(
+      "rejects duplicate scalar query values before the %s handler",
+    )
+  ) {
     problems.push("missing duplicate-query short-circuit witness matrix");
   }
   for (const route of queryRoutes) {
-    if (!tests.includes(`"${route}"`)) problems.push(`missing query-bearing route witness: ${route}`);
+    if (!tests.includes(`"${route}"`))
+      problems.push(`missing query-bearing route witness: ${route}`);
   }
   return problems;
 }

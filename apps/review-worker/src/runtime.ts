@@ -30,14 +30,17 @@ import type { GithubRepositoryReader } from "@acalys/provider-github";
 import { runRealAnalysis } from "./analysis.js";
 import { createPreloadedAnalysisCache } from "./analysis-cache.js";
 import { createReviewExecutionPort } from "./execution.js";
-import { createApiDispatchWorker, type RunningApiDispatchWorker } from "./api-dispatch-worker.js";
+import {
+  createApiDispatchWorker,
+  type RunningApiDispatchWorker,
+} from "./api-dispatch-worker.js";
 import {
   createGithubAnalysisSource,
   createGithubIndependentSource,
 } from "./github-source.js";
 import { createModelCandidateVerifier } from "./model-verifier.js";
 import type { OrchestratorOptions } from "./orchestrator.js";
-import { ReviewProviderContextResolver } from "./provider-context.js";
+import { type ReviewProviderContextResolver } from "./provider-context.js";
 import {
   createWorker,
   type RunningWorker,
@@ -153,11 +156,14 @@ export function createProductionReviewRuntime(
         );
       }
       const providerContext =
-        options.providerContext === undefined || context.reviewSubject === undefined
+        options.providerContext === undefined ||
+        context.reviewSubject === undefined
           ? undefined
           : await options.providerContext.resolve({
               organizationId: context.scope.organizationId,
-              ...(context.reviewPolicy === undefined ? {} : { policy: context.reviewPolicy.policy }),
+              ...(context.reviewPolicy === undefined
+                ? {}
+                : { policy: context.reviewPolicy.policy }),
               subject: {
                 repositoryId: context.scope.repositoryId,
                 repositoryOwner: context.reviewSubject.repositoryOwner,
@@ -173,7 +179,10 @@ export function createProductionReviewRuntime(
                   : { description: context.reviewSubject.description }),
               },
             });
-      let persistedCache: readonly { readonly fingerprint: string; readonly payload: unknown }[] = [];
+      let persistedCache: readonly {
+        readonly fingerprint: string;
+        readonly payload: unknown;
+      }[] = [];
       try {
         persistedCache = await analysisCacheStore.loadReady({
           organizationId: context.scope.organizationId,
@@ -197,9 +206,14 @@ export function createProductionReviewRuntime(
               reviewPolicy: {
                 fingerprint: context.reviewPolicy.fingerprint,
                 ignorePaths: context.reviewPolicy.policy.repository.ignorePaths,
-                toneProfile: context.reviewPolicy.policy.organizationConfig.behavior.profile,
-                toneInstructions: context.reviewPolicy.policy.organizationConfig.general.toneInstructions,
-                repositoryInstructions: context.reviewPolicy.policy.repository.instructions,
+                toneProfile:
+                  context.reviewPolicy.policy.organizationConfig.behavior
+                    .profile,
+                toneInstructions:
+                  context.reviewPolicy.policy.organizationConfig.general
+                    .toneInstructions,
+                repositoryInstructions:
+                  context.reviewPolicy.policy.repository.instructions,
               },
             }),
         llm: {
@@ -226,7 +240,9 @@ export function createProductionReviewRuntime(
           analysisCacheStore.persist({
             organizationId: context.scope.organizationId,
             repositoryId: input.repositoryId,
-            entries: [...analysisCache.writes].map(([fingerprint, payload]) => ({ fingerprint, payload })),
+            entries: [...analysisCache.writes].map(
+              ([fingerprint, payload]) => ({ fingerprint, payload }),
+            ),
           }),
         ]);
       } catch (error) {
@@ -258,7 +274,9 @@ export function createProductionReviewRuntime(
           headSha: stored.headSha,
           provider: stored.provider,
           pullRequestId: stored.pullRequestId,
-          ...(stored.reviewPolicy === undefined ? {} : { reviewPolicy: stored.reviewPolicy }),
+          ...(stored.reviewPolicy === undefined
+            ? {}
+            : { reviewPolicy: stored.reviewPolicy }),
           ...(stored.reviewSubject === undefined
             ? {}
             : { reviewSubject: stored.reviewSubject }),
@@ -271,11 +289,21 @@ export function createProductionReviewRuntime(
   const apiDispatchWorker = createApiDispatchWorker({
     store: new ReviewDispatchStore(options.pool),
     reviewExecution,
-    ...(options.worker?.batchSize === undefined ? {} : { batchSize: options.worker.batchSize }),
-    ...(options.worker?.leaseMillis === undefined ? {} : { leaseMillis: options.worker.leaseMillis }),
-    ...(options.worker?.pollIntervalMillis === undefined ? {} : { pollIntervalMillis: options.worker.pollIntervalMillis }),
-    ...(options.worker?.retryBackoffMillis === undefined ? {} : { retryBackoffMillis: options.worker.retryBackoffMillis }),
-    ...(options.worker?.observer === undefined ? {} : { observer: options.worker.observer }),
+    ...(options.worker?.batchSize === undefined
+      ? {}
+      : { batchSize: options.worker.batchSize }),
+    ...(options.worker?.leaseMillis === undefined
+      ? {}
+      : { leaseMillis: options.worker.leaseMillis }),
+    ...(options.worker?.pollIntervalMillis === undefined
+      ? {}
+      : { pollIntervalMillis: options.worker.pollIntervalMillis }),
+    ...(options.worker?.retryBackoffMillis === undefined
+      ? {}
+      : { retryBackoffMillis: options.worker.retryBackoffMillis }),
+    ...(options.worker?.observer === undefined
+      ? {}
+      : { observer: options.worker.observer }),
   });
 
   const worker = createWorker({

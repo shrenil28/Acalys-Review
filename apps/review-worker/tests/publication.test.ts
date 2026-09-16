@@ -663,7 +663,9 @@ describeWithPostgres(
           60_000,
         );
         if (ownership.kind !== "claimed") {
-          throw new Error(`expected a verification claim, got ${ownership.kind}`);
+          throw new Error(
+            `expected a verification claim, got ${ownership.kind}`,
+          );
         }
         return database.pool.query(
           `INSERT INTO verification_attempts (id, organization_id, review_run_id,

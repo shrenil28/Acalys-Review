@@ -7,11 +7,7 @@ import {
 } from "node:crypto";
 
 export type PaginationCollection =
-  | "repositories"
-  | "pull_requests"
-  | "findings"
-  | "conversations"
-  | "knowledge";
+  "repositories" | "pull_requests" | "findings" | "conversations" | "knowledge";
 
 export interface PaginationCursorBinding {
   readonly organizationId: string;
@@ -36,7 +32,8 @@ export class InvalidPaginationCursor extends Error {
 
 const TOKEN_PREFIX = "c1.";
 const TOKEN_PATTERN = /^c1\.([A-Za-z0-9_-]+)$/u;
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const NONCE_BYTES = 12;
 const AUTH_TAG_BYTES = 16;
 const BINDING_BYTES = 16;
@@ -77,7 +74,8 @@ function bindingHash(label: string, value: string | undefined): Buffer {
 }
 
 function uuidBytes(value: string): Buffer {
-  if (!UUID_PATTERN.test(value)) throw new Error("PAGINATION_CURSOR_SOURCE_INVALID");
+  if (!UUID_PATTERN.test(value))
+    throw new Error("PAGINATION_CURSOR_SOURCE_INVALID");
   return Buffer.from(value.replaceAll("-", ""), "hex");
 }
 
@@ -97,11 +95,18 @@ function buildPayload(binding: PaginationCursorBinding, rowId: string): Buffer {
   return payload;
 }
 
-function matchesBinding(payload: Buffer, binding: PaginationCursorBinding): boolean {
-  if (payload[0] !== 1 || payload[1] !== COLLECTION_CODE[binding.collection]) return false;
+function matchesBinding(
+  payload: Buffer,
+  binding: PaginationCursorBinding,
+): boolean {
+  if (payload[0] !== 1 || payload[1] !== COLLECTION_CODE[binding.collection])
+    return false;
   const tenant = payload.subarray(18, 18 + BINDING_BYTES);
   const resource = payload.subarray(18 + BINDING_BYTES, 18 + BINDING_BYTES * 2);
-  const query = payload.subarray(18 + BINDING_BYTES * 2, 18 + BINDING_BYTES * 3);
+  const query = payload.subarray(
+    18 + BINDING_BYTES * 2,
+    18 + BINDING_BYTES * 3,
+  );
   return (
     timingSafeEqual(tenant, bindingHash("tenant", binding.organizationId)) &&
     timingSafeEqual(resource, bindingHash("resource", binding.resource)) &&
@@ -154,9 +159,11 @@ export function createPaginationCursorCodec(
         cipher.update(buildPayload(binding, rowId)),
         cipher.final(),
       ]);
-      const token = Buffer.concat([nonce, encrypted, cipher.getAuthTag()]).toString(
-        "base64url",
-      );
+      const token = Buffer.concat([
+        nonce,
+        encrypted,
+        cipher.getAuthTag(),
+      ]).toString("base64url");
       return `${TOKEN_PREFIX}${token}`;
     },
 

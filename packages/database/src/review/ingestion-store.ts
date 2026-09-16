@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@acalys/contracts/domain";
-import { dashboardEffectiveReviewPolicySchema, type DashboardEffectiveReviewPolicy } from "@acalys/contracts/dashboard/v1";
+import {
+  dashboardEffectiveReviewPolicySchema,
+  type DashboardEffectiveReviewPolicy,
+} from "@acalys/contracts/dashboard/v1";
 /**
  * Turning a stored delivery into review history, convergently.
  *
@@ -115,15 +118,22 @@ export interface ReviewRunExecutionContext {
   readonly provider: "github" | "gitlab";
   readonly pullRequestId: string;
   /** Immutable provider subject captured on ReviewRequest at admission time. */
-  readonly reviewPolicy?: { readonly policy: DashboardEffectiveReviewPolicy; readonly fingerprint: string } | undefined;
-  readonly reviewSubject?: {
-    readonly number?: number | undefined;
-    readonly title: string;
-    readonly description?: string | undefined;
-    readonly headRef: string;
-    readonly repositoryOwner: string;
-    readonly repositoryName: string;
-  } | undefined;
+  readonly reviewPolicy?:
+    | {
+        readonly policy: DashboardEffectiveReviewPolicy;
+        readonly fingerprint: string;
+      }
+    | undefined;
+  readonly reviewSubject?:
+    | {
+        readonly number?: number | undefined;
+        readonly title: string;
+        readonly description?: string | undefined;
+        readonly headRef: string;
+        readonly repositoryOwner: string;
+        readonly repositoryName: string;
+      }
+    | undefined;
 }
 
 export type TransitionOutcome =
@@ -504,7 +514,9 @@ export class ReviewIngestionStore {
           input.idempotencyKey,
           input.requestedAt,
           input.correlationId ?? null,
-          input.policySnapshot === undefined ? null : JSON.stringify(input.policySnapshot),
+          input.policySnapshot === undefined
+            ? null
+            : JSON.stringify(input.policySnapshot),
           input.policyFingerprint ?? null,
         ],
       );
@@ -760,18 +772,26 @@ export class ReviewIngestionStore {
               repositoryName: row.repository_name,
             }
           : undefined;
-      const policy = row.policy_snapshot === null || row.policy_snapshot === undefined
-        ? undefined
-        : dashboardEffectiveReviewPolicySchema.safeParse(row.policy_snapshot);
-      const reviewPolicy = policy?.success === true && row.policy_fingerprint !== null
-        ? (() => {
-            const expected = createHash("sha256").update(canonicalJson(policy.data), "utf8").digest("hex");
-            return expected === row.policy_fingerprint
-              ? { policy: policy.data, fingerprint: row.policy_fingerprint }
-              : undefined;
-          })()
-        : undefined;
-      if ((row.policy_snapshot !== null && row.policy_snapshot !== undefined) && reviewPolicy === undefined) {
+      const policy =
+        row.policy_snapshot === null || row.policy_snapshot === undefined
+          ? undefined
+          : dashboardEffectiveReviewPolicySchema.safeParse(row.policy_snapshot);
+      const reviewPolicy =
+        policy?.success === true && row.policy_fingerprint !== null
+          ? (() => {
+              const expected = createHash("sha256")
+                .update(canonicalJson(policy.data), "utf8")
+                .digest("hex");
+              return expected === row.policy_fingerprint
+                ? { policy: policy.data, fingerprint: row.policy_fingerprint }
+                : undefined;
+            })()
+          : undefined;
+      if (
+        row.policy_snapshot !== null &&
+        row.policy_snapshot !== undefined &&
+        reviewPolicy === undefined
+      ) {
         // A snapshotted request whose payload/fingerprint no longer agree is
         // corrupt. Fail closed instead of executing against mutable settings.
         return undefined;
@@ -795,7 +815,9 @@ export class ReviewIngestionStore {
    * `publishing` is the external side-effect commit point: once a run reaches
    * it, cancellation may not pretend remote publication can be rolled back.
    */
-  public cancelPrePublicationRuns(pullRequestId: string): Promise<readonly string[]> {
+  public cancelPrePublicationRuns(
+    pullRequestId: string,
+  ): Promise<readonly string[]> {
     return this.#withClient(async (client) => {
       const result = await client.query<{ id: string }>(
         `UPDATE review_runs r
@@ -813,9 +835,7 @@ export class ReviewIngestionStore {
     });
   }
 
-  public getRun(
-    runId: string,
-  ): Promise<
+  public getRun(runId: string): Promise<
     | {
         readonly id: string;
         readonly state: string;

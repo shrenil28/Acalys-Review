@@ -2,25 +2,149 @@ import { readFileSync, existsSync } from "node:fs";
 const read = (path) => readFileSync(path, "utf8");
 const checks = [];
 const expect = (name, path, patterns) => {
-  const source = read(path); const missing = patterns.filter((pattern) => !source.includes(pattern));
-  if (missing.length) throw new Error(`${name}: missing ${missing.join(", ")}`); checks.push(name);
+  const source = read(path);
+  const missing = patterns.filter((pattern) => !source.includes(pattern));
+  if (missing.length) throw new Error(`${name}: missing ${missing.join(", ")}`);
+  checks.push(name);
 };
-if (!existsSync("packages/database/migrations/0024_phase4_analysis_cache.sql")) throw new Error("analysis-cache migration missing");
-if (!existsSync("packages/database/migrations/0027_phase4_analysis_cache_payload_hardening.sql")) throw new Error("analysis-cache hardening migration missing");
-if (!existsSync("packages/database/migrations/0028_phase4_analysis_cache_canonical_size.sql")) throw new Error("analysis-cache canonical-size migration missing");
-expect("durable cache schema", "packages/database/migrations/0024_phase4_analysis_cache.sql", ["review_analysis_cache_entries", "fingerprint", "payload_bytes", "expires_at", "clock_timestamp()", "ON DELETE CASCADE"]);
-expect("cache persistence and live RBAC", "packages/database/src/review-analysis-cache-store.ts", ["REVIEW_ANALYSIS_CACHE_TTL_MILLIS", "REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES", "REVIEW_ANALYSIS_CACHE_MAX_WRITE_ENTRIES", "REVIEW_ANALYSIS_CACHE_MAX_PRELOAD_BYTES", "REVIEW_ANALYSIS_CACHE_MAX_METADATA_ENTRIES", "cumulative_bytes <= $5", "octet_length(payload::text)", "touch batch is too large", "dashboard-cache:", 'new Set(["owner", "admin"])', "DELETE FROM review_analysis_cache_entries"]);
-expect("cache payload hardening", "packages/database/migrations/0027_phase4_analysis_cache_payload_hardening.sql", ["payload_bytes BETWEEN 1 AND 1048576", "DELETE FROM review_analysis_cache_entries"]);
-expect("database-authoritative cache size", "packages/database/migrations/0028_phase4_analysis_cache_canonical_size.sql", ["octet_length(payload::text)", "payload_bytes = octet_length(payload::text)", "review_analysis_cache_canonical_payload_size"]);
-expect("cache package exports", "packages/database/src/index.ts", ["REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES", "REVIEW_ANALYSIS_CACHE_MAX_PRELOAD_BYTES", "REVIEW_ANALYSIS_CACHE_MAX_METADATA_ENTRIES"]);
-expect("cache payload decoding", "apps/review-worker/src/analysis-cache.ts", ["decodeAnalysisCachePayload", "cacheAnalysisResultSchema.safeParse", "REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES", "createPreloadedAnalysisCache"]);
-expect("existing review-engine cache interface reused", "apps/review-worker/src/analysis.ts", ["readonly cache?: AnalysisCache", "{ cache: options.cache }"]);
-expect("production preload/write-through cache", "apps/review-worker/src/runtime.ts", ["ReviewAnalysisCacheStore", "createPreloadedAnalysisCache", "analysisCacheStore.loadReady", "analysisCacheStore.touch", "analysisCacheStore.persist", "options.worker?.observer?.onError?.(error)"]);
-expect("cache metadata-only HTTP control", "apps/api/src/dashboard-router.ts", ['router.get("/caches"', 'router.delete("/caches"', "dashboardReviewCachesResponseSchema", "dashboardDeleteReviewCachesBodySchema"]);
-expect("live cache browser adapter", "apps/web/src/lib/api/dashboardAdmin.ts", ["loadReviewCaches", "deleteReviewCaches", "/dashboard/v1/caches"]);
-expect("live cache page", "apps/web/src/pages/review/Caches.tsx", ["resolveDataMode", "LiveCachesPage", 'import("./CachesFixture")']);
-expect("truthful cache UI", "apps/web/src/pages/review/CachesLive.tsx", ["deterministic review-analysis results", "expire automatically after 7 days", "sizeBytes", "deleteReviewCaches"]);
-expect("Postgres cache witnesses", "packages/database/tests/phase4-analysis-cache.test.ts", ["seven-day ready window", "rejects oversized payloads", "duplicate fingerprints", "live owner/admin membership", "does not expose expired rows", "database-authoritative", "validates touch batches"]);
-expect("runtime cache witnesses", "apps/review-worker/tests/analysis-cache.test.ts", ["accepts a valid AnalysisResult payload", "malformed and oversized payloads as cache misses", "malformed fingerprints"]);
-expect("HTTP cache witnesses", "apps/api/tests/dashboard-cache.test.ts", ["metadata only", "validates cache ids", "authorized physical deletion"]);
-console.log(`Phase 4 review-cache preflight PASS (${checks.length} invariants)`); for (const check of checks) console.log(`  ✓ ${check}`);
+if (!existsSync("packages/database/migrations/0024_phase4_analysis_cache.sql"))
+  throw new Error("analysis-cache migration missing");
+if (
+  !existsSync(
+    "packages/database/migrations/0027_phase4_analysis_cache_payload_hardening.sql",
+  )
+)
+  throw new Error("analysis-cache hardening migration missing");
+if (
+  !existsSync(
+    "packages/database/migrations/0028_phase4_analysis_cache_canonical_size.sql",
+  )
+)
+  throw new Error("analysis-cache canonical-size migration missing");
+expect(
+  "durable cache schema",
+  "packages/database/migrations/0024_phase4_analysis_cache.sql",
+  [
+    "review_analysis_cache_entries",
+    "fingerprint",
+    "payload_bytes",
+    "expires_at",
+    "clock_timestamp()",
+    "ON DELETE CASCADE",
+  ],
+);
+expect(
+  "cache persistence and live RBAC",
+  "packages/database/src/review-analysis-cache-store.ts",
+  [
+    "REVIEW_ANALYSIS_CACHE_TTL_MILLIS",
+    "REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES",
+    "REVIEW_ANALYSIS_CACHE_MAX_WRITE_ENTRIES",
+    "REVIEW_ANALYSIS_CACHE_MAX_PRELOAD_BYTES",
+    "REVIEW_ANALYSIS_CACHE_MAX_METADATA_ENTRIES",
+    "cumulative_bytes <= $5",
+    "octet_length(payload::text)",
+    "touch batch is too large",
+    "dashboard-cache:",
+    'new Set(["owner", "admin"])',
+    "DELETE FROM review_analysis_cache_entries",
+  ],
+);
+expect(
+  "cache payload hardening",
+  "packages/database/migrations/0027_phase4_analysis_cache_payload_hardening.sql",
+  [
+    "payload_bytes BETWEEN 1 AND 1048576",
+    "DELETE FROM review_analysis_cache_entries",
+  ],
+);
+expect(
+  "database-authoritative cache size",
+  "packages/database/migrations/0028_phase4_analysis_cache_canonical_size.sql",
+  [
+    "octet_length(payload::text)",
+    "payload_bytes = octet_length(payload::text)",
+    "review_analysis_cache_canonical_payload_size",
+  ],
+);
+expect("cache package exports", "packages/database/src/index.ts", [
+  "REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES",
+  "REVIEW_ANALYSIS_CACHE_MAX_PRELOAD_BYTES",
+  "REVIEW_ANALYSIS_CACHE_MAX_METADATA_ENTRIES",
+]);
+expect("cache payload decoding", "apps/review-worker/src/analysis-cache.ts", [
+  "decodeAnalysisCachePayload",
+  "cacheAnalysisResultSchema.safeParse",
+  "REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES",
+  "createPreloadedAnalysisCache",
+]);
+expect(
+  "existing review-engine cache interface reused",
+  "apps/review-worker/src/analysis.ts",
+  ["readonly cache?: AnalysisCache", "{ cache: options.cache }"],
+);
+expect(
+  "production preload/write-through cache",
+  "apps/review-worker/src/runtime.ts",
+  [
+    "ReviewAnalysisCacheStore",
+    "createPreloadedAnalysisCache",
+    "analysisCacheStore.loadReady",
+    "analysisCacheStore.touch",
+    "analysisCacheStore.persist",
+    "options.worker?.observer?.onError?.(error)",
+  ],
+);
+expect("cache metadata-only HTTP control", "apps/api/src/dashboard-router.ts", [
+  'router.get("/caches"',
+  'router.delete("/caches"',
+  "dashboardReviewCachesResponseSchema",
+  "dashboardDeleteReviewCachesBodySchema",
+]);
+expect("live cache browser adapter", "apps/web/src/lib/api/dashboardAdmin.ts", [
+  "loadReviewCaches",
+  "deleteReviewCaches",
+  "/dashboard/v1/caches",
+]);
+expect("live cache page", "apps/web/src/pages/review/Caches.tsx", [
+  "resolveDataMode",
+  "LiveCachesPage",
+  'import("./CachesFixture")',
+]);
+expect("truthful cache UI", "apps/web/src/pages/review/CachesLive.tsx", [
+  "deterministic review-analysis results",
+  "expire automatically after 7 days",
+  "sizeBytes",
+  "deleteReviewCaches",
+]);
+expect(
+  "Postgres cache witnesses",
+  "packages/database/tests/phase4-analysis-cache.test.ts",
+  [
+    "seven-day ready window",
+    "rejects oversized payloads",
+    "duplicate fingerprints",
+    "live owner/admin membership",
+    "does not expose expired rows",
+    "database-authoritative",
+    "validates touch batches",
+  ],
+);
+expect(
+  "runtime cache witnesses",
+  "apps/review-worker/tests/analysis-cache.test.ts",
+  [
+    "accepts a valid AnalysisResult payload",
+    "malformed and oversized payloads as cache misses",
+    "malformed fingerprints",
+  ],
+);
+expect("HTTP cache witnesses", "apps/api/tests/dashboard-cache.test.ts", [
+  "metadata only",
+  "validates cache ids",
+  "authorized physical deletion",
+]);
+console.log(
+  `Phase 4 review-cache preflight PASS (${checks.length} invariants)`,
+);
+for (const check of checks) console.log(`  ✓ ${check}`);

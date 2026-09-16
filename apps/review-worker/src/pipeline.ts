@@ -36,7 +36,10 @@ import {
   toReviewTarget,
   type GithubPullRequestEvent,
 } from "@acalys/provider-github";
-import type { EffectiveReviewPolicyEnvelope, ReviewIngestionStore } from "@acalys/database";
+import type {
+  EffectiveReviewPolicyEnvelope,
+  ReviewIngestionStore,
+} from "@acalys/database";
 import { matchesGlob } from "@acalys/contracts/domain";
 
 /**
@@ -87,7 +90,10 @@ export type PipelineOutcome =
   | { readonly kind: "permanent_failure"; readonly errorCode: string };
 
 export interface PipelinePolicyResolver {
-  resolveEffectivePolicy(organizationId: string, repositoryId: string): Promise<EffectiveReviewPolicyEnvelope | undefined>;
+  resolveEffectivePolicy(
+    organizationId: string,
+    repositoryId: string,
+  ): Promise<EffectiveReviewPolicyEnvelope | undefined>;
 }
 
 export interface PipelineOptions {
@@ -214,12 +220,18 @@ export async function ingestDelivery(
 
   let admitted: EffectiveReviewPolicyEnvelope | undefined;
   try {
-    admitted = await options.policy?.resolveEffectivePolicy(scope.organizationId, scope.repositoryId);
+    admitted = await options.policy?.resolveEffectivePolicy(
+      scope.organizationId,
+      scope.repositoryId,
+    );
   } catch {
     return { kind: "retryable_failure", errorCode: "acalys.error.storage" };
   }
   if (options.policy !== undefined && admitted === undefined) {
-    return { kind: "retryable_failure", errorCode: "acalys.error.repository-policy-not-resolved" };
+    return {
+      kind: "retryable_failure",
+      errorCode: "acalys.error.repository-policy-not-resolved",
+    };
   }
 
   try {
@@ -251,25 +263,45 @@ export async function ingestDelivery(
         return { kind: "ignored", reason: "pull request closed" };
       }
       if (policy.repositoryLifecycle !== "enabled") {
-        return { kind: "ignored", reason: `repository reviews ${policy.repositoryLifecycle}` };
+        return {
+          kind: "ignored",
+          reason: `repository reviews ${policy.repositoryLifecycle}`,
+        };
       }
       if (!policy.organizationConfig.behavior.autoReview) {
         return { kind: "ignored", reason: "automatic review disabled" };
       }
-      if ((event.pull_request.draft ?? false) && !policy.organizationConfig.behavior.autoReviewDrafts) {
+      if (
+        (event.pull_request.draft ?? false) &&
+        !policy.organizationConfig.behavior.autoReviewDrafts
+      ) {
         return { kind: "ignored", reason: "draft reviews disabled" };
       }
-      if (event.action === "synchronize" && !policy.organizationConfig.behavior.autoIncrementalReview) {
+      if (
+        event.action === "synchronize" &&
+        !policy.organizationConfig.behavior.autoIncrementalReview
+      ) {
         return { kind: "ignored", reason: "incremental reviews disabled" };
       }
       const bases = policy.organizationConfig.behavior.baseBranches;
-      if (bases.length > 0 && !bases.some((pattern) => matchesGlob(pattern, event.pull_request.base.ref))) {
-        return { kind: "ignored", reason: "base branch excluded by review policy" };
+      if (
+        bases.length > 0 &&
+        !bases.some((pattern) =>
+          matchesGlob(pattern, event.pull_request.base.ref),
+        )
+      ) {
+        return {
+          kind: "ignored",
+          reason: "base branch excluded by review policy",
+        };
       }
     }
 
     if (trigger === undefined) {
-      return { kind: "ignored", reason: `no revision for action: ${event.action}` };
+      return {
+        kind: "ignored",
+        reason: `no revision for action: ${event.action}`,
+      };
     }
 
     const revision = await store.upsertRevision(scope, {
@@ -303,7 +335,12 @@ export async function ingestDelivery(
       executionStrategy: "single",
       idempotencyKey: idempotencyKeyFor(event),
       requestedAt: now(),
-      ...(admitted === undefined ? {} : { policySnapshot: admitted.policy, policyFingerprint: admitted.fingerprint }),
+      ...(admitted === undefined
+        ? {}
+        : {
+            policySnapshot: admitted.policy,
+            policyFingerprint: admitted.fingerprint,
+          }),
     });
 
     const run = await store.upsertReviewRun(scope, {

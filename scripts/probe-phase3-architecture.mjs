@@ -6,7 +6,13 @@
  * restoring the tree. `--preflight-only` is safe for source-only checkpoints.
  */
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -41,13 +47,17 @@ function preflight() {
     for (const problem of problems) console.error(problem);
     process.exit(2);
   }
-  console.log(`Phase 3 architecture probe preflight: ${String(probes.length)}/${String(probes.length)} rules present.`);
+  console.log(
+    `Phase 3 architecture probe preflight: ${String(probes.length)}/${String(probes.length)} rules present.`,
+  );
 }
 
 preflight();
 if (process.argv.includes("--preflight-only")) process.exit(0);
 if (!existsSync(CRUISER)) {
-  console.error("dependency-cruiser is not installed; run the repository install first");
+  console.error(
+    "dependency-cruiser is not installed; run the repository install first",
+  );
   process.exit(2);
 }
 
@@ -58,7 +68,9 @@ try {
     encoding: "utf8",
   }).trim();
 } catch {
-  console.error("architecture probe execution requires a Git worktree; use --preflight-only on source archives");
+  console.error(
+    "architecture probe execution requires a Git worktree; use --preflight-only on source archives",
+  );
   process.exit(2);
 }
 if (dirty !== "" && process.env["ACALYS_ARCH_PROBE_ALLOW_DIRTY"] !== "1") {
@@ -97,6 +109,8 @@ try {
 }
 
 for (const result of results) {
-  console.log(`${result.name}: ${result.killed ? "REJECTED AS REQUIRED" : "NOT PROVEN"} (exit ${String(result.exitCode)})`);
+  console.log(
+    `${result.name}: ${result.killed ? "REJECTED AS REQUIRED" : "NOT PROVEN"} (exit ${String(result.exitCode)})`,
+  );
 }
 process.exit(results.every((result) => result.killed) ? 0 : 1);

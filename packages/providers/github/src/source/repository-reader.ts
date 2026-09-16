@@ -99,15 +99,16 @@ export interface GithubRepositoryReaderLimits {
   readonly blobConcurrency: number;
 }
 
-export const DEFAULT_GITHUB_REPOSITORY_READER_LIMITS: GithubRepositoryReaderLimits = {
-  maxFiles: 20_000,
-  maxBlobBytes: 2 * 1024 * 1024,
-  maxRepositoryBytes: 128 * 1024 * 1024,
-  // GitHub's compare response is capped at 300 files. Refuse an exact cap rather
-  // than risk treating a truncated response as a complete change manifest.
-  maxChangedFiles: 299,
-  blobConcurrency: 8,
-};
+export const DEFAULT_GITHUB_REPOSITORY_READER_LIMITS: GithubRepositoryReaderLimits =
+  {
+    maxFiles: 20_000,
+    maxBlobBytes: 2 * 1024 * 1024,
+    maxRepositoryBytes: 128 * 1024 * 1024,
+    // GitHub's compare response is capped at 300 files. Refuse an exact cap rather
+    // than risk treating a truncated response as a complete change manifest.
+    maxChangedFiles: 299,
+    blobConcurrency: 8,
+  };
 
 export class GithubRepositoryReadError extends Error {
   public override readonly name = "GithubRepositoryReadError";
@@ -279,7 +280,10 @@ export class GithubRepositoryReader {
         `tree contains ${String(blobs.length)} blobs, limit ${String(this.#limits.maxFiles)}`,
       );
     }
-    const declaredBytes = blobs.reduce((sum, entry) => sum + (entry.size ?? 0), 0);
+    const declaredBytes = blobs.reduce(
+      (sum, entry) => sum + (entry.size ?? 0),
+      0,
+    );
     if (declaredBytes > this.#limits.maxRepositoryBytes) {
       throw new GithubRepositoryReadError(
         "repository_too_large",
@@ -294,7 +298,10 @@ export class GithubRepositoryReader {
     sha: string,
     declaredSize: number | undefined,
   ): Promise<string | undefined> {
-    if (declaredSize !== undefined && declaredSize > this.#limits.maxBlobBytes) {
+    if (
+      declaredSize !== undefined &&
+      declaredSize > this.#limits.maxBlobBytes
+    ) {
       throw new GithubRepositoryReadError(
         "blob_too_large",
         `blob ${sha} declares ${String(declaredSize)} bytes`,
@@ -375,8 +382,12 @@ export class GithubRepositoryReader {
       this.#tree(input, input.headSha),
       this.#tree(input, input.baseSha),
     ]);
-    const headByPath = new Map(headTree.map((entry) => [entry.path, entry] as const));
-    const baseByPath = new Map(baseTree.map((entry) => [entry.path, entry] as const));
+    const headByPath = new Map(
+      headTree.map((entry) => [entry.path, entry] as const),
+    );
+    const baseByPath = new Map(
+      baseTree.map((entry) => [entry.path, entry] as const),
+    );
 
     const decodedHead = await mapConcurrent(
       headTree,
@@ -425,17 +436,25 @@ export class GithubRepositoryReader {
         );
       }
 
-      const basePath = file.status === "renamed" ? file.previous_filename : file.filename;
+      const basePath =
+        file.status === "renamed" ? file.previous_filename : file.filename;
       let base: GithubBaseFile = { kind: "absent" };
       if (basePath !== undefined) {
         repositoryPath(basePath);
         const baseEntry = baseByPath.get(basePath);
         if (baseEntry !== undefined) {
           try {
-            const baseText = await this.#readBlob(input, baseEntry.sha, baseEntry.size);
+            const baseText = await this.#readBlob(
+              input,
+              baseEntry.sha,
+              baseEntry.size,
+            );
             base =
               baseText === undefined
-                ? { kind: "unavailable", reason: "base file is binary or not valid UTF-8" }
+                ? {
+                    kind: "unavailable",
+                    reason: "base file is binary or not valid UTF-8",
+                  }
                 : { kind: "present", content: baseText };
           } catch (error) {
             base = {
@@ -452,7 +471,8 @@ export class GithubRepositoryReader {
       changed.push({
         path,
         content: file.status === "removed" ? "" : (headContent ?? ""),
-        changedLines: file.patch === undefined ? [] : changedLinesFromPatch(file.patch),
+        changedLines:
+          file.patch === undefined ? [] : changedLinesFromPatch(file.patch),
         base,
       });
     }

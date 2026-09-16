@@ -207,7 +207,8 @@ module.exports = {
     {
       name: "api-must-not-import-review-worker",
       severity: "error",
-      comment: "The public API creates durable review obligations; it must not invoke worker internals directly.",
+      comment:
+        "The public API creates durable review obligations; it must not invoke worker internals directly.",
       from: { path: "^apps/api/" },
       to: { path: "^apps/review-worker/" },
     },
@@ -339,6 +340,9 @@ module.exports = {
         pathNot: [
           "\\.d\\.ts$",
           "^apps/web/src/main\\.tsx$",
+          // Preserved public compatibility import for existing frontend
+          // consumers; it intentionally re-exports the canonical model.
+          "^apps/web/src/data/orgSettings\\.ts$",
           // Tests are entry points of their own: the runner loads them, and
           // nothing in the bundle imports them.
           "^apps/web/tests/",

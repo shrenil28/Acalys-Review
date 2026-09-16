@@ -5,7 +5,8 @@ class Semaphore {
   readonly #waiters: Array<() => void> = [];
 
   public constructor(size: number) {
-    if (!Number.isInteger(size) || size < 1) throw new Error("maxConcurrency must be >= 1");
+    if (!Number.isInteger(size) || size < 1)
+      throw new Error("maxConcurrency must be >= 1");
     this.#available = size;
   }
 
@@ -40,7 +41,9 @@ export class CredentialLimiter implements ModelAdmissionPort {
     this.#now = now;
   }
 
-  public async enter(policy: CredentialPolicy): Promise<
+  public async enter(
+    policy: CredentialPolicy,
+  ): Promise<
     | { readonly kind: "entered"; readonly release: () => Promise<void> }
     | { readonly kind: "rate_limited" }
   > {
@@ -65,8 +68,9 @@ export class CredentialLimiter implements ModelAdmissionPort {
     const release = await semaphore.acquire();
     return {
       kind: "entered",
-      release: async () => {
+      release: () => {
         release();
+        return Promise.resolve();
       },
     };
   }

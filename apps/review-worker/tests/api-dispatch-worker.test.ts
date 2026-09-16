@@ -18,7 +18,10 @@ const CLAIM: ReviewDispatchClaim = {
   leaseExpiresAt: new Date("2026-09-09T00:01:00.000Z"),
 };
 
-function ownedGuard(calls: string[], renew = true): ReviewDispatchExecutionGuard {
+function ownedGuard(
+  calls: string[],
+  renew = true,
+): ReviewDispatchExecutionGuard {
   return {
     async renew() {
       calls.push("renew");
@@ -114,7 +117,10 @@ describe("API review dispatch", () => {
       },
     } satisfies ReviewExecutionPort;
 
-    const worker = createApiDispatchWorker({ store, reviewExecution: execution });
+    const worker = createApiDispatchWorker({
+      store,
+      reviewExecution: execution,
+    });
     expect(await worker.runOnce()).toBe(1);
     expect(calls).toEqual(["complete:7"]);
   });

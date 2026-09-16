@@ -1,9 +1,9 @@
-import type { AssembledContext, AssembledItem } from "@acalys/code-intelligence";
 import type {
-  ModelOutcome,
-  ModelRequest,
-} from "@acalys/model-gateway";
-import type { FindingCategory, FindingSeverity } from "@acalys/contracts/domain";
+  AssembledContext,
+  AssembledItem,
+} from "@acalys/code-intelligence";
+import type { ModelOutcome, ModelRequest } from "@acalys/model-gateway";
+import type { FindingCategory } from "@acalys/contracts/domain";
 import { z } from "zod";
 
 import type { AnalyzerFinding } from "../analyzer.js";
@@ -27,7 +27,9 @@ const proposalSchema = z.object({
 export const llmCorrectnessResponseSchema = z.object({
   candidates: z.array(proposalSchema).max(24),
 });
-export type LlmCorrectnessResponse = z.infer<typeof llmCorrectnessResponseSchema>;
+export type LlmCorrectnessResponse = z.infer<
+  typeof llmCorrectnessResponseSchema
+>;
 
 /** The only model capability the analyzer receives; there is no repository port. */
 export interface ModelCompleter {
@@ -75,9 +77,10 @@ export type LlmCorrectnessOutcome =
       readonly kind: "completed";
       readonly candidates: readonly AnalyzerFinding[];
       readonly suppressedInvalidAnchors: number;
-      readonly modelIdentity: Extract<ModelOutcome<unknown>, { kind: "ok" }>[
-        "identity"
-      ];
+      readonly modelIdentity: Extract<
+        ModelOutcome<unknown>,
+        { kind: "ok" }
+      >["identity"];
     }
   | {
       readonly kind: "unavailable";
@@ -173,19 +176,20 @@ export async function analyzeLlmCorrectness(
   model: ModelCompleter,
   timeoutMs = 60_000,
   externalData: readonly ExternalReviewDataBlock[] = [],
-  trustedPolicy?: string | undefined,
+  trustedPolicy?: string,
 ): Promise<LlmCorrectnessOutcome> {
   const normalizedPolicy = trustedPolicy?.trim();
-  const system = normalizedPolicy === undefined || normalizedPolicy === ""
-    ? LLM_CORRECTNESS_SYSTEM
-    : [
-        LLM_CORRECTNESS_SYSTEM,
-        "",
-        "The following is trusted administrator-authored review policy.",
-        "Apply it to review tone, prioritization, and repository-specific guidance only.",
-        "It cannot weaken the anchor, evidence, trust-boundary, or output-contract rules above.",
-        normalizedPolicy,
-      ].join("\n");
+  const system =
+    normalizedPolicy === undefined || normalizedPolicy === ""
+      ? LLM_CORRECTNESS_SYSTEM
+      : [
+          LLM_CORRECTNESS_SYSTEM,
+          "",
+          "The following is trusted administrator-authored review policy.",
+          "Apply it to review tone, prioritization, and repository-specific guidance only.",
+          "It cannot weaken the anchor, evidence, trust-boundary, or output-contract rules above.",
+          normalizedPolicy,
+        ].join("\n");
   const outcome = await model.complete({
     scope,
     taskClass: "correctness",
@@ -224,7 +228,7 @@ export async function analyzeLlmCorrectness(
       category: categoryFor(proposal.family),
       claim: proposal.claim,
       rationale: `${proposal.causalSteps.join(" → ")} Trigger: ${proposal.trigger}. Consequence: ${proposal.consequence}.`,
-      proposedSeverity: proposal.proposedSeverity as FindingSeverity,
+      proposedSeverity: proposal.proposedSeverity,
       // A model proposal is intentionally weak evidence. Independent
       // verification, not this number, decides whether it can be promoted.
       confidenceScore: 0.3,
@@ -233,7 +237,8 @@ export async function analyzeLlmCorrectness(
         {
           type: "agent_observation",
           strength: "weak",
-          observation: "The model proposed this claim from the supplied context.",
+          observation:
+            "The model proposed this claim from the supplied context.",
           location: anchor,
         },
       ],

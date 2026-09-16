@@ -2,32 +2,21 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": [
-      "node"
-    ],
+    "types": ["node"],
     "paths": {
-      "@acalys/auth": [
-        "../../packages/auth/src/index.ts"
-      ],
-      "@acalys/contracts": [
-        "../../packages/contracts/src/index.ts"
-      ],
+      "@acalys/auth": ["../../packages/auth/src/index.ts"],
+      "@acalys/contracts": ["../../packages/contracts/src/index.ts"],
       "@acalys/contracts/domain": [
         "../../packages/contracts/src/domain/index.ts"
       ],
       "@acalys/contracts/api/v1": [
         "../../packages/contracts/src/api/v1/index.ts"
       ],
-      "@acalys/database": [
-        "../../packages/database/src/index.ts"
-      ],
+      "@acalys/database": ["../../packages/database/src/index.ts"],
       "@acalys/contracts/dashboard/v1": [
         "../../packages/contracts/src/dashboard/v1/index.ts"
       ]
     }
   },
-  "include": [
-    "src",
-    "tests"
-  ]
+  "include": ["src", "tests"]
 }

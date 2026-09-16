@@ -27,6 +27,8 @@ import { errorHandler, securityHeaders } from "./security.js";
 
 export interface GatewayOptions {
   readonly github: GithubWebhookRouteOptions;
+  /** Readiness check for durable dependencies. */
+  readonly readiness?: (() => Promise<void>) | undefined;
   /** Called for every unhandled error. Never receives a response object. */
   readonly onError?: ((error: unknown) => void) | undefined;
 }
@@ -57,6 +59,15 @@ export function createGatewayApp(options: GatewayOptions): Express {
     // that touches a dependency turns a slow dependency into a restart loop,
     // which converts degradation into an outage.
     response.status(200).json({ status: "ok" });
+  });
+
+  app.get("/readyz", async (_request, response) => {
+    try {
+      await options.readiness?.();
+      response.status(200).json({ status: "ready" });
+    } catch {
+      response.status(503).json({ status: "unavailable" });
+    }
   });
 
   // Last. An error handler mounted before a route never sees that route's

@@ -24,10 +24,12 @@ export interface ValidatedMcpServer {
     readonly auth: McpAuthMethod;
     readonly headerNames: readonly string[];
   };
-  readonly secret?: {
-    readonly apiKey?: string | undefined;
-    readonly headers: Readonly<Record<string, string>>;
-  } | undefined;
+  readonly secret?:
+    | {
+        readonly apiKey?: string | undefined;
+        readonly headers: Readonly<Record<string, string>>;
+      }
+    | undefined;
 }
 
 export interface McpAddressResolver {
@@ -46,7 +48,8 @@ const blockedHeaderNames = new Set([
   "upgrade",
   "forwarded",
 ]);
-const sensitiveQueryName = /(?:^|[-_.])(token|secret|password|passwd|api[-_.]?key|access[-_.]?token|auth|authorization)(?:$|[-_.])/iu;
+const sensitiveQueryName =
+  /(?:^|[-_.])(token|secret|password|passwd|api[-_.]?key|access[-_.]?token|auth|authorization)(?:$|[-_.])/iu;
 
 function invalid(message: string): never {
   throw new ValidationError(message);
@@ -56,7 +59,8 @@ function parseIpv4(address: string): readonly number[] | undefined {
   const parts = address.split(".");
   if (parts.length !== 4) return undefined;
   const numbers = parts.map((part) => Number(part));
-  if (numbers.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return undefined;
+  if (numbers.some((part) => !Number.isInteger(part) || part < 0 || part > 255))
+    return undefined;
   return numbers;
 }
 
@@ -96,37 +100,63 @@ async function defaultResolver(hostname: string): Promise<readonly string[]> {
 }
 
 export class McpIntegrationService {
-  public constructor(private readonly resolveAddresses: McpAddressResolver = defaultResolver) {}
+  public constructor(
+    private readonly resolveAddresses: McpAddressResolver = defaultResolver,
+  ) {}
 
-  public async validateRegistration(input: McpServerRegistrationInput): Promise<ValidatedMcpServer> {
+  public async validateRegistration(
+    input: McpServerRegistrationInput,
+  ): Promise<ValidatedMcpServer> {
     const label = input.label.trim();
-    if (label.length < 1 || label.length > 200) invalid("MCP server label is invalid");
-    if (input.guidance.length > 10_000) invalid("MCP usage guidance is too long");
+    if (label.length < 1 || label.length > 200)
+      invalid("MCP server label is invalid");
+    if (input.guidance.length > 10_000)
+      invalid("MCP usage guidance is too long");
 
     let endpoint: URL;
-    try { endpoint = new URL(input.url); }
-    catch { invalid("MCP server URL is invalid"); }
-    if (endpoint.protocol !== "https:") invalid("MCP server URL must use HTTPS");
-    if (endpoint.username !== "" || endpoint.password !== "") invalid("MCP server URL must not contain credentials");
-    if (endpoint.hash !== "") invalid("MCP server URL must not contain a fragment");
-    if (endpoint.port !== "" && endpoint.port !== "443") invalid("MCP server URL must use the standard HTTPS port");
+    try {
+      endpoint = new URL(input.url);
+    } catch {
+      invalid("MCP server URL is invalid");
+    }
+    if (endpoint.protocol !== "https:")
+      invalid("MCP server URL must use HTTPS");
+    if (endpoint.username !== "" || endpoint.password !== "")
+      invalid("MCP server URL must not contain credentials");
+    if (endpoint.hash !== "")
+      invalid("MCP server URL must not contain a fragment");
+    if (endpoint.port !== "" && endpoint.port !== "443")
+      invalid("MCP server URL must use the standard HTTPS port");
 
     const hostname = endpoint.hostname.toLowerCase().replace(/\.$/u, "");
     if (
-      hostname === "localhost" || hostname.endsWith(".localhost") ||
-      hostname.endsWith(".local") || hostname.endsWith(".internal") ||
+      hostname === "localhost" ||
+      hostname.endsWith(".localhost") ||
+      hostname.endsWith(".local") ||
+      hostname.endsWith(".internal") ||
       isIP(hostname) !== 0
-    ) invalid("MCP server hostname is not allowed");
+    )
+      invalid("MCP server hostname is not allowed");
     for (const [name, value] of endpoint.searchParams) {
-      if (name.length > 200 || value.length > 2_000 || sensitiveQueryName.test(name)) {
+      if (
+        name.length > 200 ||
+        value.length > 2_000 ||
+        sensitiveQueryName.test(name)
+      ) {
         invalid("MCP server URL contains a disallowed query parameter");
       }
     }
 
     let addresses: readonly string[];
-    try { addresses = await this.resolveAddresses(hostname); }
-    catch { invalid("MCP server hostname could not be resolved"); }
-    if (addresses.length === 0 || addresses.some((address) => !isPublicMcpAddress(address))) {
+    try {
+      addresses = await this.resolveAddresses(hostname);
+    } catch {
+      invalid("MCP server hostname could not be resolved");
+    }
+    if (
+      addresses.length === 0 ||
+      addresses.some((address) => !isPublicMcpAddress(address))
+    ) {
       invalid("MCP server hostname resolved to a non-public network address");
     }
 
@@ -135,17 +165,24 @@ export class McpIntegrationService {
     for (const [rawName, rawValue] of Object.entries(input.headers)) {
       const name = rawName.trim();
       const lower = name.toLowerCase();
-      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name)) invalid("MCP header name is invalid");
-      if (blockedHeaderNames.has(lower) || lower.startsWith("x-forwarded-")) invalid("MCP header is blocked");
-      if (rawValue.includes("\r") || rawValue.includes("\n")) invalid("MCP header value contains a line break");
+      if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name))
+        invalid("MCP header name is invalid");
+      if (blockedHeaderNames.has(lower) || lower.startsWith("x-forwarded-"))
+        invalid("MCP header is blocked");
+      if (rawValue.includes("\r") || rawValue.includes("\n"))
+        invalid("MCP header value contains a line break");
       if (rawValue.length > 4_096) invalid("MCP header value is too long");
-      headerBytes += Buffer.byteLength(name, "utf8") + Buffer.byteLength(rawValue, "utf8");
+      headerBytes +=
+        Buffer.byteLength(name, "utf8") + Buffer.byteLength(rawValue, "utf8");
       if (headerBytes > 8_192) invalid("MCP headers exceed the 8KB limit");
       headers[name] = rawValue;
     }
 
     const apiKey = input.apiKey?.trim();
-    if (input.auth === "api_key" && (apiKey === undefined || apiKey.length < 1 || apiKey.length > 8_192)) {
+    if (
+      input.auth === "api_key" &&
+      (apiKey === undefined || apiKey.length < 1 || apiKey.length > 8_192)
+    ) {
       invalid("MCP API key is required for API-key authentication");
     }
     if (input.auth === "none" && apiKey !== undefined && apiKey !== "") {
@@ -156,7 +193,8 @@ export class McpIntegrationService {
     endpoint.username = "";
     endpoint.password = "";
     const secretHeaders = Object.keys(headers).length === 0 ? {} : headers;
-    const hasSecret = input.auth === "api_key" || Object.keys(secretHeaders).length > 0;
+    const hasSecret =
+      input.auth === "api_key" || Object.keys(secretHeaders).length > 0;
     return {
       config: {
         id: input.id,
@@ -166,12 +204,14 @@ export class McpIntegrationService {
         auth: input.auth,
         headerNames: Object.keys(headers).sort((a, b) => a.localeCompare(b)),
       },
-      ...(hasSecret ? {
-        secret: {
-          ...(input.auth === "api_key" ? { apiKey } : {}),
-          headers: secretHeaders,
-        },
-      } : {}),
+      ...(hasSecret
+        ? {
+            secret: {
+              ...(input.auth === "api_key" ? { apiKey } : {}),
+              headers: secretHeaders,
+            },
+          }
+        : {}),
     };
   }
 }

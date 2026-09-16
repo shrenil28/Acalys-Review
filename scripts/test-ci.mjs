@@ -53,6 +53,10 @@ const vitest = await run(
   [
     "./node_modules/vitest/vitest.mjs",
     "run",
+    // The Postgres suites share one server and isolate themselves by database.
+    // Bounding file workers prevents schema/setup hooks from timing out under
+    // host-dependent CPU fan-out while retaining useful parallelism.
+    "--maxWorkers=4",
     "--reporter=json",
     "--outputFile=.vitest-report.json",
   ],

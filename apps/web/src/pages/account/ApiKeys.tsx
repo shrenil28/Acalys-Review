@@ -51,7 +51,7 @@ function LiveApiKeys() {
 
   const refresh = async () => {
     const result = await loadDashboardApiKeys();
-    if (result.kind === "ok") { setKeys(result.value.items as readonly DashboardApiKeyView[]); setState("ready"); }
+    if (result.kind === "ok") { setKeys(result.value.items); setState("ready"); }
     else setState("failed");
   };
   useEffect(() => { void refresh(); }, []);

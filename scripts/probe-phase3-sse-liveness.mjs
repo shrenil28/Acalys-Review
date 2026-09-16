@@ -10,7 +10,8 @@ const suitePath = join(ROOT, suite);
 function preflight() {
   const problems = [];
   for (const path of [appPath, suitePath]) {
-    if (!existsSync(path)) problems.push(`${path.slice(ROOT.length + 1)} is missing`);
+    if (!existsSync(path))
+      problems.push(`${path.slice(ROOT.length + 1)} is missing`);
   }
   if (problems.length > 0) return problems;
 
@@ -29,11 +30,17 @@ function preflight() {
   if (!app.includes("delay(pollMillis)")) {
     problems.push("idle poll delay must remain heartbeat-aware");
   }
-  if (!app.includes("options.api.reviewEvents(context.scope, id, after, 100)")) {
-    problems.push("durable event polls must remain in the heartbeat-aware stream loop");
+  if (
+    !app.includes("options.api.reviewEvents(context.scope, id, after, 100)")
+  ) {
+    problems.push(
+      "durable event polls must remain in the heartbeat-aware stream loop",
+    );
   }
   if (!app.includes('writeSseFrame(response, ": heartbeat\\n\\n")')) {
-    problems.push("heartbeat writes must use the backpressure-aware SSE writer");
+    problems.push(
+      "heartbeat writes must use the backpressure-aware SSE writer",
+    );
   }
   if (!app.includes("heartbeat.markActivity();\n          after = event.id")) {
     problems.push("product frames must reset the idle heartbeat deadline");
@@ -45,7 +52,9 @@ function preflight() {
     problems.push("poll configuration needs an explicit upper bound");
   }
   if (!app.includes("heartbeatWrite !== undefined")) {
-    problems.push("operation completion must wait for an in-flight heartbeat write");
+    problems.push(
+      "operation completion must wait for an in-flight heartbeat write",
+    );
   }
 
   for (const witness of [
@@ -53,7 +62,8 @@ function preflight() {
     "keeps sending bounded heartbeats while a database event poll is still pending",
     "uses a monotonic idle clock and bounds invalid SSE timing configuration",
   ]) {
-    if (!tests.includes(witness)) problems.push(`missing SSE liveness witness: ${witness}`);
+    if (!tests.includes(witness))
+      problems.push(`missing SSE liveness witness: ${witness}`);
   }
 
   return problems;

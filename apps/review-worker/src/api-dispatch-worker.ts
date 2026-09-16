@@ -1,5 +1,5 @@
 import {
-  ReviewDispatchStore,
+  type ReviewDispatchStore,
   StaleReviewDispatchClaim,
   type ReviewDispatchClaim,
   type ReviewDispatchExecutionGuard,
@@ -46,7 +46,11 @@ export function createApiDispatchWorker(
         await options.store.complete(claim.reviewRunId, claim.claimGeneration);
         return;
       case "deferred":
-        await options.store.defer(claim.reviewRunId, claim.claimGeneration, pollMillis);
+        await options.store.defer(
+          claim.reviewRunId,
+          claim.claimGeneration,
+          pollMillis,
+        );
         return;
       case "retryable_failure":
         await options.store.release(
@@ -132,7 +136,10 @@ export function createApiDispatchWorker(
         case "settled":
           // The lifecycle became terminal/publishing between claim and execution.
           // No review work is owed; remove only this generation's dispatch row.
-          await options.store.complete(claim.reviewRunId, claim.claimGeneration);
+          await options.store.complete(
+            claim.reviewRunId,
+            claim.claimGeneration,
+          );
           return;
         case "owned":
           await executeOwnedClaim(claim, acquisition.guard);

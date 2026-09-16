@@ -56,9 +56,9 @@ describe("GitHub installation token exchange", () => {
       repository_ids: [123],
       permissions: { contents: "read" },
     });
-    expect((calls[0]?.init?.headers as Record<string, string>).authorization).toBe(
-      "Bearer app-jwt-secret",
-    );
+    expect(
+      (calls[0]?.init?.headers as Record<string, string>).authorization,
+    ).toBe("Bearer app-jwt-secret");
   });
 
   it("fails closed when GitHub returns a different repository scope", async () => {

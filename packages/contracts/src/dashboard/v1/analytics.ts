@@ -26,7 +26,11 @@ export const dashboardAnalyticsBucketSchema = z.object({
 });
 
 export const dashboardAnalyticsResponseSchema = z.object({
-  range: z.object({ from: iso, to: iso, bucketSeconds: z.number().int().positive() }),
+  range: z.object({
+    from: iso,
+    to: iso,
+    bucketSeconds: z.number().int().positive(),
+  }),
   summary: z.object({
     reviews: count,
     completed: count,
@@ -41,23 +45,57 @@ export const dashboardAnalyticsResponseSchema = z.object({
   trends: z.array(dashboardAnalyticsBucketSchema).max(1000),
   severities: z.array(z.object({ severity: z.string(), count })).max(32),
   categories: z.array(z.object({ category: z.string(), count })).max(200),
-  checks: z.object({ total: count, passed: count, failed: count, inconclusive: count, skipped: count }),
+  checks: z.object({
+    total: count,
+    passed: count,
+    failed: count,
+    inconclusive: count,
+    skipped: count,
+  }),
   knowledge: z.object({
     total: count,
     newInRange: count,
-    byRepository: z.array(z.object({ repositoryId: dashboardIdSchema.nullable(), repositoryName: z.string().nullable(), count })).max(500),
+    byRepository: z
+      .array(
+        z.object({
+          repositoryId: dashboardIdSchema.nullable(),
+          repositoryName: z.string().nullable(),
+          count,
+        }),
+      )
+      .max(500),
   }),
-  repositories: z.array(z.object({
-    repositoryId: dashboardIdSchema,
-    name: z.string(),
-    reviews: count,
-    findings: count,
-    averageDurationSeconds: finite.nonnegative().nullable(),
-    lastReviewAt: iso.nullable(),
-  })).max(500),
-  authors: z.array(z.object({ username: z.string(), team: z.string().nullable(), reviews: count, findings: count })).max(1000),
-  dimensions: z.object({ usernames: z.array(z.string()).max(2000), teams: z.array(z.string()).max(500) }),
+  repositories: z
+    .array(
+      z.object({
+        repositoryId: dashboardIdSchema,
+        name: z.string(),
+        reviews: count,
+        findings: count,
+        averageDurationSeconds: finite.nonnegative().nullable(),
+        lastReviewAt: iso.nullable(),
+      }),
+    )
+    .max(500),
+  authors: z
+    .array(
+      z.object({
+        username: z.string(),
+        team: z.string().nullable(),
+        reviews: count,
+        findings: count,
+      }),
+    )
+    .max(1000),
+  dimensions: z.object({
+    usernames: z.array(z.string()).max(2000),
+    teams: z.array(z.string()).max(500),
+  }),
 });
 
-export type DashboardAnalyticsQuery = z.infer<typeof dashboardAnalyticsQuerySchema>;
-export type DashboardAnalyticsResponse = z.infer<typeof dashboardAnalyticsResponseSchema>;
+export type DashboardAnalyticsQuery = z.infer<
+  typeof dashboardAnalyticsQuerySchema
+>;
+export type DashboardAnalyticsResponse = z.infer<
+  typeof dashboardAnalyticsResponseSchema
+>;

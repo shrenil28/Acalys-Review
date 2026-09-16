@@ -52,7 +52,12 @@ import {
   type BaseRevisionResolution,
   type PlannerBaseRevision,
 } from "@acalys/code-intelligence";
-import { canonicalJson, gitObjectId, isRepositoryPath, matchesGlob } from "@acalys/contracts/domain";
+import {
+  canonicalJson,
+  gitObjectId,
+  isRepositoryPath,
+  matchesGlob,
+} from "@acalys/contracts/domain";
 import type { CandidateFindingRow } from "@acalys/database";
 import {
   ALL_ANALYZER_IDS,
@@ -75,6 +80,7 @@ import {
   type ExternalReviewDataBlock,
   type ModelCompleter,
   type LlmCorrectnessOutcome,
+  type AnalyzerFinding,
 } from "@acalys/review-engine";
 
 type ConfigGovernanceResult = ReturnType<typeof governanceFor>;
@@ -327,7 +333,7 @@ export function modelAnalyzerInputDigest(input: {
 
 function llmCandidateFingerprint(
   repositoryId: string,
-  finding: import("@acalys/review-engine").AnalyzerFinding,
+  finding: AnalyzerFinding,
 ): string {
   return sha256(
     canonicalJson({
@@ -564,7 +570,10 @@ function resolveBaseRevisions(
   };
 }
 
-function isIgnoredByReviewPolicy(path: string, patterns: readonly string[]): boolean {
+function isIgnoredByReviewPolicy(
+  path: string,
+  patterns: readonly string[],
+): boolean {
   return patterns.some((pattern) => matchesGlob(pattern, path));
 }
 
@@ -576,19 +585,32 @@ function filterInstructionObservation(
   return {
     listPaths: () => {
       const traversal = observation.listPaths();
-      return { ...traversal, paths: traversal.paths.filter((path) => !isIgnoredByReviewPolicy(path, ignorePaths)) };
+      return {
+        ...traversal,
+        paths: traversal.paths.filter(
+          (path) => !isIgnoredByReviewPolicy(path, ignorePaths),
+        ),
+      };
     },
     readArtifact: (path) =>
       isIgnoredByReviewPolicy(path, ignorePaths)
-        ? { status: "unsupported", detail: "artifact is excluded by the admitted repository review policy" }
+        ? {
+            status: "unsupported",
+            detail:
+              "artifact is excluded by the admitted repository review policy",
+          }
         : observation.readArtifact(path),
   };
 }
 
-function trustedReviewPolicyText(policy: NonNullable<RealAnalysisOptions["reviewPolicy"]>): string {
+function trustedReviewPolicyText(
+  policy: NonNullable<RealAnalysisOptions["reviewPolicy"]>,
+): string {
   const lines = [
     `Tone profile: ${policy.toneProfile}`,
-    ...(policy.toneInstructions.trim() === "" ? [] : [`Tone instructions:\n${policy.toneInstructions.trim()}`]),
+    ...(policy.toneInstructions.trim() === ""
+      ? []
+      : [`Tone instructions:\n${policy.toneInstructions.trim()}`]),
     ...(policy.repositoryInstructions.trim() === ""
       ? []
       : [`Repository instructions:\n${policy.repositoryInstructions.trim()}`]),
@@ -600,21 +622,26 @@ export async function runRealAnalysis(
   options: RealAnalysisOptions,
 ): Promise<RealAnalysisOutcome> {
   const snapshot = await options.source.read({
-      repositoryId: options.repositoryId,
-      headSha: options.headSha,
-      ...(options.revisionId === undefined
-        ? {}
-        : { revisionId: options.revisionId }),
-    });
+    repositoryId: options.repositoryId,
+    headSha: options.headSha,
+    ...(options.revisionId === undefined
+      ? {}
+      : { revisionId: options.revisionId }),
+  });
 
   assertCanonicalChangedPaths(snapshot.changed);
   const ignorePaths = options.reviewPolicy?.ignorePaths ?? [];
-  const changed = snapshot.changed.filter((file) => !isIgnoredByReviewPolicy(file.path, ignorePaths));
+  const changed = snapshot.changed.filter(
+    (file) => !isIgnoredByReviewPolicy(file.path, ignorePaths),
+  );
   const repository = new Map(
-    [...snapshot.repository].filter(([path]) => !isIgnoredByReviewPolicy(path, ignorePaths)),
+    [...snapshot.repository].filter(
+      ([path]) => !isIgnoredByReviewPolicy(path, ignorePaths),
+    ),
   );
   const instructionObservation = filterInstructionObservation(
-    snapshot.instructionObservation ?? repositoryInstructionObservation(snapshot.repository),
+    snapshot.instructionObservation ??
+      repositoryInstructionObservation(snapshot.repository),
     ignorePaths,
   );
   const { baseSha, mergeBaseSha } = snapshot;
@@ -770,7 +797,9 @@ export async function runRealAnalysis(
           options.llm.model,
           options.llm.timeoutMs,
           options.llm.externalData,
-          options.reviewPolicy === undefined ? undefined : trustedReviewPolicyText(options.reviewPolicy),
+          options.reviewPolicy === undefined
+            ? undefined
+            : trustedReviewPolicyText(options.reviewPolicy),
         );
   if (llm?.kind === "unavailable") {
     // A requested model path that could not run is not equivalent to the model
@@ -840,9 +869,7 @@ export async function runRealAnalysis(
       } satisfies CandidateFindingRow;
     });
 
-  const conflictsWithDeterministic = (
-    proposed: import("@acalys/review-engine").AnalyzerFinding,
-  ): boolean =>
+  const conflictsWithDeterministic = (proposed: AnalyzerFinding): boolean =>
     report.findings.some(
       (deterministic) =>
         deterministic.location.path === proposed.location.path &&
@@ -1117,9 +1144,7 @@ function buildBoundaryFacts(
     base: baseSurfaces,
     head: headSurfaces,
     abstentions,
-    identity: sha256(
-      canonicalJson({ base: baseSurfaces, head: headSurfaces }),
-    ),
+    identity: sha256(canonicalJson({ base: baseSurfaces, head: headSurfaces })),
   };
 }
 

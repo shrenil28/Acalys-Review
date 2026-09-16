@@ -47,7 +47,9 @@ export function createModelCandidateVerifier(
       ) {
         return { status: "unavailable", failure: "context_unavailable" };
       }
-      const severity = findingSeveritySchema.safeParse(candidate.proposedSeverity);
+      const severity = findingSeveritySchema.safeParse(
+        candidate.proposedSeverity,
+      );
       if (!severity.success) {
         return { status: "unavailable", failure: "context_unavailable" };
       }

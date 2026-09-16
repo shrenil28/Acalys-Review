@@ -24,7 +24,7 @@ import { resolveDataConfig } from "@/lib/api/config";
 
 const FixtureTeam = lazy(() => import("./TeamFixture").then((module) => ({ default: module.TeamPage })));
 const roles = ["owner", "admin", "member", "read_only"] as const;
-const labelRole = (role: string) => role === "read_only" ? "Read only" : role[0]!.toUpperCase() + role.slice(1);
+const labelRole = (role: string) => role === "read_only" ? "Read only" : role[0].toUpperCase() + role.slice(1);
 
 export function TeamPage() {
   const config = resolveDataConfig();

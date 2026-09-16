@@ -112,7 +112,11 @@ export function repositoryFromApi(repo: RepositoryDto): RepositoryView {
   };
 }
 
+// Type-only queries deliberately mirror the runtime fixture imports below.
+// Static imports would pull fixture modules into API-mode dependency graphs.
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 type RepositoryFixture = (typeof import("@/data/repos"))["repositories"][number];
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
 type LearningFixture = (typeof import("@/data/review"))["learnings"][number];
 
 function repositoryFromFixture(
@@ -477,4 +481,3 @@ export function useDashboardFilterDimensions(): {
     teamOptions: demoDimensions.teamOptions,
   };
 }
-

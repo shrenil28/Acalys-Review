@@ -13,14 +13,16 @@ import {
 } from "@acalys/review-engine";
 import { z } from "zod";
 
-const cacheLocationSchema = z.strictObject({
-  path: z.string().min(1),
-  startLine: z.number().int().positive(),
-  endLine: z.number().int().positive(),
-  side: z.enum(["base", "head"]).optional(),
-}).refine((value) => value.endLine >= value.startLine, {
-  message: "cache finding location endLine must not precede startLine",
-});
+const cacheLocationSchema = z
+  .strictObject({
+    path: z.string().min(1),
+    startLine: z.number().int().positive(),
+    endLine: z.number().int().positive(),
+    side: z.enum(["base", "head"]).optional(),
+  })
+  .refine((value) => value.endLine >= value.startLine, {
+    message: "cache finding location endLine must not precede startLine",
+  });
 
 const cacheEvidenceSchema = z.strictObject({
   type: evidenceTypeSchema,
@@ -55,16 +57,20 @@ const cacheFindingSchema = z.strictObject({
 
 const cacheAnalysisResultSchema = z.strictObject({
   findings: z.array(cacheFindingSchema),
-  suppressions: z.array(z.strictObject({
-    reason: z.enum(SUPPRESSION_REASONS),
-    ruleId: z.string().min(1),
-    clusterId: z.string().min(1),
-    detail: z.string().min(1),
-  })),
-  degradations: z.array(z.strictObject({
-    clusterId: z.string().min(1),
-    reason: z.string().min(1),
-  })),
+  suppressions: z.array(
+    z.strictObject({
+      reason: z.enum(SUPPRESSION_REASONS),
+      ruleId: z.string().min(1),
+      clusterId: z.string().min(1),
+      detail: z.string().min(1),
+    }),
+  ),
+  degradations: z.array(
+    z.strictObject({
+      clusterId: z.string().min(1),
+      reason: z.string().min(1),
+    }),
+  ),
 });
 
 /**
@@ -73,7 +79,9 @@ const cacheAnalysisResultSchema = z.strictObject({
  * A malformed or oversized row must never become review input. Invalid cache
  * state therefore returns undefined and the caller recomputes the cluster.
  */
-export function decodeAnalysisCachePayload(value: unknown): AnalysisResult | undefined {
+export function decodeAnalysisCachePayload(
+  value: unknown,
+): AnalysisResult | undefined {
   let serialized: string | undefined;
   try {
     serialized = JSON.stringify(value);
@@ -82,7 +90,8 @@ export function decodeAnalysisCachePayload(value: unknown): AnalysisResult | und
   }
   if (
     serialized === undefined ||
-    Buffer.byteLength(serialized, "utf8") > REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES
+    Buffer.byteLength(serialized, "utf8") >
+      REVIEW_ANALYSIS_CACHE_MAX_PAYLOAD_BYTES
   ) {
     return undefined;
   }
@@ -97,7 +106,10 @@ export interface PreloadedAnalysisCache {
 }
 
 export function createPreloadedAnalysisCache(
-  entries: readonly { readonly fingerprint: string; readonly payload: unknown }[],
+  entries: readonly {
+    readonly fingerprint: string;
+    readonly payload: unknown;
+  }[],
 ): PreloadedAnalysisCache {
   const values = new Map<string, AnalysisResult>();
   for (const entry of entries) {

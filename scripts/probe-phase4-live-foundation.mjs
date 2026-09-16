@@ -16,7 +16,9 @@ const test = read("apps/web/tests/live-dashboard.test.ts");
 const requestPool = read("apps/web/src/lib/api/sharedRequest.ts");
 const requestPoolTest = read("apps/web/tests/shared-request.test.ts");
 
-const routeLiterals = [...router.matchAll(/path:\s*"([^"]+)"/g)].map((match) => match[1]);
+const routeLiterals = [...router.matchAll(/path:\s*"([^"]+)"/g)].map(
+  (match) => match[1],
+);
 for (const route of routeLiterals) {
   if (route === "*") continue;
   const normalized = route.startsWith("/") ? route : `/${route}`;
@@ -39,9 +41,12 @@ const connectedPages = [
 ];
 for (const page of connectedPages) {
   const source = read(page);
-  if (/from\s+["']@\/data\//.test(source)) fail(`${page} still statically imports fixture data`);
-  if (/lib\/api\/(client|result)/.test(source)) fail(`${page} imports the transport/result boundary directly`);
-  if (/@acalys\/contracts\/api/.test(source)) fail(`${page} imports API contracts directly`);
+  if (/from\s+["']@\/data\//.test(source))
+    fail(`${page} still statically imports fixture data`);
+  if (/lib\/api\/(client|result)/.test(source))
+    fail(`${page} imports the transport/result boundary directly`);
+  if (/@acalys\/contracts\/api/.test(source))
+    fail(`${page} imports API contracts directly`);
 }
 
 const requiredAdapterAnchors = [
@@ -53,8 +58,14 @@ const requiredAdapterAnchors = [
 for (const anchor of requiredAdapterAnchors) {
   if (!liveAdapter.includes(anchor)) fail(`live adapter is missing ${anchor}`);
 }
-for (const anchor of ["class SharedRequestPool", "controller.abort()", "expiresAt", "entry.refs += 1"]) {
-  if (!requestPool.includes(anchor)) fail(`shared request primitive is missing ${anchor}`);
+for (const anchor of [
+  "class SharedRequestPool",
+  "controller.abort()",
+  "expiresAt",
+  "entry.refs += 1",
+]) {
+  if (!requestPool.includes(anchor))
+    fail(`shared request primitive is missing ${anchor}`);
 }
 for (const anchor of [
   "deduplicates concurrent consumers",
@@ -62,7 +73,8 @@ for (const anchor of [
   "does not retain a settled result the caller marks non-reusable",
   "reuses a settled result only inside the configured TTL",
 ]) {
-  if (!requestPoolTest.includes(anchor)) fail(`shared request witness missing: ${anchor}`);
+  if (!requestPoolTest.includes(anchor))
+    fail(`shared request witness missing: ${anchor}`);
 }
 
 const witnessAnchors = [

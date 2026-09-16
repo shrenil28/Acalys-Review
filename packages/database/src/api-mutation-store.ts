@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import type { ConversationDto, FindingDto, ReviewRunDto } from "@acalys/contracts/api/v1";
+import type {
+  ConversationDto,
+  FindingDto,
+  ReviewRunDto,
+} from "@acalys/contracts/api/v1";
 import type { PgClient, PgPool } from "./webhook/postgres-inbox.js";
 import { reviewDispatchExecutionLockKey } from "./review/api-dispatch-store.js";
 import { DashboardSettingsStore } from "./dashboard-settings-store.js";
@@ -40,7 +44,9 @@ async function databaseMutationTime(client: PgClient): Promise<Date> {
 export class ApiMutationStore {
   public constructor(private readonly pool: PgPool) {}
 
-  private async inTransaction<T>(work: (client: PgClient) => Promise<T>): Promise<T> {
+  private async inTransaction<T>(
+    work: (client: PgClient) => Promise<T>,
+  ): Promise<T> {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -92,13 +98,21 @@ export class ApiMutationStore {
              FROM api_idempotency
             WHERE organization_id=$1 AND principal_id=$2 AND route_name=$3 AND idempotency_key=$4
             FOR UPDATE`,
-          [identity.organizationId, identity.principalId, identity.routeName, identity.key],
+          [
+            identity.organizationId,
+            identity.principalId,
+            identity.routeName,
+            identity.key,
+          ],
         );
         const row = existing.rows[0];
         if (row === undefined) {
-          throw new Error("Idempotency row disappeared during conflict resolution");
+          throw new Error(
+            "Idempotency row disappeared during conflict resolution",
+          );
         }
-        if (row.request_digest !== identity.requestDigest) return { kind: "conflict" };
+        if (row.request_digest !== identity.requestDigest)
+          return { kind: "conflict" };
         if (row.state === "completed" && row.response_status !== null) {
           return {
             kind: "replay",
@@ -163,11 +177,18 @@ export class ApiMutationStore {
               ORDER BY sequence DESC LIMIT 1
            ) v ON TRUE
           WHERE p.organization_id=$1 AND p.repository_id=$2 AND p.id=$3`,
-        [input.identity.organizationId, input.repositoryId, input.pullRequestId],
+        [
+          input.identity.organizationId,
+          input.repositoryId,
+          input.pullRequestId,
+        ],
       );
       const resolved = seed.rows[0];
       if (resolved === undefined) {
-        return { status: 404, body: errorBody("NOT_FOUND", "Pull request not found") };
+        return {
+          status: 404,
+          body: errorBody("NOT_FOUND", "Pull request not found"),
+        };
       }
 
       const revisionId = resolved.revision_id;
@@ -177,21 +198,33 @@ export class ApiMutationStore {
         `SELECT pg_advisory_xact_lock(hashtextextended('dashboard-settings:' || $1, 0))`,
         [input.identity.organizationId],
       );
-      const admitted = await new DashboardSettingsStore(this.pool).resolveEffectivePolicyWithClient(
+      const admitted = await new DashboardSettingsStore(
+        this.pool,
+      ).resolveEffectivePolicyWithClient(
         client,
         input.identity.organizationId,
         input.repositoryId,
       );
       if (admitted === undefined) {
-        return { status: 404, body: errorBody("NOT_FOUND", "Repository not found") };
+        return {
+          status: 404,
+          body: errorBody("NOT_FOUND", "Repository not found"),
+        };
       }
       if (admitted.policy.repositoryLifecycle !== "enabled") {
-        return { status: 409, body: errorBody("REPOSITORY_REVIEWS_DISABLED", "Reviews are paused or archived for this repository") };
+        return {
+          status: 409,
+          body: errorBody(
+            "REPOSITORY_REVIEWS_DISABLED",
+            "Reviews are paused or archived for this repository",
+          ),
+        };
       }
 
-      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, [
-        `api-review:${input.identity.organizationId}:${revisionId}`,
-      ]);
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [`api-review:${input.identity.organizationId}:${revisionId}`],
+      );
       const active = await client.query<{ id: string }>(
         `SELECT id FROM review_runs WHERE organization_id=$1 AND revision_id=$2
           AND state NOT IN ('completed','failed','cancelled','superseded')
@@ -223,13 +256,21 @@ export class ApiMutationStore {
           externalId: resolved.provider_external_id,
           number: resolved.number,
         },
-        base: { name: resolved.base_ref, objectId: objectId(resolved.base_sha) },
-        head: { name: resolved.head_ref, objectId: objectId(resolved.head_sha) },
+        base: {
+          name: resolved.base_ref,
+          objectId: objectId(resolved.base_sha),
+        },
+        head: {
+          name: resolved.head_ref,
+          objectId: objectId(resolved.head_sha),
+        },
         ...(resolved.merge_base_sha === null
           ? {}
           : { mergeBase: { objectId: objectId(resolved.merge_base_sha) } }),
         title: resolved.title,
-        ...(resolved.description === null ? {} : { description: resolved.description }),
+        ...(resolved.description === null
+          ? {}
+          : { description: resolved.description }),
         author: resolved.author,
         draft: resolved.draft,
       };
@@ -275,7 +316,13 @@ export class ApiMutationStore {
         `INSERT INTO review_dispatch_jobs
           (review_run_id, organization_id, revision_id, pull_request_id, available_at, created_at, updated_at)
          VALUES ($1,$2,$3,$4,$5,$5,$5)`,
-        [runId, input.identity.organizationId, revisionId, input.pullRequestId, mutationAt],
+        [
+          runId,
+          input.identity.organizationId,
+          revisionId,
+          input.pullRequestId,
+          mutationAt,
+        ],
       );
 
       const body: ReviewRunDto = {
@@ -304,7 +351,10 @@ export class ApiMutationStore {
         [input.identity.organizationId, input.reviewRunId],
       );
       if (visible.rows[0] === undefined) {
-        return { status: 404, body: errorBody("NOT_FOUND", "Review not found") };
+        return {
+          status: 404,
+          body: errorBody("NOT_FOUND", "Review not found"),
+        };
       }
 
       // Serialize cancellation with active API dispatch execution using the
@@ -312,9 +362,10 @@ export class ApiMutationStore {
       // shared by every coordinated path, preventing cancel-vs-settle deadlocks.
       // If a worker is already executing, cancellation waits for that owner to
       // settle/release and then re-reads the lifecycle state below.
-      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, [
-        reviewDispatchExecutionLockKey(input.reviewRunId),
-      ]);
+      await client.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`,
+        [reviewDispatchExecutionLockKey(input.reviewRunId)],
+      );
 
       const query = await client.query<{
         id: string;
@@ -336,16 +387,27 @@ export class ApiMutationStore {
       );
       const row = query.rows[0];
       if (row === undefined) {
-        return { status: 404, body: errorBody("NOT_FOUND", "Review not found") };
+        return {
+          status: 404,
+          body: errorBody("NOT_FOUND", "Review not found"),
+        };
       }
       if (
-        !["queued", "preparing", "analyzing", "reviewing", "verifying", "reconciling"].includes(
-          row.state,
-        )
+        ![
+          "queued",
+          "preparing",
+          "analyzing",
+          "reviewing",
+          "verifying",
+          "reconciling",
+        ].includes(row.state)
       ) {
         return {
           status: 409,
-          body: errorBody("STATE_CONFLICT", "Review can no longer be cancelled"),
+          body: errorBody(
+            "STATE_CONFLICT",
+            "Review can no longer be cancelled",
+          ),
         };
       }
 
@@ -371,12 +433,19 @@ export class ApiMutationStore {
       );
       const completedAt = updated.rows[0]?.completed_at;
       if (!(completedAt instanceof Date)) {
-        throw new Error("Cancelled review did not return a completion timestamp");
+        throw new Error(
+          "Cancelled review did not return a completion timestamp",
+        );
       }
       await client.query(
         `INSERT INTO review_run_transitions(run_id,seq,from_state,to_state,at)
          VALUES($1,$2,$3,'cancelled',$4)`,
-        [input.reviewRunId, sequence.rows[0]?.next_seq ?? 1, row.state, completedAt],
+        [
+          input.reviewRunId,
+          sequence.rows[0]?.next_seq ?? 1,
+          row.state,
+          completedAt,
+        ],
       );
 
       // Cancellation and dispatch claiming serialize on the same review_runs row.
@@ -393,7 +462,9 @@ export class ApiMutationStore {
       const body: ReviewRunDto = {
         id: row.id,
         repositoryId: row.repository_id,
-        ...(row.pull_request_id === null ? {} : { pullRequestId: row.pull_request_id }),
+        ...(row.pull_request_id === null
+          ? {}
+          : { pullRequestId: row.pull_request_id }),
         state: "cancelled",
         settled: true,
         createdAt: iso(row.created_at),
@@ -436,7 +507,10 @@ export class ApiMutationStore {
       );
       const row = query.rows[0];
       if (row === undefined) {
-        return { status: 404, body: errorBody("NOT_FOUND", "Finding not found") };
+        return {
+          status: 404,
+          body: errorBody("NOT_FOUND", "Finding not found"),
+        };
       }
       if (row.state !== "published") {
         return {
@@ -450,7 +524,12 @@ export class ApiMutationStore {
             SET state='dismissed', dismissal_reason=$3,
                 updated_at=GREATEST(updated_at, $4::timestamptz)
           WHERE organization_id=$1 AND id=$2`,
-        [input.identity.organizationId, input.findingId, input.reason, mutationAt],
+        [
+          input.identity.organizationId,
+          input.findingId,
+          input.reason,
+          mutationAt,
+        ],
       );
       const body: FindingDto = {
         id: row.id,
@@ -495,7 +574,10 @@ export class ApiMutationStore {
       );
       const row = query.rows[0];
       if (row === undefined) {
-        return { status: 404, body: errorBody("NOT_FOUND", "Conversation not found") };
+        return {
+          status: 404,
+          body: errorBody("NOT_FOUND", "Conversation not found"),
+        };
       }
       const count = await client.query<{ message_count: number }>(
         `SELECT COUNT(*)::int AS message_count
@@ -519,12 +601,16 @@ export class ApiMutationStore {
       );
       const updatedAt = updated.rows[0]?.updated_at;
       if (!(updatedAt instanceof Date)) {
-        throw new Error("Resolved conversation did not return an update timestamp");
+        throw new Error(
+          "Resolved conversation did not return an update timestamp",
+        );
       }
       const body: ConversationDto = {
         id: row.id,
         repositoryId: row.repository_id,
-        ...(row.pull_request_id === null ? {} : { pullRequestId: row.pull_request_id }),
+        ...(row.pull_request_id === null
+          ? {}
+          : { pullRequestId: row.pull_request_id }),
         ...(row.finding_id === null ? {} : { findingId: row.finding_id }),
         state: "resolved",
         messageCount: count.rows[0]?.message_count ?? 0,
